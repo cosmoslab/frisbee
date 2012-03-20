@@ -1,6 +1,6 @@
 #
 # EMULAB-COPYRIGHT
-# Copyright (c) 2000-2011 University of Utah and the Flux Group.
+# Copyright (c) 2000-2012 University of Utah and the Flux Group.
 # All rights reserved.
 #
 SRCDIR		= @srcdir@
@@ -13,8 +13,10 @@ SYSTEM	       := $(shell uname -s)
 
 include $(OBJDIR)/Makeconf
 
-SUBDIRS	= syncd dijkstra genhostsfile
-
+SUBDIRS	= syncd dijkstra genhostsfile imagezip frisbee.redux 
+ifeq ($(SYSTEM),FreeBSD)
+SUBDIRS += growdisk
+endif
 all:	all-subdirs
 
 include $(TESTBED_SRCDIR)/GNUmakerules
@@ -22,16 +24,16 @@ include $(TESTBED_SRCDIR)/GNUmakerules
 boss-install:
 	$(MAKE) -C genhostsfile boss-install
 	$(MAKE) -C syncd boss-install
+	$(MAKE) -C imagezip boss-install
+	$(MAKE) -C frisbee.redux install
 	-mkdir -p $(INSTALL_DIR)/opsdir/man/man1
 	$(INSTALL) -m 644 $(SRCDIR)/install-tarfile.1 \
 		$(INSTALL_DIR)/opsdir/man/man1/install-tarfile.1
 
 control-install: 
+	@$(MAKE) -C imagezip install
 
-client:
-	$(MAKE) -C syncd client
-	$(MAKE) -C dijkstra client
-	$(MAKE) -C genhostsfile client
+client: client-subdirs
 
 client-install: client
 	-mkdir -p $(LBINDIR)
@@ -42,10 +44,26 @@ client-install: client
 	$(MAKE) -C syncd client-install
 	$(MAKE) -C dijkstra client-install
 	$(MAKE) -C genhostsfile client-install
+ifeq ($(SYSTEM),FreeBSD)
+	$(MAKE) -C growdisk client-install
+endif
+	$(MAKE) -C frisbee.redux client-install
 
 subboss: client
 
+mfs:
+	$(MAKE) -C growdisk client
+	$(MAKE) -C zapdisk mfs
+	$(MAKE) -C growdisk client
+	$(MAKE) -C imagezip client
+	$(MAKE) -C frisbee.redux client
+
 subboss-install: subboss client-install
+ifeq ($(SYSTEM),FreeBSD)
+	CLIENT_BINDIR=/etc/testbed $(MAKE) -e -C frisbee.redux subboss-install
+else
+	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C frisbee.redux subboss-install
+endif
 
 remote-install: 
 	-mkdir -p $(LBINDIR)
@@ -54,10 +72,25 @@ remote-install:
 
 clean:		clean-subdirs
 distclean:	subdir-distclean
-mfs:
-mfs-install:
+
 frisbee-mfs:
+	$(MAKE) -C growdisk client
+	$(MAKE) -C frisbee.redux client
+
 frisbee-mfs-install:
+ifeq ($(SYSTEM),FreeBSD)
+	CLIENT_BINDIR=/etc/testbed $(MAKE) -e -C growdisk client-install
+else
+	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C growdisk client-install
+endif
+
+mfs-install:
+	$(MAKE) -C zapdisk mfs-install
+	$(MAKE) -C imagezip client-install
+	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C growdisk client-install
+	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C frisbee.redux client-install
+
+cdboot-install: mfs-install
 
 subdir-distclean:
 	@$(MAKE) -C imagezip distclean
