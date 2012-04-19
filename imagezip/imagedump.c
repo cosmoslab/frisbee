@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2000-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -10,7 +10,7 @@
  * Prints out information about an image.
  */
 
-#ifdef WITH_HASH
+#if defined(WITH_HASH) && defined(WITH_CRYPTO)
 /*
  * This enables a very specific command line option (-H) for printing out
  * an MD5 hash for every chunk of an image.  I put this in just to get a
@@ -21,8 +21,10 @@
 #define WITH_HASHCMD
 #endif
 
+#ifdef WITH_CRYPTO
 #include <openssl/evp.h>
 #include <openssl/sha.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
