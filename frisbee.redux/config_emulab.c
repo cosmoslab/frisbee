@@ -253,6 +253,14 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 	ii->get_methods = CONFIG_IMAGE_MCAST;
 #if 1
 	/*
+	 * XXX broadcast is a bad idea on a large shared LAN environment.
+	 * But it can be enabled/disabled in the server, so this flag
+	 * doesn't hurt.
+	 */
+	ii->get_methods |= CONFIG_IMAGE_BCAST;
+#endif
+#if 1
+	/*
 	 * XXX the current frisbee server allows only a single client
 	 * in unicast mode, which makes this option rather limited.
 	 * So you may not want to allow it by default.
@@ -402,10 +410,12 @@ emulab_get_server_address(struct config_imageinfo *ii, int methods, int first,
 	int	  idx;
 	int	  a, b, c, d;
 
+#if 0
 	if ((methods & (CONFIG_IMAGE_MCAST|CONFIG_IMAGE_UCAST)) == 0) {
 		error("get_server_address: only support UCAST/MCAST");
 		return 1;
 	}
+#endif
 
 	if (!mydb_update("UPDATE emulab_indicies "
 			" SET idx=LAST_INSERT_ID(idx+1) "
@@ -469,6 +479,15 @@ emulab_get_server_address(struct config_imageinfo *ii, int methods, int first,
 		/* XXX on retries, we don't mess with the address */
 		if (first)
 			*addrp = 0;
+	}
+	/*
+	 * Broadcast is the method of last resort since it could melt down
+	 * a good-sized network.
+	 */
+	else if (methods & CONFIG_IMAGE_BCAST) {
+		*methp = CONFIG_IMAGE_BCAST;
+		if (first)
+			*addrp = INADDR_BROADCAST;
 	}
 
 	/*

@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2000-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -12,6 +12,8 @@
 #include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <net/if.h>
+#include <ifaddrs.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,6 +102,42 @@ GetSockbufSize(void)
 	return sbsize;
 }
 
+/*
+ * Find the subnet broadcast address associated with the given interface
+ * address. We use this to limit broadcasts to a single interface.
+ * Returns zero if we successfully produced an address (in *bcaddr),
+ * non-zero otherwise.
+ */
+static int
+GetBcastAddr(struct in_addr *ifaddr, struct in_addr *bcaddr)
+{
+	struct ifaddrs *ifa, *nifa;
+	struct sockaddr_in *sin;
+
+	if (getifaddrs(&ifa) != 0) {
+		pwarning("Could not get interface list");
+		return 1;
+	}
+
+	for (nifa = ifa; nifa != NULL; nifa = nifa->ifa_next) {
+		if (nifa->ifa_addr->sa_family != AF_INET)
+			continue;
+		if ((nifa->ifa_flags & (IFF_UP|IFF_BROADCAST)) !=
+		    (IFF_UP|IFF_BROADCAST))
+			continue;
+		sin = (struct sockaddr_in *)nifa->ifa_addr;
+		if (ifaddr->s_addr == sin->sin_addr.s_addr) {
+			*bcaddr = ((struct sockaddr_in *)nifa->ifa_broadaddr)->sin_addr;
+			freeifaddrs(ifa);
+			return 0;
+		}
+	}
+	freeifaddrs(ifa);
+
+	warning("Could not find interface %s", inet_ntoa(*ifaddr));
+	return 1;
+}
+
 static void
 CommonInit(int dobind)
 {
@@ -186,13 +224,28 @@ CommonInit(int dobind)
 		}
 	}
 	else if (broadcast) {
-		/*
-		 * Otherwise, we use a broadcast addr. 
-		 */
-		i = 1;
+		log("Setting broadcast mode");
 
-		log("Setting broadcast mode\n");
-		
+		/*
+		 * If they are using the local broadcast address and they
+		 * have specified an interface, attempt to limit broadcasts
+		 * to that interface by using the subnet broadcast address.
+		 * Otherwise we issue a dire warning about the consequences
+		 * of broadcasting to all interfaces.
+		 */
+		if (ntohl(mcastaddr.s_addr) == INADDR_BROADCAST) {
+			struct in_addr bcaddr;
+			if (mcastif.s_addr &&
+			    GetBcastAddr(&mcastif, &bcaddr) == 0) {
+				log("Limiting broadcasts using %s",
+				    inet_ntoa(bcaddr));
+				mcastaddr = bcaddr;
+			} else
+				warning("WARNING: will broadcast "
+					"to ALL configured interfaces!");
+		}
+
+		i = 1;
 		if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST,
 			       &i, sizeof(i)) < 0)
 			pfatal("setsockopt(SOL_SOCKET, SO_BROADCAST)");
@@ -736,4 +789,3 @@ ClientNetFindServer(in_addr_t sip, in_port_t sport,
 	return 1;
 }
 #endif
-

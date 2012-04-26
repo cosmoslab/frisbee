@@ -469,6 +469,7 @@ main(int argc, char **argv)
 			serverip.s_addr = htonl(reply.servaddr);
 			mcastaddr.s_addr = htonl(reply.addr);
 			portnum = reply.port;
+			broadcast = (reply.method == MS_METHOD_BROADCAST);
 
 			/*
 			 * Unless the user explicitly specified the interface
@@ -479,15 +480,17 @@ main(int argc, char **argv)
 				mcastif = pif;
 
 			if (serverip.s_addr == mcastaddr.s_addr)
-				log("%s: address: %s:%d",
-				    imageid, inet_ntoa(mcastaddr), portnum);
+				log("%s: address: %s:%d%s",
+				    imageid, inet_ntoa(mcastaddr), portnum,
+				    broadcast ? " (broadcast)" : "");
 			else {
 				char serverstr[sizeof("XXX.XXX.XXX.XXX")+1];
 
 				strncpy(serverstr, inet_ntoa(serverip),
 					sizeof serverstr);
-				log("%s: address: %s:%d, server: %s",
+				log("%s: address: %s:%d%s, server: %s",
 				    imageid, inet_ntoa(mcastaddr), portnum,
+				    broadcast ? " (broadcast)" : "",
 				    serverstr);
 			}
 			break;

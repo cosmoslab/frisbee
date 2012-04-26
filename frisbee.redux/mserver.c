@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2010-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -1314,7 +1314,7 @@ get_options(int argc, char **argv)
 {
 	int ch;
 
-	while ((ch = getopt(argc, argv, "AC:DI:MRX:S:P:p:i:dh")) != -1)
+	while ((ch = getopt(argc, argv, "AC:DI:MRX:x:S:P:p:i:dh")) != -1)
 		switch(ch) {
 		case 'A':
 			usechildauth = 1;
@@ -1584,8 +1584,9 @@ startchild(struct childinfo *ci)
 			opts = ci->imageinfo->get_options ?
 				ci->imageinfo->get_options : "";
 			snprintf(argbuf, sizeof argbuf,
-				 "%s -i %s -T %d %s -m %s -p %d %s",
+				 "%s -i %s -T %d %s %s -m %s -p %d %s",
 				 pname, ifacestr, ci->timeout, opts,
+				 ci->method == CONFIG_IMAGE_BCAST ? "-b" : "",
 				 inet_ntoa(in), ci->port, ci->imageinfo->path);
 			break;
 		case PTYPE_CLIENT:
@@ -1594,7 +1595,8 @@ startchild(struct childinfo *ci)
 				 "%s -N -S %s -i %s %s %s -m %s -p %d %s",
 				 pname, servstr, ifacestr,
 				 debug > 1 ? "" : "-q",
-				 ci->method == CONFIG_IMAGE_UCAST ? "-O" : "",
+				 ci->method == CONFIG_IMAGE_UCAST ? "-O" :
+				 (ci->method == CONFIG_IMAGE_BCAST ? "-b" : ""),
 				 inet_ntoa(in), ci->port, ci->imageinfo->path);
 			break;
 		case PTYPE_UPLOADER:

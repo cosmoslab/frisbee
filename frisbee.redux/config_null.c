@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2010-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -86,6 +86,14 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 
 	/* get_methods */
 	ai->imageinfo[ix].get_methods = CONFIG_IMAGE_MCAST;
+#if 1
+	/*
+	 * XXX broadcast is a bad idea on a large shared LAN environment.
+	 * But it can be enabled/disabled in the server, so this flag
+	 * doesn't hurt.
+	 */
+	ai->imageinfo[ix].get_methods |= CONFIG_IMAGE_BCAST;
+#endif
 #if 1
 	/*
 	 * XXX the current frisbee server allows only a single client
@@ -201,10 +209,12 @@ null_get_server_address(struct config_imageinfo *ii, int methods, int first,
 	int	incr = 1;
 	FILE	*fd;
 
+#if 0
 	if ((methods & (CONFIG_IMAGE_MCAST|CONFIG_IMAGE_UCAST)) == 0) {
 		error("get_server_address: only support UCAST/MCAST");
 		return 1;
 	}
+#endif
 
  again:
 	if ((fd = fopen(indexfile, "r+")) == NULL) {
@@ -280,6 +290,15 @@ null_get_server_address(struct config_imageinfo *ii, int methods, int first,
 		/* XXX on retries, we don't mess with the address */
 		if (first)
 			*addrp = 0;
+	}
+	/*
+	 * Broadcast is the method of last resort since it could melt down
+	 * a good-sized network.
+	 */
+	else if (methods & CONFIG_IMAGE_BCAST) {
+		*methp = CONFIG_IMAGE_BCAST;
+		if (first)
+			*addrp = INADDR_BROADCAST;
 	}
 
 	/*
