@@ -82,7 +82,7 @@ sleeptime(unsigned int usecs, char *str, int doround)
 			if (res.tv_nsec < 1000000)
 				clockres_us = 1000;
 			else
-				clockres_us = (res.tv_nsec / 1000) * 1000;
+				clockres_us = (res.tv_nsec / 1000000) * 1000;
 		}
 		else
 #endif
