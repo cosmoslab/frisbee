@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2000-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -1629,6 +1629,7 @@ PlayFrisbee(void)
 	struct timeval  estamp, timeo;
 	unsigned int	myid;
 	int		delay;
+	int32_t		jtype = 0;
 
 	gettimeofday(&stamp, 0);
 	CLEVENT(1, EV_CLISTART, 0, 0, 0, 0);
@@ -1680,7 +1681,6 @@ PlayFrisbee(void)
 	gettimeofday(&timeo, 0);
 	while (1) {
 		struct timeval now;
-		int32_t subtype = PKTSUBTYPE_JOIN;
 
 		gettimeofday(&now, 0);
 		if (timercmp(&timeo, &now, <=)) {
@@ -1708,11 +1708,11 @@ PlayFrisbee(void)
 			 * client talking to an old (pre-JOINv2) server.
 			 */
 			if (!nodecompress) {
-				subtype = p->hdr.subtype = PKTSUBTYPE_JOIN;
+				jtype = p->hdr.subtype = PKTSUBTYPE_JOIN;
 				p->hdr.datalen = sizeof(p->msg.join);
 				p->msg.join.clientid = myid;
 			} else {
-				subtype = p->hdr.subtype = PKTSUBTYPE_JOIN2;
+				jtype = p->hdr.subtype = PKTSUBTYPE_JOIN2;
 				p->hdr.datalen = sizeof(p->msg.join2);
 				p->msg.join2.clientid = myid;
 				p->msg.join2.chunksize = MAXCHUNKSIZE;
@@ -1722,6 +1722,8 @@ PlayFrisbee(void)
 			timeo.tv_sec = 0;
 			timeo.tv_usec = 500000;
 			timeradd(&timeo, &now, &timeo);
+			if (debug > 1)
+				log("sent JOIN (%d)", p->hdr.subtype);
 		}
 
 		/*
@@ -1729,15 +1731,17 @@ PlayFrisbee(void)
 		 * we get a reply back.
 		 */
 		if (PacketReceive(p) == 0 &&
-		    p->hdr.subtype == subtype &&
+		    p->hdr.subtype == jtype &&
 		    p->hdr.type == PKTTYPE_REPLY) {
-			if (subtype == PKTSUBTYPE_JOIN) {
+			if (jtype == PKTSUBTYPE_JOIN) {
 				p->msg.join2.chunksize = MAXCHUNKSIZE;
 				p->msg.join2.blocksize = MAXBLOCKSIZE;
 				p->msg.join2.bytecount =
 					(uint64_t)p->msg.join.blockcount *
 					MAXBLOCKSIZE;
 			}
+			if (debug > 1)
+				log("got JOIN (%d) reply", jtype);
 			CLEVENT(1, EV_CLIJOINREP,
 				p->msg.join2.chunksize,
 				p->msg.join2.blocksize,
