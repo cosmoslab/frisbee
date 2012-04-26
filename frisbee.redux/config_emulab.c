@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2010-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -1207,7 +1207,8 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			wantname = mystrdup(wantname+1);
 		}
 		imageidx = emulab_imageid(wantpid, wantname);
-		assert(imageidx > 0);
+		if (imageidx == 0)
+			goto done;
 	}
 
 	if (put != NULL) {
