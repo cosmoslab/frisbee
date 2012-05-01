@@ -44,6 +44,7 @@ client-install: client
 	$(MAKE) -C syncd client-install
 	$(MAKE) -C dijkstra client-install
 	$(MAKE) -C genhostsfile client-install
+	$(MAKE) -C imagezip client-install
 ifeq ($(SYSTEM),FreeBSD)
 	$(MAKE) -C growdisk client-install
 endif
