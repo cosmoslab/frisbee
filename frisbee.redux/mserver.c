@@ -43,6 +43,9 @@ static void	get_options(int argc, char **argv);
 static int	makesocket(int portnum, struct in_addr *ifip, int *tcpsockp);
 static void	handle_request(int sock);
 static int	reapchildren(int apid, int *status);
+#ifdef WITH_IGMP
+static void	handle_igmp(void);
+#endif
 static char *	gidstr(int ngids, gid_t gids[]);
 
 static int	daemonize = 1;
@@ -68,6 +71,7 @@ static int	usechildauth = 0;
 static int	mirrormode = 0;
 static char     *configstyle = "null";
 static struct in_addr ifaceip;
+static int	igmpqueryinterval = 0;
 
 /* XXX the following just keep network.c happy */
 int		portnum = MS_PORTNUM;
@@ -101,6 +105,11 @@ main(int argc, char **argv)
 		    inet_ntoa(parentip), parentport,
 		    mirrormode ? " in mirror mode" : "",
 		    GetMSMethods(parentmethods));
+#ifdef WITH_IGMP
+	if (igmpqueryinterval)
+		log("  acting as IGMP querier on %s with %d second interval",
+		    inet_ntoa(ifaceip), igmpqueryinterval);
+#endif
 	config_init(configstyle, 1);
 
 	/* Just dump the config to stdout in human readable form and exit. */
@@ -130,6 +139,11 @@ main(int argc, char **argv)
 		}
 	}
 #endif
+#ifdef WITH_IGMP
+	if (igmpqueryinterval)
+		IGMPInit(&ifaceip, NULL);
+#endif
+
 	/* Now become a daemon */
 	if (daemonize)
 		daemon(0, 0);
@@ -157,6 +171,12 @@ main(int argc, char **argv)
 		struct sockaddr_in client;
 		socklen_t length;
 		int newsock, rv, maxsock = 0;
+
+#ifdef WITH_IGMP
+		/* Do the querier thing */
+		if (igmpqueryinterval)
+			handle_igmp();
+#endif
 
 		FD_SET(tcpsock, &ready);
 		maxsock = tcpsock + 1;
@@ -1314,7 +1334,7 @@ get_options(int argc, char **argv)
 {
 	int ch;
 
-	while ((ch = getopt(argc, argv, "AC:DI:MRX:x:S:P:p:i:dh")) != -1)
+	while ((ch = getopt(argc, argv, "AC:DI:MRX:x:S:P:p:i:dhQ:")) != -1)
 		switch(ch) {
 		case 'A':
 			usechildauth = 1;
@@ -1401,6 +1421,20 @@ get_options(int argc, char **argv)
 					optarg);
 				exit(1);
 			}
+			break;
+		case 'Q':
+#ifdef WITH_IGMP
+			igmpqueryinterval = atoi(optarg);
+			if (igmpqueryinterval <= 0) {
+				fprintf(stderr,
+					"Invalid IGMP querier interval '%s'\n",
+					optarg);
+				exit(1);
+			}
+#else
+			fprintf(stderr, "IGMP querier mode not supported\n");
+			exit(1);
+#endif
 			break;
 		case 'h':
 		case '?':
@@ -2118,6 +2152,33 @@ reapchildren(int wpid, int *statusp)
 
 	return corpses;
 }
+
+#ifdef WITH_IGMP
+/*
+ * If we are acting as an IGMP querier, see if we are due to send out a
+ * general membership query. Maybe we should only send queries while we
+ * have active MC servers running?
+ *
+ * Called from the main loop before returning to select to wait for more.
+ */
+static void
+handle_igmp(void)
+{
+	static struct timeval lastquery;
+	struct timeval now, delta;
+
+	gettimeofday(&now, NULL);
+	timersub(&now, &lastquery, &delta);
+	if (delta.tv_sec >= igmpqueryinterval) {
+		if (debug)
+			log("sending IGMP membership query after %d seconds",
+			    delta.tv_sec);
+		if (IGMPSendQuery())
+			warning("could not send IGMP membership query!");
+		lastquery = now;
+	}
+}
+#endif
 
 /*
  * XXX debug

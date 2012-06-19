@@ -293,8 +293,14 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 	snprintf(str, sizeof str, " -W %u",
 		 isindir(STDIMAGEDIR, ii->path) ?
 		 get_maxrate_std : get_maxrate_usr);
+#if 0
+	/*
+	 * Should not be needed anymore. If the multicast group is getting
+	 * dropped, the mserver should be configured to run as a querier (-Q).
+	 */
 	if (INELABINELAB)
 		strcat(str, " -K 15");
+#endif
 	ii->get_options = mystrdup(str);
 
 	/* and whack the put_* fields */

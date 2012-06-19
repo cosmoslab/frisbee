@@ -19,6 +19,11 @@ EXPANDCOPYRIGHT	= /usr/site/lib/copyright/expand-copyr
 WITH_CRYPTO	= 1
 WITH_SIGNING	= 1
 
+#
+# Support direct sending of IGMP query/report messages.
+#
+WITH_IGMP	= 1
+
 SYSTEM	:= $(shell uname -s)
 
 # FreeBSD specific goop
@@ -145,6 +150,13 @@ endif
 #
 ifeq ($(WITH_JUMBO),1)
 CFLAGS		+= -DJUMBO
+endif
+
+#
+# Send direct IGMP packets
+#
+ifeq ($(WITH_IGMP),1)
+CFLAGS		+= -DWITH_IGMP
 endif
 
 #

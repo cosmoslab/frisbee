@@ -66,6 +66,12 @@ GetIP(char *str, struct in_addr *in)
 	return 1;
 }
 
+/*
+ * Return the maximum size of a socket buffer.
+ * Computes it dynamically on the first call.
+ *
+ * XXX assumes send/recv max sizes are the same.
+ */
 int
 GetSockbufSize(void)
 {
@@ -222,6 +228,10 @@ CommonInit(int dobind)
 			       &mcastif, sizeof(mcastif)) < 0) {
 			pfatal("setsockopt(IPPROTO_IP, IP_MULTICAST_IF)");
 		}
+
+#ifdef WITH_IGMP
+		IGMPInit(&mcastif, &mcastaddr);
+#endif
 	}
 	else if (broadcast) {
 		log("Setting broadcast mode");
@@ -338,6 +348,12 @@ NetMCKeepAlive(void)
 	if (sock == -1)
 		return 1;
 
+#ifdef WITH_IGMP
+	/* Send a direct V2 report packet if possible */
+	if (IGMPSendReport() == 0)
+		return 0;
+#endif
+
 	mreq.imr_multiaddr.s_addr = mcastaddr.s_addr;
 	if (mcastif.s_addr)
 		mreq.imr_interface.s_addr = mcastif.s_addr;
@@ -349,6 +365,7 @@ NetMCKeepAlive(void)
 	    setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
 		       &mreq, sizeof(mreq)) < 0)
 		return 1;
+
 	return 0;
 }
 
@@ -568,6 +585,9 @@ PacketValid(Packet_t *p, int nchunks)
 	return 1;
 }
 
+/*
+ * Functions for communicating with the master server.
+ */
 #ifdef MASTER_SERVER
 int
 MsgSend(int msock, MasterMsg_t *msg, size_t size, int timo)
@@ -787,5 +807,165 @@ ClientNetFindServer(in_addr_t sip, in_port_t sport,
 	reply->hisize = ntohl(reply->hisize);
 	reply->losize = ntohl(reply->losize);
 	return 1;
+}
+#endif
+
+/*
+ * Functions for dealing with IGMP
+ */
+#ifdef WITH_IGMP
+#include <netinet/ip.h>
+#include <netinet/igmp.h>
+
+#ifdef IGMP_MEMBERSHIP_QUERY
+#define IGMP_QUERY IGMP_MEMBERSHIP_QUERY
+#else
+#define IGMP_QUERY IGMP_HOST_MEMBERSHIP_QUERY
+#endif
+#ifdef IGMP_V2_MEMBERSHIP_REPORT
+#define IGMP_REPORT IGMP_V2_MEMBERSHIP_REPORT
+#else
+#define IGMP_REPORT IGMP_v2_HOST_MEMBERSHIP_REPORT
+#endif
+
+static struct igmp qpacket, rpacket;
+static struct in_addr mciface;
+static struct sockaddr_in allhosts, mcgroup;
+
+static uint16_t
+igmp_csum(struct igmp *pkt)
+{
+	char *addr = (char *)pkt;
+	int cc = sizeof(*pkt);
+	uint32_t csum = 0;
+
+	while (cc >= sizeof(uint16_t)) {
+		csum += *(uint16_t *)addr;
+		addr += sizeof(uint16_t);
+		cc -= sizeof(uint16_t);
+	}
+	if (cc > 0)
+		csum = csum + *(uint8_t *)addr;
+
+	while ((csum >> 16) != 0)
+		csum = (csum >> 16) + (csum & 0xFFFF);
+
+	return(~csum);
+}
+
+static int
+igmp_opensocket(void)
+{
+	char ra[4];
+	int ttl = 1;
+	int sock;
+
+	sock = socket(AF_INET, SOCK_RAW, IPPROTO_IGMP);
+	if (sock < 0) {
+		perror("IGMP socket");
+		return -1;
+	}
+	
+	/* set TTL */
+	if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL,
+		       &ttl, sizeof(ttl)) < 0) {
+		perror("setsockopt(MULTICAST_TTL)");
+		close(sock);
+		return -1;
+	}
+
+	/* fix interface */
+	if (mciface.s_addr != 0 &&
+	    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF,
+		       &mciface, sizeof(mciface)) < 0) {
+		perror("setsockopt(MULTICAST_IF)");
+		close(sock);
+		return -1;
+	}
+
+	/* set router alert option */
+	ra[0] = IPOPT_RA;
+	ra[1] = 4;
+	ra[2] = ra[3] = '\0';
+	if (setsockopt(sock, IPPROTO_IP, IP_OPTIONS, &ra, sizeof(ra)) < 0) {
+		perror("setsockopt(RA)");
+		close(sock);
+		return -1;
+	}
+
+	return sock;
+}
+
+void
+IGMPInit(struct in_addr *iface, struct in_addr *mcaddr)
+{
+	/* build a prototype query packet */
+	qpacket.igmp_type = IGMP_QUERY;
+	qpacket.igmp_code = 0x64;
+	memset(&qpacket.igmp_group, 0, sizeof(qpacket.igmp_group));
+	qpacket.igmp_cksum = 0;
+	qpacket.igmp_cksum = igmp_csum(&qpacket);
+
+	/* sockaddr for queries */
+	allhosts.sin_family = AF_INET;
+	allhosts.sin_port = htons(0);
+	allhosts.sin_addr.s_addr = htonl(INADDR_ALLHOSTS_GROUP);
+
+	if (mcaddr != NULL) {
+		/* build a prototype report packet */
+		rpacket.igmp_type = IGMP_REPORT;
+		rpacket.igmp_code = 0;
+		rpacket.igmp_group = *mcaddr;
+		rpacket.igmp_cksum = 0;
+		rpacket.igmp_cksum = igmp_csum(&rpacket);
+
+		/* sockaddr for reports */
+		mcgroup.sin_family = AF_INET;
+		mcgroup.sin_port = htons(0);
+		mcgroup.sin_addr = *mcaddr;
+	}
+
+	/* remember the interface */
+	if (iface != NULL)
+		mciface = *iface;
+	else
+		mciface.s_addr = 0;
+}
+
+int
+IGMPSendQuery(void)
+{
+	int rv, sock;
+
+	if ((sock = igmp_opensocket()) < 0)
+		return -1;
+
+	rv = sendto(sock, &qpacket, sizeof(qpacket), 0,
+		  (struct sockaddr *)&allhosts, sizeof(allhosts));
+	if (rv < 0)
+		perror("query sendto");
+	close(sock);
+
+	return (rv != sizeof(qpacket));
+}
+
+int
+IGMPSendReport(void)
+{
+	int rv, sock;
+
+	if (mcgroup.sin_addr.s_addr == 0)
+		return 0;
+
+	if ((sock = igmp_opensocket()) < 0)
+		return -1;
+
+	rv = sendto(sock, &rpacket, sizeof(rpacket), 0,
+		    (struct sockaddr *)&mcgroup, sizeof(mcgroup));
+	if (rv < 0)
+		perror("report sendto");
+	close(sock);
+
+	return (rv != sizeof(rpacket));
 }
 #endif

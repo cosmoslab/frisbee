@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2000-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -436,6 +436,11 @@ int	ClientNetFindServer(in_addr_t, in_port_t, in_addr_t, char *,
 			    int, int, int, GetReply *, struct in_addr *);
 int	MsgSend(int, MasterMsg_t *, size_t, int);
 int	MsgReceive(int, MasterMsg_t *, size_t, int);
+#endif
+#ifdef WITH_IGMP
+void	IGMPInit(struct in_addr *iface, struct in_addr *mcaddr);
+int	IGMPSendQuery(void);
+int	IGMPSendReport(void);
 #endif
 
 /*

@@ -702,8 +702,6 @@ ClientRecvThread(void *arg)
 	if (debug)
 		log("Receive pthread starting up ...");
 
-	KACounter = keepalive * TIMEOUT_HZ;
-
 	/*
 	 * Use this to control the rate at which we request blocks.
 	 * The IdleCounter is how many ticks we let pass without a
@@ -713,6 +711,17 @@ ClientRecvThread(void *arg)
 	 * immediate first request to get the ball rolling.
 	 */
 	IdleCounter = 1;
+
+	/*
+	 * KACounter is how often we send a multicast "keep alive",
+	 * aka a V2 IGMP report message. The keep alive mechanism is a
+	 * hack and indicates a compatibility issue between the frisbee
+	 * server, frisbee client, and switch IGMP implementations.
+	 * As with the idle counter, we initialize it to one so that an
+	 * immediate message will be sent in order to get things moving
+	 * quickly.
+	 */
+	KACounter = keepalive ? 1 : 0;
 
 	/*
 	 * This is another throttling mechanism; avoid making repeated
