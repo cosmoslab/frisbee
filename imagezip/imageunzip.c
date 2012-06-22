@@ -194,8 +194,8 @@ typedef struct {
 	char		*data;
 } writebuf_t;
 
-static unsigned long	maxwritebufmem = MAXWRITEBUFMEM;
-static volatile unsigned long	curwritebufmem, curwritebufs;
+static unsigned long long	   maxwritebufmem = MAXWRITEBUFMEM;
+static volatile unsigned long long curwritebufmem, curwritebufs;
 #ifndef NOTHREADS
 static queue_head_t	writequeue;
 static pthread_mutex_t	writebuf_mutex;
@@ -206,7 +206,8 @@ static pthread_cond_t	writebuf_cond;
 static volatile int	writebufwanted;
 
 /* stats */
-unsigned long		maxbufsalloced, maxmemalloced;
+unsigned long		maxbufsalloced;
+unsigned long long	maxmemalloced;
 unsigned long		splits;
 
 #ifdef WITH_CRYPTO
@@ -332,7 +333,7 @@ void dodots(int dottype, off_t cc)
 void
 dump_writebufs(void)
 {
-	fprintf(stderr, "%lu max bufs, %lu max memory\n",
+	fprintf(stderr, "%lu max bufs, %llu max memory\n",
 		maxbufsalloced, maxmemalloced);
 	fprintf(stderr, "%lu buffers split\n",
 		splits);
@@ -640,8 +641,8 @@ main(int argc, char *argv[])
 
 #ifndef NOTHREADS
 		case 'W':
-			maxwritebufmem = atoi(optarg);
-			if (maxwritebufmem >= 4096)
+			maxwritebufmem = (unsigned long long)atoi(optarg);
+			if (maxwritebufmem >= MAXWRITEBUFMEM)
 				maxwritebufmem = MAXWRITEBUFMEM;
 			maxwritebufmem *= (1024 * 1024);
 			break;
@@ -1005,7 +1006,7 @@ ImageUnzipInitKeys(char *uuidstr, char *sig_keyfile, char *enc_keyfile)
 int
 ImageUnzipInit(char *filename, int _slice, int _debug, int _fill,
 	       int _nothreads, int _dostype, int _dodots,
-	       unsigned long _writebufmem, int _directio)
+	       unsigned long long _writebufmem, int _directio)
 {
 	int flags;
 
@@ -1084,7 +1085,7 @@ ImageUnzipSetChunkCount(unsigned long _chunkcount)
 }
 
 void
-ImageUnzipSetMemory(unsigned long _writebufmem)
+ImageUnzipSetMemory(unsigned long long _writebufmem)
 {
 #ifndef NOTHREADS
 	maxwritebufmem = _writebufmem;

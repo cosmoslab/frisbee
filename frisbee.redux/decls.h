@@ -68,8 +68,11 @@
  * The ratio of the number of these two buffer types depends on the ratio
  * of network to disk speed and the degree of compression in the image.
  */
-#define MAXCHUNKBUFS	64	/* 64MB with default chunk size */
-#define MAXWRITEBUFMEM	64	/* in MB */
+#define DEFCHUNKBUFS	64		/* 64MB with default chunk size */
+#define MAXCHUNKBUFS	(128*1024)	/* 128GB with default chunk size */
+#define DEFWRITEBUFMEM	64		/* in MB */
+#define MAXWRITEBUFMEM	(128*1024)	/* in MB */
+#define MAXMEMUSE	(256*1024)	/* in MB */
 
 /*
  * Socket buffer size, used for both send and receive in client and
