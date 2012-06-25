@@ -17,6 +17,13 @@ SUBDIRS	= syncd dijkstra genhostsfile imagezip frisbee.redux
 ifeq ($(SYSTEM),FreeBSD)
 SUBDIRS += growdisk
 endif
+
+# XXX: Remove dijkstra from win7 for now as g++4 doesn't like Boost
+# XXX: also remove imagezip and frisbee - oy vey...
+ifeq ($(findstring CYGWIN_NT,$(SYSTEM)),CYGWIN_NT)
+SUBDIRS := $(filter-out dijkstra imagezip frisbee.redux,$(SUBDIRS))
+endif
+
 all:	all-subdirs
 
 include $(TESTBED_SRCDIR)/GNUmakerules
@@ -42,13 +49,16 @@ client-install: client
 	$(INSTALL) -m 644 $(SRCDIR)/install-tarfile.1 $(DESTDIR)$(CLIENT_MANDIR)/man1/install-tarfile.1
 	$(INSTALL_PROGRAM) $(SRCDIR)/install-rpm $(LBINDIR)/install-rpm
 	$(MAKE) -C syncd client-install
+ifneq ($(findstring CYGWIN_NT,$(SYSTEM)),CYGWIN_NT) # Filter out again...
 	$(MAKE) -C dijkstra client-install
-	$(MAKE) -C genhostsfile client-install
 	$(MAKE) -C imagezip client-install
+	$(MAKE) -C frisbee.redux client-install
+endif
+	$(MAKE) -C genhostsfile client-install
 ifeq ($(SYSTEM),FreeBSD)
 	$(MAKE) -C growdisk client-install
 endif
-	$(MAKE) -C frisbee.redux client-install
+
 
 subboss: client
 
