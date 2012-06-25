@@ -39,8 +39,8 @@ static int exitstatus;
 #endif
 
 /* Tunable constants */
-int		maxchunkbufs = MAXCHUNKBUFS;
-int		maxwritebufmem = MAXWRITEBUFMEM;
+int		maxchunkbufs = DEFCHUNKBUFS;
+int		maxwritebufmem = DEFWRITEBUFMEM;
 int		maxmem = 0;
 int		pkttimeout = PKTRCV_TIMEOUT;
 int		idletimer = CLIENT_IDLETIMER_COUNT;
@@ -83,9 +83,9 @@ extern int	ImageUnzipInitKeys(char *uuidstr, char *sig_keyfile,
 				   char *enc_keyfile);
 extern int	ImageUnzipInit(char *filename, int slice, int debug, int zero,
 			       int nothreads, int dostype, int dodots,
-			       unsigned long writebufmem, int directio);
+			       unsigned long long writebufmem, int directio);
 extern void	ImageUnzipSetChunkCount(unsigned long chunkcount);
-extern void	ImageUnzipSetMemory(unsigned long writebufmem);
+extern void	ImageUnzipSetMemory(unsigned long long writebufmem);
 extern int	ImageWriteChunk(int chunkno, char *chunkdata, int chunksize);
 extern int	ImageUnzipChunk(char *chunkdata, int chunksize);
 extern int	ImageUnzipFlush(void);
@@ -338,18 +338,17 @@ main(int argc, char **argv)
 			mem = atoi(optarg);
 			if (mem < 1)
 				mem = 1;
-			else if (mem > 32768)
-				mem = 32768;
-			maxchunkbufs = (mem * 1024 * 1024) /
-				sizeof(ChunkBuffer_t);
+			else if (mem > MAXCHUNKBUFS)
+				mem = MAXCHUNKBUFS;
+			maxchunkbufs = mem;
 			break;
 
 		case 'W':
 			mem = atoi(optarg);
 			if (mem < 1)
 				mem = 1;
-			else if (mem > 32768)
-				mem = 32768;
+			else if (mem > MAXWRITEBUFMEM)
+				mem = MAXWRITEBUFMEM;
 			maxwritebufmem = mem;
 			break;
 
@@ -357,8 +356,8 @@ main(int argc, char **argv)
 			mem = atoi(optarg);
 			if (mem < 2)
 				mem = 2;
-			else if (mem > 65536)
-				mem = 65536;
+			else if (mem > MAXMEMUSE)
+				mem = MAXMEMUSE;
 			maxmem = mem;
 			break;
 
@@ -538,20 +537,20 @@ main(int argc, char **argv)
 		else
 			idletimer = CLIENT_IDLETIMER_COUNT;
 		if (event.data.start.chunkbufs >= 0 &&
-		    event.data.start.chunkbufs <= 1024)
+		    event.data.start.chunkbufs <= MAXCHUNKBUFS)
 			maxchunkbufs = event.data.start.chunkbufs;
 		else
 			maxchunkbufs = MAXCHUNKBUFS;
 		if (event.data.start.writebufmem >= 0 &&
-		    event.data.start.writebufmem < 4096)
+		    event.data.start.writebufmem < MAXWRITEBUFMEM)
 			maxwritebufmem = event.data.start.writebufmem;
 		else
 			maxwritebufmem = MAXWRITEBUFMEM;
 		if (event.data.start.maxmem >= 0 &&
-		    event.data.start.maxmem < 4096)
+		    event.data.start.maxmem < MAXMEMUSE)
 			maxmem = event.data.start.maxmem;
 		else
-			maxmem = 0;
+			maxmem = MAXMEMUSE;
 		if (event.data.start.readahead >= 0 &&
 		    event.data.start.readahead <= maxchunkbufs)
 			maxreadahead = event.data.start.readahead;
@@ -625,7 +624,8 @@ main(int argc, char **argv)
 	 */
 	if (maxmem != 0) {
 		/* XXX divide it up 50/50 */
-		maxchunkbufs = (maxmem/2 * 1024*1024) / sizeof(ChunkBuffer_t);
+		maxchunkbufs = (int)((unsigned long long)maxmem/2 * 1024*1024
+				     / sizeof(ChunkBuffer_t));
 		maxwritebufmem = maxmem/2;
 	}
 
@@ -639,7 +639,9 @@ main(int argc, char **argv)
 	 * The writer thread synchronizes only with us (the decompresser).
 	 */
 	ImageUnzipInit(filename, slice, debug, zero, nothreads, dostype,
-		       quiet ? 0 : 3, maxwritebufmem*1024*1024, forcedirectio);
+		       quiet ? 0 : 3,
+		       (unsigned long long)maxwritebufmem*1024*1024,
+		       forcedirectio);
 
 	if (tracing) {
 		ClientTraceInit(traceprefix);
@@ -1768,6 +1770,9 @@ PlayFrisbee(void)
 	TotalChunkCount = TotalChunks();
 	ImageUnzipSetChunkCount(TotalChunkCount);
 	
+	if (maxchunkbufs == 0)
+		maxchunkbufs = TotalChunkCount;
+
 	/*
 	 * If we have partitioned up the memory and have allocated
 	 * more chunkbufs than chunks in the file, reallocate the
@@ -1777,12 +1782,14 @@ PlayFrisbee(void)
 	if (maxmem != 0 && maxchunkbufs > TotalChunkCount) {
 		int excessmb;
 
-		excessmb = ((maxchunkbufs - TotalChunkCount) *
-			    sizeof(ChunkBuffer_t)) / (1024 * 1024);
+		excessmb = (int)((((unsigned long long)
+				   (maxchunkbufs - TotalChunkCount) *
+				   sizeof(ChunkBuffer_t)) / (1024 * 1024)));
 		maxchunkbufs = TotalChunkCount;
 		if (excessmb > 0) {
 			maxwritebufmem += excessmb;
-			ImageUnzipSetMemory(maxwritebufmem*1024*1024);
+			ImageUnzipSetMemory((unsigned long long)
+					    maxwritebufmem*1024*1024);
 		}
 	}
  

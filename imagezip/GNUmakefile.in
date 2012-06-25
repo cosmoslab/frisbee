@@ -50,7 +50,9 @@ ifneq ($(FBSDREL),5.3)
 ifneq ($(FBSDMAJ),7)
 ifneq ($(FBSDMAJ),8)
 ifneq ($(FBSDMAJ),9)
+ifneq ($(FBSDMAJ),10)
 WITH_LTHREADS	= 1
+endif
 endif
 endif
 endif
