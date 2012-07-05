@@ -18,10 +18,9 @@ ifeq ($(SYSTEM),FreeBSD)
 SUBDIRS += growdisk
 endif
 
-# XXX: Remove dijkstra from win7 for now as g++4 doesn't like Boost
-# XXX: also remove imagezip and frisbee - oy vey...
+# XXX: Remove imagezip and frisbee from Cygwin builds - not working.
 ifeq ($(findstring CYGWIN_NT,$(SYSTEM)),CYGWIN_NT)
-SUBDIRS := $(filter-out dijkstra imagezip frisbee.redux,$(SUBDIRS))
+SUBDIRS := $(filter-out imagezip frisbee.redux,$(SUBDIRS))
 endif
 
 all:	all-subdirs
