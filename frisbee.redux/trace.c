@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2002-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2002-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -179,9 +179,9 @@ TraceDump(int serverrel, int level)
 				stamp.tv_sec = ptr->args[0];
 				stamp.tv_usec = ptr->args[1];
 				timersub(&ptr->tstamp, &stamp, &stamp);
-				fprintf(fd, "overrun by %ld.%03ld "
+				fprintf(fd, "overrun by %ld.%06ld "
 					"after %u[%u]\n",
-					stamp.tv_sec, stamp.tv_usec/1000,
+					stamp.tv_sec, stamp.tv_usec,
 					ptr->args[2], ptr->args[3]);
 				break;
 			case EV_LONGBURST:
@@ -465,10 +465,10 @@ TraceDump(int serverrel, int level)
 				stamp.tv_sec = ptr->args[0];
 				stamp.tv_usec = ptr->args[1];
 				timersub(&ptr->tstamp, &stamp, &stamp);
-				fprintf(fd, "%s: got block, wait=%03ld.%03ld"
-					", %u good blocks recv (%u  total)\n",
+				fprintf(fd, "%s: got block, wait=%03ld.%06ld"
+					", %u good blocks recv (%u total)\n",
 					inet_ntoa(ptr->srcip),
-					stamp.tv_sec, stamp.tv_usec/1000,
+					stamp.tv_sec, stamp.tv_usec,
 					ptr->args[2], ptr->args[3]);
 				break;
 			case EV_CLIRTIMO:
