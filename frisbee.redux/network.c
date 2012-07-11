@@ -99,6 +99,23 @@ GetSockbufSize(void)
 				i = SOCKBUFSIZE;
 			sbsize = i;
 		}
+		else {
+			int i = 0;
+			unsigned int ilen = sizeof(i);
+			if (getsockopt(sock, SOL_SOCKET, SO_SNDBUF,
+				       &i, &ilen) < 0)
+				pfatal("Could not read sockbuf size");
+#ifdef linux
+			/* In Linux, getsockopt returns 2 * actual value */
+			if (i == 2 * sbsize)
+				i = sbsize;
+#endif
+			if (i != sbsize) {
+				warning("Actual socket buffer size is %d"
+					" (instead of %d)", i, sbsize);
+				sbsize = i;
+			}
+		}
 		close(sock);
 #else
 		sbsize = SOCKBUFSIZE;

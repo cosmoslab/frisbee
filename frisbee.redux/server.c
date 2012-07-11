@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2000-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -427,7 +427,8 @@ ClientJoin(Packet_t *p, int version)
 	activeclients++;
 #endif
 
-	EVENT(1, EV_JOINREP, ipaddr, FileInfo.blocks, 0, 0, 0);
+	EVENT(1, EV_JOINREP, ipaddr, CHUNKSIZE, BLOCKSIZE,
+	      (FileInfo.filesize >> 32), FileInfo.filesize);
 
 	/*
 	 * Log after we send reply so that we get the packet off as
