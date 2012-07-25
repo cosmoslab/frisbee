@@ -1086,7 +1086,8 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 					 " FROM subbosses"
 					 " WHERE subboss_id='%s'"
 					 "  AND node_id='%s'"
-					 "  AND service='frisbee'",
+					 "  AND service='frisbee'"
+					 "  AND disabled=0",
 					 1, proxy, node);
 			assert(res != NULL);
 		} else {
