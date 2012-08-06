@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2000-2006 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -342,7 +342,8 @@ main(int argc, char **argv)
 
 	while (1) {
 		struct sockaddr_in	client;
-		int			length, cc, newsock, j;
+		int			cc, newsock, j;
+		socklen_t		length;
 		barrier_req_t		barrier_req;
 		
 		if (gotsiginfo) {
@@ -594,7 +595,8 @@ static int
 makesockets(int *portnum, int *udpsockp, int *tcpsockp)
 {
 	struct sockaddr_in	name;
-	int			length, i, udpsock, tcpsock;
+	socklen_t		length;
+	int			i, udpsock, tcpsock;
 
 	/*
 	 * Setup TCP socket for incoming connections.

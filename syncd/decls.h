@@ -1,8 +1,10 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2002-2006 University of Utah and the Flux Group.
+ * Copyright (c) 2002-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
+
+#include <inttypes.h>
 
 #define SERVER_SERVNAME		"emulab_syncd"
 #define SERVER_PORTNUM		16534
@@ -15,10 +17,10 @@
  */
 typedef struct {
 	char		name[64];	/* An arbitrary string */
-	short		request;	/* Either init or wait */
-	short		flags;		/* See below */
-	int		count;		/* Number of waiters */
-	int		error;		/* Error code (0 == no error) */
+	int16_t		request;	/* Either init or wait */
+	int16_t		flags;		/* See below */
+	int32_t		count;		/* Number of waiters */
+	int32_t		error;		/* Error code (0 == no error) */
 } barrier_req_t;
 
 /* Request */

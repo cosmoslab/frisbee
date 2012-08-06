@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2000-2004, 2006 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -217,13 +217,13 @@ main(int argc, char **argv)
 		
 		if (fgets(buf, sizeof(buf), fp)) {
 			if ((bp = strchr(buf, '\n')))
-				*bp = (char) NULL;
+				*bp = 0;
 
 			/*
 			 * Look for port spec
 			 */
 			if ((bp = strchr(buf, ':'))) {
-				*bp++   = (char) NULL;
+				*bp++   = 0;
 				portnum = atoi(bp);
 			}
 			server = strdup(buf);
@@ -446,8 +446,8 @@ dotcp(barrier_req_t *barrier_reqp, struct in_addr serverip, int portnum)
 	}
 	close(sock);
 
-	if (n == 4) {
-		return *((int *)buf);
+	if (n == sizeof(int32_t)) {
+		return *((int32_t *)buf);
 	}
 	else {
 		return -1;
@@ -463,7 +463,8 @@ dotcp(barrier_req_t *barrier_reqp, struct in_addr serverip, int portnum)
 static int
 doudp(barrier_req_t *barrier_reqp, struct in_addr serverip, int portnum)
 {
-	int			sock, length, n, cc;
+	int			sock, n, cc;
+	socklen_t		length;
 	struct sockaddr_in	name, client;
 	char			buf[BUFSIZ];
 
@@ -503,8 +504,8 @@ doudp(barrier_req_t *barrier_reqp, struct in_addr serverip, int portnum)
 	}
 	close(sock);
 
-	if (cc == 4) {
-		return *((int *)buf);
+	if (cc == sizeof(int32_t)) {
+		return *((int32_t *)buf);
 	}
 	else {
 		return -1;
