@@ -2012,6 +2012,7 @@ static void
 getrelocinfo(const blockhdr_t *hdr)
 {
 	const struct blockreloc *relocs;
+	int hdrsize = 0;
 
 	if (reloctable) {
 		free(reloctable);
@@ -2027,8 +2028,23 @@ getrelocinfo(const blockhdr_t *hdr)
 		exit(1);
 	}
 
+	switch (hdr->magic) {
+	case COMPRESSED_V1:
+		hdrsize = sizeof(struct blockhdr_V1);
+		break;
+	case COMPRESSED_V2:
+	case COMPRESSED_V3:
+		hdrsize = sizeof(struct blockhdr_V2);
+		break;
+	case COMPRESSED_V4:
+		hdrsize = sizeof(struct blockhdr_V4);
+		break;
+	default:
+		fprintf(stderr, "Unrecognized header type 0x%x\n", hdr->magic);
+		exit(1);
+	}
 	relocs = (const struct blockreloc *)
-		((const char *)&hdr[1] +
+		((const char *)hdr + hdrsize +
 		 hdr->regioncount * sizeof(struct region));
 	memcpy(reloctable, relocs, numrelocs * sizeof(struct blockreloc));
 }
@@ -2163,7 +2179,7 @@ reloc_bsdlabel(struct disklabel *label, int reloctype)
 		} else if (i == RAW_PART && psize != slicesize) {
 			assert(label->d_partitions[i].p_offset == outputminsec);
 			fprintf(stderr, "WARNING: raw partition '%c' "
-				"too small for slice, growing\n", 'a' + i);
+				"wrong size for slice, fixing\n", 'a' + i);
 			label->d_partitions[i].p_size = slicesize;
 		}
 	}
