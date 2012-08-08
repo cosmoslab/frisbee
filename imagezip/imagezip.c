@@ -2247,8 +2247,8 @@ compress_image(void)
 	fflush(stderr);
 
 	/*
-	 * For version 2 we don't bother to go back and fill in the
-	 * blockcount.  Imageunzip and frisbee don't use it.  We still
+	 * For version 2 and beyond we don't bother to go back and fill in
+	 * the blockcount.  Imageunzip and frisbee don't use it.  We still
 	 * do it if creating V1 images and we can seek on the output.
 	 */
 	if (compat != COMPRESSED_V1 || !outcanseek)
@@ -2271,11 +2271,11 @@ compress_image(void)
 			perror("seeking to read block header");
 			exit(1);
 		}
-		if ((cc = read(outfd, buf, sizeof(blockhdr_t))) < 0) {
+		if ((cc = read(outfd, buf, sizeof(struct blockhdr_V1))) < 0) {
 			perror("reading subblock header");
 			exit(1);
 		}
-		assert(cc == sizeof(blockhdr_t));
+		assert(cc == sizeof(struct blockhdr_V1));
 		if (lseek(outfd, (off_t) outputoffset, SEEK_SET) < 0) {
 			perror("seeking to write new block header");
 			exit(1);
@@ -2284,11 +2284,11 @@ compress_image(void)
 		assert(blkhdr->blockindex == i);
 		blkhdr->blocktotal = count;
 
-		if ((cc = devwrite(outfd, buf, sizeof(blockhdr_t))) < 0) {
+		if ((cc = devwrite(outfd, buf, sizeof(struct blockhdr_V1))) < 0) {
 			perror("writing new subblock header");
 			exit(1);
 		}
-		assert(cc == sizeof(blockhdr_t));
+		assert(cc == sizeof(struct blockhdr_V1));
 	}
 	return 0;
 }
