@@ -831,6 +831,7 @@ ClientNetFindServer(in_addr_t sip, in_port_t sport,
  * Functions for dealing with IGMP
  */
 #ifdef WITH_IGMP
+#include <netinet/in_systm.h>	/* for older *BSD that needs n_long */
 #include <netinet/ip.h>
 #include <netinet/igmp.h>
 
