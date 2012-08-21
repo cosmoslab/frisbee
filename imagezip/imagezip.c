@@ -49,7 +49,7 @@
 #define min(a,b) ((a) <= (b) ? (a) : (b))
 
 char	*infilename;
-int	infd, outfd, outcanseek;
+int	infd, outfd, incanseek, outcanseek;
 int	secsize	  = 512;	/* XXX bytes. */
 int	debug	  = 0;
 int	dots	  = 0;
@@ -194,6 +194,8 @@ slowread(int fd, void *buf, size_t nbytes, off_t startoffset)
 {
 	int cc, i, count;
 
+	assert(fd != infd || incanseek);
+
 	fprintf(stderr, "read failed: will retry by sector %d more times\n",
 		READ_RETRIES);
 
@@ -234,6 +236,8 @@ off_t
 devlseek(int fd, off_t off, int whence)
 {
 	off_t noff;
+
+	assert(fd != infd || incanseek);
 	assert((off & (DEV_BSIZE-1)) == 0);
 	noff = lseek(fd, off, whence);
 	if (!filemode) {
@@ -257,8 +261,30 @@ devread(int fd, void *buf, size_t nbytes)
 	assert((nbytes & (DEV_BSIZE-1)) == 0);
 #endif
 	cc = read(fd, buf, nbytes);
+
+	/*
+	 * If reading from a pipe, try to fill the input buffer
+	 * even if it takes multiple reads. Forces deterministic
+	 * behavior when compressing the same input stream.
+	 */
+	if (cc > 0 && cc != nbytes && !incanseek) {
+		int ncc;
+
+		count = nbytes - cc;
+		while (count > 0) {
+			ncc = read(fd, (char *)buf + cc, count);
+			if (ncc <= 0)
+				break;
+			cc += ncc;
+			count -= ncc;
+		}
+		return cc;
+	}
+
 	if (!forcereads || cc >= 0)
 		return cc;
+
+	assert(fd != infd || incanseek);
 
 	/*
 	 * Got an error reading the range.
@@ -605,9 +631,22 @@ main(int argc, char *argv[])
 		dorelocs = 0;
 
 	infilename = argv[0];
-	if ((infd = open(infilename, O_RDONLY, 0)) < 0) {
-		perror(infilename);
-		exit(1);
+	if (strcmp(infilename, "-")) {
+		if ((infd = open(infilename, O_RDONLY, 0)) < 0) {
+			perror(infilename);
+			exit(1);
+		}
+		incanseek = 1;
+	}
+	else {
+		if (!rawmode) {
+			fprintf(stderr,
+				"Can only use stdin as input with -f or -r\n");
+			usage();
+		}
+		infd = fileno(stdin);
+		incanseek = 0;
+		forcereads = 0;
 	}
 
 #ifdef WITH_CRYPTO
@@ -681,17 +720,6 @@ main(int argc, char *argv[])
 		if (fd >= 0)
 			close(fd);
 	}
-
-#if 0
-	/*
-	 * Use OS-specific techniques to discover the size of the disk.
-	 * Note that this could produce an image that will not fit on a
-	 * smaller disk, as imagezip will consider any space beyond the
-	 * final partition as allocated and will record the ranges.
-	 */
-	if (!slicemode && !maxmode)
-		inputmaxsec = getdisksize(infd);
-#endif
 
 	/*
 	 * Create the skip list by scanning the filesystems on
@@ -829,15 +857,17 @@ read_slice(int snum, int stype, u_int32_t start, u_int32_t size,
  * If successful return 0 with *label filled in.  Otherwise return an error.
  */
 static int
-read_doslabel(int infd, int lsect, int pstart, struct doslabel *label)
+read_doslabel(int fd, int lsect, int pstart, struct doslabel *label)
 {
 	int cc;
 
-	if (devlseek(infd, sectobytes(lsect), SEEK_SET) < 0) {
+	assert(fd != infd || incanseek);
+
+	if (devlseek(fd, sectobytes(lsect), SEEK_SET) < 0) {
 		warn("Could not seek to DOS label at sector %u", lsect);
 		return 1;
 	}
-	if ((cc = devread(infd, label->pad2, DOSPARTSIZE)) < 0) {
+	if ((cc = devread(fd, label->pad2, DOSPARTSIZE)) < 0) {
 		warn("Could not read DOS label at sector %u", lsect);
 		return 1;
 	}
@@ -1028,9 +1058,9 @@ read_image(u_int32_t bbstart, int pstart, u_int32_t extstart)
 int
 read_raw(void)
 {
-	off_t	size;
+	off_t	size = 0;
 
-	if ((size = devlseek(infd, (off_t) 0, SEEK_END)) < 0) {
+	if (incanseek && (size = devlseek(infd, (off_t) 0, SEEK_END)) < 0) {
 		warn("lseeking to end of raw image");
 		return 1;
 	}
@@ -1902,11 +1932,12 @@ compress_image(void)
 		/*
 		 * Seek to the beginning of the data range to compress.
 		 */
-		devlseek(infd, (off_t) inputoffset, SEEK_SET);
+		if (incanseek)
+			devlseek(infd, (off_t) inputoffset, SEEK_SET);
 
 		/*
 		 * The amount to compress is the size of the range, which
-		 * might be zero if its the last one (size unknown).
+		 * might be zero if it is the last one (size unknown).
 		 */
 		rangesize = sectobytes(prange->size);
 
