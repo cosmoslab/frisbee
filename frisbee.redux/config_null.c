@@ -448,12 +448,15 @@ null_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	int exists;
 	char *path = NULL;
 
+/* XXX don't worry about this right now; breaks virthosts under subboss */
+#if 0
 	/*
 	 * If the requester is not the same as the host, then it is a proxy
 	 * request.  We don't do proxying.
 	 */
 	if (req->s_addr != host->s_addr)
 		return 1;
+#endif
 
 	/*
 	 * If an imageid is specified, convert it into a plausible path.

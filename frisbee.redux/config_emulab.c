@@ -989,8 +989,8 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	/*
 	 * If the requester is not the same as the host, then it is a proxy
 	 * request.  In Emulab, the only proxy scenarios we support are
-	 * elabinelab inner bosses and subbosses.  So we first ensure that
-	 * the requester is listed as one of those.
+	 * elabinelab inner bosses, subbosses and shared vnode hosts.
+	 * So we first ensure that the requester is listed as one of those.
 	 */
 	if (req->s_addr != host->s_addr) {
 #ifdef USE_LOCALHOST_PROXY
@@ -1011,7 +1011,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			return 1;
 		}
 
-		/* Make sure the node really is a inner-boss/subboss */
+		/* Check the role of the node */
 		res = mydb_query("SELECT erole,inner_elab_role FROM reserved"
 				 " WHERE node_id='%s'", 2, proxy);
 		assert(res != NULL);
@@ -1036,7 +1036,10 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		/* or a subboss? */
 		else if (row[0] && strcmp(row[0], "subboss") == 0)
 			role = "subboss";
-		/* neither, return an error */
+		/* or a shared vnode host? */
+		else if (row[0] && strcmp(row[0], "sharedhost") == 0)
+			role = "sharedhost";
+		/* none of the above, return an error */
 		else {
 			mysql_free_result(res);
 			free(proxy);
@@ -1070,8 +1073,9 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	/*
 	 * We have a proxy node.  It should be one of:
 	 * - boss (for any node)
-	 * - a subboss (that is a frisbee subboss for the node)
+	 * - a subboss (that is a frisbee subboss for the node or node host)
 	 * - an inner-boss (in the same experiment as the node)
+	 * - a sharedhost (that is hosting the node)
 	 * Note that we could not do this check until we had the node name.
 	 * Note also that we no longer care about proxy or not after this.
 	 */
@@ -1082,15 +1086,17 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		} else
 #endif
 		if (strcmp(role, "subboss") == 0) {
-			res = mydb_query("SELECT node_id"
-					 " FROM subbosses"
-					 " WHERE subboss_id='%s'"
-					 "  AND node_id='%s'"
-					 "  AND service='frisbee'"
-					 "  AND disabled=0",
+			res = mydb_query("SELECT s.node_id"
+					 " FROM subbosses as s,"
+					 "  nodes as n"
+					 " WHERE s.subboss_id='%s'"
+					 "  AND s.service='frisbee'"
+					 "  AND s.disabled=0"
+					 "  AND n.node_id='%s'"
+					 "  AND s.node_id=n.phys_nodeid",
 					 1, proxy, node);
 			assert(res != NULL);
-		} else {
+		} else if (strcmp(role, "innerboss") == 0) {
 			res = mydb_query("SELECT r1.node_id"
 					 " FROM reserved as r1,"
 					 "  reserved as r2"
@@ -1099,6 +1105,17 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 					 "  AND r1.pid=r2.pid"
 					 "  AND r1.eid=r2.eid",
 					 1, proxy, node);
+			assert(res != NULL);
+		} else if (strcmp(role, "sharedhost") == 0) {
+			res = mydb_query("SELECT node_id"
+					 " FROM nodes"
+					 " WHERE phys_nodeid='%s'"
+					 "  AND node_id='%s'",
+					 1, proxy, node);
+			assert(res != NULL);
+		} else {
+			/* XXX just make it fail */
+			res = NULL;
 			assert(res != NULL);
 		}
 		if (res) {

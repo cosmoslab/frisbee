@@ -223,6 +223,7 @@ main(int argc, char **argv)
 	int	dostype = -1;
 	int	slice = 0;
 	char	*sig_keyfile = 0, *enc_keyfile = 0, *uuidstr = 0;
+	int	islocalproxy = 0;
 
 	while ((ch = getopt(argc, argv, "dqhp:m:s:i:tbznT:r:E:D:C:W:S:M:R:I:ONc:e:u:K:B:F:Q:P:X:f")) != -1)
 		switch(ch) {
@@ -440,6 +441,14 @@ main(int argc, char **argv)
 				fatal("Could not resolve host '%s'\n",
 				      proxyfor);
 			host = ntohl(in.s_addr);
+
+			/*
+			 * XXX make a note if localhost is the server.
+			 * This is a special case of proxying, see
+			 * proxyfor comment below.
+			 */
+			if (ntohl(serverip.s_addr) == INADDR_LOOPBACK)
+				islocalproxy = 1;
 		}
 		while (1) {
 			if (!ClientNetFindServer(ntohl(serverip.s_addr),
@@ -497,12 +506,16 @@ main(int argc, char **argv)
 	}
 
 	/*
-	 * XXX if proxying for another node, assume that we are only
-	 * interested in starting up the frisbeed and don't care about
-	 * the image ourselves. So, our work is done!
+	 * XXX if proxying for another node from localhost, assume that
+	 * we are only interested in starting up the frisbeed and don't
+	 * care about the image ourselves. So, our work is done!
+	 *
+	 * This is a special case for implementing backward compatibility
+	 * on Emulab. We should instead have a client timeout option that
+	 * we can set to really small value to handle immediate termination.
 	 */
-	if (proxyfor) {
-		log("server started on behalf of %s", proxyfor);
+	if (proxyfor && islocalproxy) {
+		log("frisbeed server started on behalf of %s", proxyfor);
 		exit(0);
 	}
 #endif

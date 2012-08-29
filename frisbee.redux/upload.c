@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2010-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -39,6 +39,7 @@ static int bufsize = (64 * 1024);;
 static int timeout = -1;
 static int usessl = 0;
 static int verify = 1;
+static in_addr_t proxyip = 0;
 
 /* Globals */
 int debug = 0;
@@ -96,7 +97,7 @@ main(int argc, char **argv)
 	}
 
 	if (imageid) {
-		if (!put_request(imageid, ntohl(msip.s_addr), msport, 0,
+		if (!put_request(imageid, ntohl(msip.s_addr), msport, proxyip,
 				 filesize, mtime, timeout, askonly, timo,
 				 &reply))
 			fatal("Could not get upload info for '%s'", imageid);
@@ -158,7 +159,7 @@ main(int argc, char **argv)
 		while (1) {
 			sleep(1);
 			if (!put_request(imageid, ntohl(msip.s_addr), msport,
-					 0, 0, 0, 0, 1, timo, &reply)) {
+					 proxyip, 0, 0, 0, 1, timo, &reply)) {
 				warning("%s: status request failed",
 					imageid);
 				goto vdone;
@@ -220,7 +221,7 @@ static void
 parse_args(int argc, char **argv)
 {
 	int ch;
-	while ((ch = getopt(argc, argv, "S:p:F:Q:sb:T:N")) != -1) {
+	while ((ch = getopt(argc, argv, "S:p:F:Q:sb:T:NP:")) != -1) {
 		switch (ch) {
 		case 'S':
 			mshost = optarg;
@@ -257,6 +258,19 @@ parse_args(int argc, char **argv)
 		case 'N':
 			verify = 0;
 			break;
+		case 'P':
+		{
+			struct in_addr in;
+
+			if (!GetIP(optarg, &in)) {
+				fprintf(stderr,
+					"Invalid node name '%s' for -P\n",
+					optarg);
+				exit(1);
+			}
+			proxyip = ntohl(in.s_addr);
+			break;
+		}
 		default:
 			break;
 		}
