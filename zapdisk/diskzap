@@ -32,7 +32,7 @@ fi
 
 if [ $# -eq 0 ]; then
     if [ `uname` = FreeBSD ]; then
-	set -- `dmesg | egrep '(ad|da|ar|aacd|amrd|mfid)[0-9]: [0-9]+MB' | \
+	set -- `dmesg | egrep '(ad|da|ar|aacd|amrd|mfid|mfisyspd)[0-9]: [0-9]+MB' | \
 	    sed -e 's/^\([a-z][^:]*\):.*/\1/'`
     else
 	# Linux
