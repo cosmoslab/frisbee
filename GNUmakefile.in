@@ -102,6 +102,9 @@ mfs-install:
 	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C growdisk client-install
 	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C frisbee.redux client-install
 
+newnode-mfs: mfs
+newnode-mfs-install: mfs-install
+
 cdboot-install: mfs-install
 
 subdir-distclean:
