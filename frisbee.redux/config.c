@@ -1,6 +1,6 @@
 /*
  * EMULAB-COPYRIGHT
- * Copyright (c) 2010-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2012 University of Utah and the Flux Group.
  * All rights reserved.
  */
 
@@ -50,15 +50,15 @@ config_signal(int sig)
 }
 
 int
-config_init(char *style, int readit)
+config_init(char *style, int readit, char *opts)
 {
 	int rv;
 
 	if (strcmp(style, "emulab") == 0) {
 #ifdef USE_EMULAB_CONFIG
-		extern struct config *emulab_init();
+		extern struct config *emulab_init(char *);
 		if (myconfig == NULL) {
-			if ((myconfig = emulab_init()) != NULL)
+			if ((myconfig = emulab_init(opts)) != NULL)
 				log("Using Emulab configuration");
 		} else
 			log("Emulab config init failed");
@@ -68,9 +68,9 @@ config_init(char *style, int readit)
 	}
 	if (strcmp(style, "null") == 0) {
 #ifdef USE_NULL_CONFIG
-		extern struct config *null_init();
+		extern struct config *null_init(char *);
 		if (myconfig == NULL) {
-			if ((myconfig = null_init()) != NULL)
+			if ((myconfig = null_init(opts)) != NULL)
 				log("Using null configuration");
 		} else
 			log("Null config init failed");

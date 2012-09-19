@@ -76,7 +76,7 @@ struct config {
 	void (*config_dump)(FILE *);
 };
 
-extern int	config_init(char *, int);
+extern int	config_init(char *, int, char *);
 extern void	config_deinit(void);
 extern int	config_read(void);
 extern int	config_get_host_authinfo(struct in_addr *,

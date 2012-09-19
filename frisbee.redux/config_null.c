@@ -677,7 +677,7 @@ struct config null_config = {
 };
 
 struct config *
-null_init(void)
+null_init(char *opts)
 {
 	char pathbuf[PATH_MAX], *path;
 	static int called;
@@ -686,6 +686,20 @@ null_init(void)
 	if (called)
 		return &null_config;
 	called++;
+
+	/*
+	 * XXX the only option we recognize right now is
+	 * mcaddr=A.B.C.D
+	 */
+	if (opts && opts[0]) {
+		char *cp = index(opts, '=');
+		if (cp) {
+			*cp = 0;
+			if (strcmp(opts, "mcaddr") == 0)
+				DEFAULT_MCADDR = cp + 1;
+			*cp = '=';
+		}
+	}
 
 	if (imagedir == NULL)
 		imagedir = DEFAULT_IMAGEDIR;

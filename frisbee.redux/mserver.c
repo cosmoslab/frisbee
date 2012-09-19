@@ -70,6 +70,7 @@ static int	canredirect = 0;
 static int	usechildauth = 0;
 static int	mirrormode = 0;
 static char     *configstyle = "null";
+static char	*configopts = "";
 static struct in_addr ifaceip;
 static int	igmpqueryinterval = 0;
 
@@ -110,7 +111,7 @@ main(int argc, char **argv)
 		log("  acting as IGMP querier on %s with %d second interval",
 		    inet_ntoa(ifaceip), igmpqueryinterval);
 #endif
-	config_init(configstyle, 1);
+	config_init(configstyle, 1, configopts);
 
 	/* Just dump the config to stdout in human readable form and exit. */
 	if (dumpconfig) {
@@ -1313,6 +1314,7 @@ usage(void)
 	fprintf(stderr, "mfrisbeed [-ADRd] [-X method] [-I imagedir] [-S parentIP] [-P parentport] [-p port]\n");
 	fprintf(stderr, "Basic:\n");
 	fprintf(stderr, "  -C <style>  configuration style: emulab, file, or null\n");
+	fprintf(stderr, "  -O <str>    configuration options, style-specific\n");
 	fprintf(stderr, "  -I <dir>    default directory where images are stored\n");
 	fprintf(stderr, "  -x <methods> transfer methods to allow from clients: ucast, mcast, bcast or any\n");
 	fprintf(stderr, "  -X <method> transfer method to request from parent\n");
@@ -1334,7 +1336,7 @@ get_options(int argc, char **argv)
 {
 	int ch;
 
-	while ((ch = getopt(argc, argv, "AC:DI:MRX:x:S:P:p:i:dhQ:")) != -1)
+	while ((ch = getopt(argc, argv, "AC:O:DI:MRX:x:S:P:p:i:dhQ:")) != -1)
 		switch(ch) {
 		case 'A':
 			usechildauth = 1;
@@ -1350,6 +1352,9 @@ get_options(int argc, char **argv)
 					"'emulab', 'file', 'null'\n");
 				exit(1);
 			}
+			break;
+		case 'O':
+			configopts = optarg;
 			break;
 		case 'x':
 		case 'X':

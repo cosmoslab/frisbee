@@ -1725,7 +1725,7 @@ struct config emulab_config = {
 };
 
 struct config *
-emulab_init(void)
+emulab_init(char *opts)
 {
 	static int called;
 	char pathbuf[PATH_MAX], *path;
