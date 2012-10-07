@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 #
-# Copyright (c) 2000-2010 University of Utah and the Flux Group.
+# Copyright (c) 2000-2012 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -61,7 +61,7 @@ delete @ENV{'IFS', 'CDPATH', 'ENV', 'BASH_ENV'};
 #
 # No configure vars.
 #
-my $IDENTFILE      = "/var/db/testbed.rpms";
+my $IDENTFILE      = "$DBDIR/testbed.rpms";
 my $rpm            = "";
 my $usewget	   = 0;
 my $copymode	   = 0;
