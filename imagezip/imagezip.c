@@ -86,6 +86,7 @@ int	retrywrites= 1;
 int	dorelocs  = 1;
 int	metaoptimize = 0;
 int	filemode  = 0;
+int	excludenonfs = 0;
 int	do_encrypt = 0;
 int	cipher = ENC_NONE;
 int	do_checksum = 0;
@@ -441,7 +442,7 @@ main(int argc, char *argv[])
 	memset(imageid, UUID_LENGTH, '\0');
 
 	gettimeofday(&sstamp, 0);
-	while ((ch = getopt(argc, argv, "vlbnNdihrs:c:z:ofI:13F:DR:S:XH:Me:k:u:a:Z")) != -1)
+	while ((ch = getopt(argc, argv, "vlbnNdihrs:c:z:ofI:13F:DR:S:XxH:Me:k:u:a:Z")) != -1)
 		switch(ch) {
 		case 'v':
 			version++;
@@ -511,6 +512,9 @@ main(int argc, char *argv[])
 			break;
 		case 'Z':
 			zerofrange = 1;
+			break;
+		case 'x':
+			excludenonfs++;
 			break;
 		case 'X':
 			forcereads++;

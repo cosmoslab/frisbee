@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2004 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2012 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -60,6 +60,7 @@ read_linuxslice(int slice, int stype, u_int32_t start, u_int32_t size,
 	unsigned char   	groups[EXT4_MAX_BLOCK_SIZE];
 	int			dosslice = slice + 1; /* DOS Numbering */
 	off_t			soff;
+	u_int32_t		fssect;
 
 	/*
 	 * Check for a LILO boot block and create relocations as necessary
@@ -111,6 +112,19 @@ read_linuxslice(int slice, int stype, u_int32_t start, u_int32_t size,
 		return 1;
 	} else {
 		fs.s_desc_size = EXT4_MIN_DESC_SIZE;
+	}
+
+	/*
+	 * See if the filesystem is smaller than the containing partition.
+	 * If so, and we are skipping such space, inform the user.
+	 */
+	fssect = bytestosec(EXT4_BLOCK_SIZE(&fs) *
+			    (off_t)fs.s_blocks_count_lo);
+	if (excludenonfs && fssect < size) {
+		warnx("Linux Slice %d: filesystem smaller than partition, "
+		      "excluding [%u-%u]",
+		      dosslice, start+fssect, start+size-1);
+		addskip(start + fssect, size - fssect);
 	}
 
 	numgroups = ((fs.s_blocks_count_lo - fs.s_first_data_block)

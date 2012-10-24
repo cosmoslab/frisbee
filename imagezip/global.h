@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2006 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2012 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -29,6 +29,7 @@ extern int secsize;
 extern int slicemode;
 extern int dorelocs;
 extern int metaoptimize;
+extern int excludenonfs;
 
 extern off_t devlseek(int fd, off_t off, int whence);
 extern ssize_t devread(int fd, void *buf, size_t nbytes);
