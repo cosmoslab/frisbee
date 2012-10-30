@@ -40,6 +40,9 @@ growdisk: growdisk.o
 
 install:
 
+subboss:
+subboss-install:
+
 client: all
 client-install: client
 	$(INSTALL_PROGRAM) -s growdisk$(EXE) $(DESTDIR)$(CLIENT_BINDIR)$(EXE)

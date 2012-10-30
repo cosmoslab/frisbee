@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2011 University of Utah and the Flux Group.
+# Copyright (c) 2000-2012 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -41,6 +41,8 @@ wgraph.o:	wgraph.cc wgraph.h
 
 boss-install:	$(INSTALL_LIBEXECDIR)/genhostsfile
 control-install:
+subboss: client
+subboss-install: client-install
 client: genhostsfile
 client-install: client
 	$(INSTALL_PROGRAM) genhostsfile$(EXE) $(DESTDIR)$(CLIENT_BINDIR)/genhostsfile$(EXE)

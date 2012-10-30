@@ -55,6 +55,8 @@ boss-install:
 		$(INSTALL_DIR)/opsdir/man/man1/emulab-sync.1
 
 control-install:
+subboss:
+subboss-install:
 
 client: all
 client-install: client

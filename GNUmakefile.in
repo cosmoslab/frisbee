@@ -75,9 +75,6 @@ ifeq ($(SYSTEM),FreeBSD)
 	$(MAKE) -C growdisk client-install
 endif
 
-
-subboss: client
-
 mfs:
 	$(MAKE) -C growdisk client
 	$(MAKE) -C zapdisk mfs
@@ -85,11 +82,13 @@ mfs:
 	$(MAKE) -C imagezip client
 	$(MAKE) -C frisbee.redux client
 
-subboss-install: subboss client-install
-ifeq ($(SYSTEM),FreeBSD)
-	CLIENT_BINDIR=/etc/testbed $(MAKE) -e -C frisbee.redux subboss-install
-else
-	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C frisbee.redux subboss-install
+subboss: subboss-subdirs
+
+subboss-install: subboss
+	$(MAKE) -C genhostsfile subboss-install
+ifneq ($(findstring CYGWIN_NT,$(SYSTEM)),CYGWIN_NT) # Filter out again...
+	$(MAKE) -C imagezip client-install
+	$(MAKE) -C frisbee.redux subboss-install
 endif
 
 remote-install: 

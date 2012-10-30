@@ -242,6 +242,8 @@ version.c: imagezip.c imageunzip.c imagedump.c
 install: $(addprefix $(INSTALL_BINDIR)/, $(PROGS))
 
 boss-install: install
+subboss: all
+subboss-install: subboss
 
 client: all
 client-install: client
