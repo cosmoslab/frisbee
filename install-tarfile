@@ -113,7 +113,7 @@ sub WriteIdentFile();
 # Must be running as root to work. 
 #
 if ($EUID != 0) {
-    die("Must be run as root! Try using sudo or su1!\n");
+    die("Must be run as root! Try using sudo!\n");
 }
 
 #
@@ -321,8 +321,14 @@ if (! $copymode) {
     }
 }
 else {
-    $copyfile = `mktemp /var/tmp/tarball.XXXXXX`;
-
+    #
+    # Create copy file in the same directory (filesystem) as the ultimate
+    # target. We used to just use /var/tmp, but that is at most 6GB.
+    # We now assume that if someone is downloading and untaring a large file,
+    # they are doing it into a large filesystem and that that filesystem will
+    # be large enough to hold the tarball as well!
+    #
+    $copyfile = `mktemp $installdir/tarball.XXXXXX`;
     if ($copyfile =~ /^([-\@\w\.\/]+)$/) {
 	$copyfile = $1;
     }
@@ -349,6 +355,7 @@ else {
 }
 
 if ($verifymode) {
+    # XXX should we unlink any copyfile here?
     exit(0);
 }
 
@@ -388,12 +395,12 @@ if ($unknownuser && ! $uuname) {
 if ($copymode) {
     $tarfile = $copyfile;
 }
-$tarlist = `mktemp /var/tmp/tarlist.XXXXXX`;
+$tarlist = `mktemp $installdir/tarlist.XXXXXX`;
 if ($tarlist =~ /^([-\@\w\.\/]+)$/) {
     $tarlist = $1;
 }
 else {
-    die("Bad data in tarlist name: $tarlist");
+    fatal("Bad data in tarlist name: $tarlist");
 }
 my $oumask = umask(0);
 my $TAR = `which gtar`;
