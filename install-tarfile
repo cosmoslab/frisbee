@@ -592,6 +592,11 @@ sub GetTarFile($$$$$$$$)
 	    }
 	}
 	my $www  = "https://$wgetserver";
+	if ($wgetserver =~ /^users/) {
+	    $www .= "/spewrpmtar";
+	} else {
+	    $www .= "/spewrpmtar.php3";
+	}
 
 	#
 	# Okay, run wget with the proper arguments. 
@@ -599,8 +604,7 @@ sub GetTarFile($$$$$$$$)
 	my $cmd = "wget -nv -O $copyfile ".
 	          "--no-check-certificate ".
 	          ($debug ? "--server-response " : "") .
-	          "'${www}/spewrpmtar.php3".
-	          "?nodeid=${nodeid}&file=${tarfile}&key=${keyhash}" .
+	          "'${www}?nodeid=${nodeid}&file=${tarfile}&key=${keyhash}" .
 		  (defined($oldstamp) ? "&stamp=$oldstamp" : "") .
 		  (defined($oldmd5)   ? "&md5=$oldmd5" : "") .
 		  "'";
@@ -629,7 +633,7 @@ sub GetTarFile($$$$$$$$)
 	}
 	if (! close(WGET)) {
 	    if ($?) {
-		fatal("Could not retrieve $tarfile from $www")
+		fatal("Could not retrieve $tarfile from $wgetserver")
 		    if (!$nochange);
 		# Otherwise, not modifed. 
 		print STDOUT "Timestamp for $tarfile unchanged!\n"

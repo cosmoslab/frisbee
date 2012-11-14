@@ -376,14 +376,19 @@ sub GetRPMFile($$$$$$$$)
 	    }
 	}
 	my $www  = "https://$wgetserver";
+	if ($wgetserver =~ /^users/) {
+	    $www .= "/spewrpmtar";
+	} else {
+	    $www .= "/spewrpmtar.php3";
+	}
 
 	#
 	# Okay, run wget with the proper arguments. 
 	#
-	my $cmd = "wget -nv -O --no-check-certificate $copyfile ".
+	my $cmd = "wget -nv -O $copyfile ".
+	          "--no-check-certificate ".
 	          ($debug ? "--server-response " : "") .
-	          "'${www}/spewrpmtar.php3".
-	          "?nodeid=${nodeid}&file=${rpm}&key=${keyhash}".
+	          "'${www}?nodeid=${nodeid}&file=${rpm}&key=${keyhash}" .
 		  (defined($oldstamp) ? "&stamp=$oldstamp" : "") .
 		  (defined($oldmd5)   ? "&md5=$oldmd5" : "") .
 		  "'";
@@ -412,7 +417,7 @@ sub GetRPMFile($$$$$$$$)
 	}
 	if (! close(WGET)) {
 	    if ($?) {
-		fatal("Could not retrieve $rpm from $www")
+		fatal("Could not retrieve $rpm from $wgetserver")
 		    if (!$nochange);
 		# Otherwise, not modifed. 
 		print STDOUT "Timestamp for $rpm unchanged!\n"
