@@ -41,7 +41,7 @@ BEGIN { require "/etc/emulab/paths.pm"; import emulabpaths; }
 sub usage()
 {
     print STDOUT 
-	"Usage: install-tarfile [-hVdfvct] [-n nodeid] [-u user] <installdir> ".
+	"Usage: install-tarfile [-hVdfvct] [-n nodeid] [-u user] [-S server] <installdir> ".
 	    "<filename>\n".
 	"       install-tarfile [-l]\n".
 	"Options:\n".
@@ -55,6 +55,7 @@ sub usage()
 	"  -n nodeid   Override the default node ID when downloading from Emulab\n".
 	"  -u user     User that should own files with unknown uid/gid\n".
 	"  -l          List the currently installed tar files and exit\n".
+	"  -S server   Specifies the Emulab server (for -t)\n".
 	"\n".
 	"Required Arguments:".
 	"  installdir  The absolute path of the install directory.\n".
@@ -62,7 +63,7 @@ sub usage()
 
     exit(-1);
 }
-my $optlist  = "hVlvcdftn:u:";
+my $optlist  = "hVlvcdftn:u:S:";
 
 #
 # Turn off line buffering on output
@@ -84,6 +85,7 @@ my $installdir     = "/";
 my $unknownuser	   = "";
 my $force	   = 0;
 my $usewget	   = 0;
+my $wgetserver	   = "";
 my $listmode	   = 0;
 my $copymode	   = 0;
 my $verifymode	   = 0;
@@ -105,7 +107,7 @@ use libsetup;
 use libtmcc;
 
 # Protos
-sub GetTarFile($$$$$$$);
+sub GetTarFile($$$$$$$$);
 sub GetMD5($);
 sub WriteIdentFile();
 
@@ -143,6 +145,15 @@ if (defined($options{"f"})) {
 if (defined($options{"t"})) {
     $copymode = 1;
     $usewget  = 1;
+}
+if (defined($options{"S"})) {
+    $wgetserver = $options{"S"};
+    if ($wgetserver =~ /^([-\w\.]+)$/) {
+	$wgetserver = $1;
+    }
+    else {
+	fatal("Tainted server: $wgetserver");
+    }
 }
 if (defined($options{"v"})) {
     $verifymode = 1;
@@ -340,7 +351,7 @@ else {
     # Returns >0 if server copy has not been modifed.
     # Returns =0 if okay to install, and gives us new stamp/md5.
     #
-    if (GetTarFile($tarfile, $copyfile, $usewget,
+    if (GetTarFile($tarfile, $copyfile, $usewget, $wgetserver,
 		   $oldstamp, $oldmd5, \$filestamp, \$filemd5)) {
 	print STDOUT "Tarfile $tarfile has already been installed!\n";
 	if (defined($filestamp) && $filestamp != $oldstamp) {
@@ -483,79 +494,41 @@ sub fatal {
 #
 # Get a tarfile from the server via tmcc and stash.
 #
-sub GetTarFile($$$$$$$)
+sub GetTarFile($$$$$$$$)
 {
-    my ($tarfile, $copyfile, $usewget,
+    my ($tarfile, $copyfile, $usewget, $wgetserver,
 	$oldstamp, $oldmd5, $filestamp, $filemd5) = @_;
     my $buf;
 
-    #
-    # If copying via NFS, must watch for read errors and retry.
-    #
     if (! $usewget) {
+	print STDOUT "Copying tarball $tarfile across NFS\n"
+	    if ($debug);
+
 	#
 	# Compare timestamp. If no change, we are done. 
 	#
-	my (undef,undef,undef,undef,undef,undef,undef,$bytelen,
-	    undef,$stamp) = stat($tarfile);
+	my (undef,undef,undef,undef,undef,undef,undef,undef,undef,$stamp) =
+	    stat($tarfile);
 
 	if (defined($oldstamp) && $oldstamp >= $stamp && !$force) {
 	    print STDOUT "Timestamp ($stamp) for $tarfile unchanged!\n"
 		if ($debug);
 	    return 1;
 	}
-	
+
+	#
 	# Must do this for caller so that if the MD5 has not changed,
 	# the caller can update the timestamp in the ident file.
+	#
 	$$filestamp = $stamp;
 	
-	open(TMCC, "< $tarfile")
-	    or fatal("Could not open tarfile on server!");
-
-	binmode TMCC;
-
 	#
-	# Open the target file and start dumping the data in.
+	# If copying via NFS, use special copy routine which retries on error.
 	#
-	open(JFILE, "> $copyfile")
-	    or fatal("Could not open local file $copyfile: $!");
-
-	binmode JFILE;
-
-	#
-	# Deal with NFS read failures
-	#
-	my $foffset = 0;
-	my $retries = 5;
-
-	while ($bytelen) {
-	    my $rlen = sysread(TMCC, $buf, 8192);
-
-	    if (! defined($rlen)) {
-		#
-		# If we are copying the file via NFS, retry a few times
-		# on error to avoid the changing-exports-file server problem.
-		if ($retries > 0 && sysseek(TMCC, $foffset, 0)) {
-		    warn("*** WARNING retrying read of $tarfile ".
-			 "at offset $foffset\n");
-		    $retries--;
-		    sleep(2);
-		    next;
-		}
-		fatal("Error reading tarball $tarfile: $!");
-	    }
-	    if ($rlen == 0) {
-		last;
-	    }
-	    if (! syswrite(JFILE, $buf)) {
-		fatal("Error writing tarfile $copyfile: $!");
-	    }
-	    $foffset += $rlen;
-	    $bytelen -= $rlen;
-	    $retries = 5;
+	if (!copyfilefromnfs($tarfile, $copyfile, 1)) {
+	    unlink($copyfile);
+	    fatal("Could not copy tarfile $tarfile from server!");
 	}
-	close(JFILE);
-	close(TMCC);
 
 	#
 	# Compare md5.
@@ -569,6 +542,9 @@ sub GetTarFile($$$$$$$)
 	$$filemd5   = $md5;
     }
     else {
+	print STDOUT "Fetching tarball $tarfile from $wgetserver via HTTP\n"
+	    if ($debug);
+
 	#
 	# Need the nodeid and the keyhash. We allow the nodeid to be
 	# overridden on the command line, but thats just a debugging
@@ -603,31 +579,31 @@ sub GetTarFile($$$$$$$)
 	}
 
 	#
-	# Lastly, need our boss node.
+	# Lastly, need the server.
+	# For compat, use boss (aka, www) if not specified.
 	#
-	my ($www) = tmccbossname();
-
-	if ($www =~ /^[-\w]+\.(.*)$/) {
-	    $www = "www.${1}";
+	if ($wgetserver eq "") {
+	    ($wgetserver) = tmccbossname();
+	    if ($wgetserver =~ /^[-\w]+\.(.*)$/) {
+		$wgetserver = "www.${1}";
+	    }
+	    else {
+		fatal("Tainted bossinfo $wgetserver!");
+	    }
 	}
-	else {
-	    fatal("Tainted bossinfo $www!");
-	}
-	$www  = "https://${www}";
-	#$www = "https://${www}/dev/stoller";
-	#$www = "http://golden-gw.ballmoss.com:9876/~stoller/testbed";
+	my $www  = "https://$wgetserver";
 
 	#
 	# Okay, run wget with the proper arguments. 
 	#
 	my $cmd = "wget -nv -O $copyfile ".
+	          "--no-check-certificate ".
 	          ($debug ? "--server-response " : "") .
 	          "'${www}/spewrpmtar.php3".
 	          "?nodeid=${nodeid}&file=${tarfile}&key=${keyhash}" .
 		  (defined($oldstamp) ? "&stamp=$oldstamp" : "") .
 		  (defined($oldmd5)   ? "&md5=$oldmd5" : "") .
 		  "'";
-
     
 	if ($debug) {
 	    print STDERR "$cmd\n";
@@ -645,7 +621,7 @@ sub GetTarFile($$$$$$$)
 	while (<WGET>) {
 	    print $_
 		if ($debug);
-	    
+
 	    # Ick!
 	    if ($_ =~ /^.* ERROR 304.*$/i) {
 		$nochange = 1;
