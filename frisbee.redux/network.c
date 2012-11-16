@@ -764,7 +764,9 @@ ClientNetFindServer(in_addr_t sip, in_port_t sport,
 	name.sin_addr.s_addr = htonl(sip);
 	name.sin_port = htons(sport);
 	if (connect(msock, (struct sockaddr *)&name, sizeof(name)) < 0) {
-		perror("Connecting to master server");
+		fprintf(stderr,
+			"Connecting to master server %s:%d failed: %s",
+			inet_ntoa(name.sin_addr), sport, strerror(errno));
 		close(msock);
 		return 0;
 	}
@@ -818,11 +820,15 @@ ClientNetFindServer(in_addr_t sip, in_port_t sport,
 
 	if (strncmp((char *)msg.hdr.version, MS_MSGVERS_1,
 		    sizeof(msg.hdr.version))) {
-		fprintf(stderr, "Got incorrect version from master server\n");
+		fprintf(stderr,
+			"Got incorrect version from master server %s:%d\n",
+			inet_ntoa(name.sin_addr), sport);
 		return 0;
 	}
 	if (ntohl(msg.hdr.type) != MS_MSGTYPE_GETREPLY) {
-		fprintf(stderr, "Got incorrect reply from master server\n");
+		fprintf(stderr,
+			"Got incorrect reply from master server %s:%d\n",
+			inet_ntoa(name.sin_addr), sport);
 		return 0;
 	}
 

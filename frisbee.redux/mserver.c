@@ -453,9 +453,9 @@ fetch_parent(struct in_addr *myip, struct in_addr *hostip,
 	}
 
 	if (debug)
-		info("%s: requesting %simage from %s",
+		info("%s: requesting %simage from %s:%d",
 		     ii->imageid, (statusonly ? "status of ": ""),
-		     inet_ntoa(*pip));
+		     inet_ntoa(*pip), pport);
 
 	/*
 	 * Image fetch is not in progress.
@@ -736,18 +736,21 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 			 * Since this is mirror mode, we can use the status
 			 * info we got from the earlier call.
 			 *
+			 * Note that we actually check for a different date,
+			 * not just a newer date. People often roll back
+			 * faulty images to previous versions.
+			 *
 			 * XXX need checks for other signature types.
 			 */
 			if ((reply.sigtype == MS_SIGTYPE_MTIME &&
-			     *(time_t *)reply.signature > sb.st_mtime)) {
+			     *(time_t *)reply.signature != sb.st_mtime)) {
+				uint32_t mt = *(uint32_t *)reply.signature;;
+
 				msg->body.getreply.sigtype =
 					htons(reply.sigtype);
-				if (reply.sigtype == MS_SIGTYPE_MTIME) {
-					uint32_t mt;
-					mt = *(uint32_t *)reply.signature;
+				if (reply.sigtype == MS_SIGTYPE_MTIME)
 					*(uint32_t *)reply.signature =
 						htonl(mt);
-				}
 				memcpy(msg->body.getreply.signature,
 				       reply.signature, MS_MAXSIGLEN);
 				msg->body.getreply.hisize =
@@ -758,8 +761,9 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 				if (wantstatus)
 					goto reply;
 
-				log("%s: local copy out of date, "
-				    "GET from parent", imageid);
+				log("%s: local copy (sig=%x) "
+				    "is out of date (sig=%x), GET from parent",
+				    imageid, sb.st_mtime, mt);
 				getfromparent = 1;
 			}
 		}
@@ -2188,6 +2192,9 @@ handle_igmp(void)
 {
 	static struct timeval lastquery;
 	struct timeval now, delta;
+
+	if (lastquery.tv_sec == 0)
+		gettimeofday(&lastquery, NULL);
 
 	gettimeofday(&now, NULL);
 	timersub(&now, &lastquery, &delta);
