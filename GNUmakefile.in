@@ -65,8 +65,8 @@ client-install: client
 	$(INSTALL) -m 644 $(SRCDIR)/install-tarfile.1 $(DESTDIR)$(CLIENT_MANDIR)/man1/install-tarfile.1
 	$(INSTALL_PROGRAM) $(SRCDIR)/install-rpm $(LBINDIR)/install-rpm
 	$(MAKE) -C syncd client-install
-ifneq ($(findstring CYGWIN_NT,$(SYSTEM)),CYGWIN_NT) # Filter out again...
 	$(MAKE) -C dijkstra client-install
+ifneq ($(findstring CYGWIN_NT,$(SYSTEM)),CYGWIN_NT) # Filter out again...
 	$(MAKE) -C imagezip client-install
 	$(MAKE) -C frisbee.redux client-install
 endif
