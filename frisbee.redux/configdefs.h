@@ -3,9 +3,13 @@
 
 /*
  * Maximum groups for a server process.
- * We don't use NGROUPS_MAX because it is huge on Linux (64K).
+ * We limit NGROUPS_MAX because it is huge on Linux (64K).
  */
-#define MAXGIDS	(16+1)
+#if NGROUPS_MAX < 1024
+#define MAXGIDS (NGROUPS_MAX+1)
+#else
+#define MAXGIDS	1024
+#endif
 
 #define NOUID (-1)
 
