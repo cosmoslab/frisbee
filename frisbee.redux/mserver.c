@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -114,7 +114,13 @@ main(int argc, char **argv)
 	myuid = geteuid();
 	mygid = getegid();
 
-	MasterServerLogInit();
+	if (daemonize && debug) {
+		int odebug = debug;
+		debug = 0;
+		MasterServerLogInit();
+		debug = odebug;
+	} else
+		MasterServerLogInit();
 
 	log("mfrisbeed daemon starting as %d/%d, methods=%s (debug level %d)",
 	    myuid, mygid, GetMSMethods(onlymethods), debug);
@@ -1342,7 +1348,7 @@ usage(void)
 	fprintf(stderr, "  -p <port>   port to listen on\n");
 	fprintf(stderr, "Debug:\n");
 	fprintf(stderr, "  -d          debug mode; does not daemonize\n");
-	fprintf(stderr, "  -D          dump configuration and exit\n");
+	fprintf(stderr, "  -D          force daemonizing even with debug\n");
 	fprintf(stderr, "Proxying:\n");
 	fprintf(stderr, "  -S <parent> parent name or IP\n");
 	fprintf(stderr, "  -P <pport>  parent port to contact\n");
@@ -1356,6 +1362,7 @@ static void
 get_options(int argc, char **argv)
 {
 	int ch;
+	int forcedaemonize = 0;
 
 	while ((ch = getopt(argc, argv, "AC:O:DI:MRX:x:S:P:p:i:dhQ:")) != -1)
 		switch(ch) {
@@ -1413,7 +1420,7 @@ get_options(int argc, char **argv)
 			debug++;
 			break;
 		case 'D':
-			dumpconfig = 1;
+			forcedaemonize = 1;
 			break;
 		case 'I':
 		{
@@ -1482,6 +1489,9 @@ get_options(int argc, char **argv)
 			"Error: Must specify a parent (-S) in mirror mode\n");
 		usage();
 	}
+
+	if (forcedaemonize)
+		daemonize = 1;
 }
 
 /*
