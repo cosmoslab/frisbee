@@ -337,8 +337,17 @@ copy_imageinfo(struct config_imageinfo *ii)
 		goto fail;
 	if (ii->path && (nii->path = strdup(ii->path)) == NULL)
 		goto fail;
-	if (ii->sig && (nii->sig = strdup(ii->sig)) == NULL)
-		goto fail;
+	if (ii->sig) {
+		int sz = 0;
+		if (ii->flags & CONFIG_SIG_ISMTIME)
+			sz = sizeof(time_t);
+		if (sz) {
+			if ((nii->sig = malloc(sz)) == NULL)
+				goto fail;
+		}
+		if (nii->sig)
+			memcpy(nii->sig, ii->sig, sz);
+	}
 	nii->flags = ii->flags;
 	nii->uid = ii->uid;
 	for (i = 0; i < ii->ngids; i++)
@@ -750,7 +759,7 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 			 */
 			if ((reply.sigtype == MS_SIGTYPE_MTIME &&
 			     *(time_t *)reply.signature != sb.st_mtime)) {
-				uint32_t mt = *(uint32_t *)reply.signature;;
+				uint32_t mt = *(uint32_t *)reply.signature;
 
 				msg->body.getreply.sigtype =
 					htons(reply.sigtype);
@@ -1518,7 +1527,7 @@ makesocket(int port, struct in_addr *ifip, int *tcpsockp)
 	i = 1;
 	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
 		       (char *)&i, sizeof(i)) < 0)
-		pwarning("setsockopt(SO_REUSEADDR)");;
+		pwarning("setsockopt(SO_REUSEADDR)");
 	
 	/* Create name. */
 	name.sin_family = AF_INET;
