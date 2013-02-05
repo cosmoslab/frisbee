@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2012 University of Utah and the Flux Group.
+# Copyright (c) 2000-2013 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -101,7 +101,7 @@ include $(OBJDIR)/Makeconf
 
 SUBDIRCFLAGS	= -Wall -O2 -g # -ansi -pedantic
 ifeq ($(SYSTEM),Linux)
-SUBDIRCFLAGS	+= -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -D_THREAD_SAFE -pthread
+SUBDIRCFLAGS	+= -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -D_THREAD_SAFE -DCONDVARS_WORK -pthread
 else
 ifeq ($(WITH_LTHREADS),1)
 PTHREADCFLAGS	= -D_THREAD_SAFE -I/usr/local/include/pthread/linuxthreads
