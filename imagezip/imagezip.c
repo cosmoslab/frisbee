@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -439,7 +439,7 @@ main(int argc, char *argv[])
 	struct timeval sstamp;
 	extern char build_info[];
 
-	memset(imageid, UUID_LENGTH, '\0');
+	memset(imageid, '\0', UUID_LENGTH);
 
 	gettimeofday(&sstamp, 0);
 	while ((ch = getopt(argc, argv, "vlbnNdihrs:c:z:ofI:13F:DR:S:XxH:Me:k:u:a:Z")) != -1)
@@ -729,7 +729,7 @@ main(int argc, char *argv[])
 		if (fd < 0 ||
 		    read(fd, imageid, sizeof(imageid)) != sizeof(imageid)) {
 			fprintf(stderr, "WARNING: no UUID generated\n");
-			memset(imageid, UUID_LENGTH, '\0');
+			memset(imageid, '\0', UUID_LENGTH);
 		} else {
 			char uuidstr[UUID_LENGTH*2+1];
 
