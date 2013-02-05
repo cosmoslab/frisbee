@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -436,10 +436,10 @@ read_bsdsblock(int infd, u_int32_t offset, int part, struct fs *fsp)
 		      BSDPARTNAME(part));
 
 	if (debug)
-		fprintf(stderr, "    '%c' UFS%d, superblock at %lld\n",
+		fprintf(stderr, "    '%c' UFS%d, superblock at %llu\n",
 			BSDPARTNAME(part),
 			fs->fs_magic == FS_UFS2_MAGIC ? 2 : 1,
-			sblockloc);
+			(unsigned long long)sblockloc);
 
 	/*
 	 * Copy UFS1 fields into newer, roomier UFS2 equivs that we use

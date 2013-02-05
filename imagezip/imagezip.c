@@ -747,7 +747,7 @@ main(int argc, char *argv[])
 	 * the disk or indicated partition.
 	 */
 	if (slicetype != 0) {
-		rval = read_slice(-1, slicetype, 0, 0,
+		rval = read_slice(-1, slicetype, 0, inputmaxsec,
 				  infilename, infd);
 		if (rval == -1)
 			fprintf(stderr, ", cannot process\n");
@@ -947,7 +947,6 @@ int
 read_image(u_int32_t bbstart, int pstart, u_int32_t extstart)
 {
 	int		i, rval = 0;
-	struct slicemap	*smap;
 	struct doslabel doslabel;
 
 	if (read_doslabel(infd, bbstart, pstart, &doslabel) != 0)
@@ -1006,7 +1005,6 @@ read_image(u_int32_t bbstart, int pstart, u_int32_t extstart)
 			}
 		}
 
-		smap = getslicemap(type);
 		switch (type) {
 		case DOSPTYP_EXT:
 		case DOSPTYP_EXT_LBA:
@@ -1541,8 +1539,8 @@ dumpranges(int verbose)
 		range = range->next;
 	}
 	fprintf(stderr,
-		"Total Number of Valid Sectors: %d (bytes %lld) in %d ranges\n",
-		total, sectobytes(total), nranges);
+		"Total Number of Valid Sectors: %d (bytes %llu) in %d ranges\n",
+		total, (unsigned long long)sectobytes(total), nranges);
 }
 
 /*
@@ -1766,8 +1764,10 @@ applyfixups(off_t offset, off_t size, void *data)
 				"Applying %sfixup [%llu-%llu] to [%llu-%llu]\n",
 				(clen == (u_int32_t)fp->size) ?
 				"full " : "partial ",
-				fp->offset, fp->offset+fp->size,
-				offset, offset+size);
+				(unsigned long long)fp->offset,
+				(unsigned long long)fp->offset+fp->size,
+				(unsigned long long)offset,
+				(unsigned long long)offset+size);
 
 		/* don't mess with data arg for functions */
 		if (fp->func != NULL)
@@ -1828,9 +1828,10 @@ dumpfixups(int verbose)
 		fp = range->data;
 
 		if (verbose) {
-			fprintf(stderr, "  %12d    %9d (%12lld/%9lld)\n",
+			fprintf(stderr, "  %12d    %9d (%12llu/%9llu)\n",
 				range->start, range->size,
-				fp->offset, fp->size);
+				(unsigned long long)fp->offset,
+				(unsigned long long)fp->size);
 		}
 		nfixups++;
 		range = range->next;
@@ -1967,7 +1968,8 @@ compress_image(void)
 		 */
 		if (debug > 1 && debug < 3) {
 			fprintf(stderr,
-				"Compressing range: %14lld --> ", inputoffset);
+				"Compressing range: %14llu --> ",
+				(unsigned long long)inputoffset);
 			fflush(stderr);
 		}
 
@@ -1975,8 +1977,9 @@ compress_image(void)
 				      &full, &blkhdr->size);
 
 		if (debug > 2) {
-			fprintf(stderr, "%14lld -> %12lld %10ld %10u %10d %d\n",
-				inputoffset, inputoffset + size,
+			fprintf(stderr, "%14llu -> %12llu %10ld %10u %10d %d\n",
+				(unsigned long long)inputoffset,
+				(unsigned long long)inputoffset + size,
 				prange->start - inputminsec,
 				bytestosec(size),
 				blkhdr->size, full);
@@ -1984,8 +1987,9 @@ compress_image(void)
 		else if (debug > 1) {
 			gettimeofday(&estamp, 0);
 			estamp.tv_sec -= cstamp.tv_sec;
-			fprintf(stderr, "%12lld in %ld seconds.\n",
-				inputoffset + size, (long)estamp.tv_sec);
+			fprintf(stderr, "%12llu in %ld seconds.\n",
+				(unsigned long long)inputoffset + size,
+				(long)estamp.tv_sec);
 		}
 		else if (dots && full) {
 			static int pos;
@@ -1994,8 +1998,9 @@ compress_image(void)
 			if (pos++ >= 60) {
 				gettimeofday(&estamp, 0);
 				estamp.tv_sec -= cstamp.tv_sec;
-				fprintf(stderr, " %12lld %4ld\n",
-					inputoffset+size, (long)estamp.tv_sec);
+				fprintf(stderr, " %12llu %4ld\n",
+					(unsigned long long)inputoffset+size,
+					(long)estamp.tv_sec);
 				pos = 0;
 			}
 			fflush(stderr);
@@ -2008,8 +2013,8 @@ compress_image(void)
 		 * This should never happen!
 		 */
 		if (size & (secsize - 1)) {
-			fprintf(stderr, "  Not on a sector boundry at %lld\n",
-				inputoffset);
+			fprintf(stderr, "  Not on a sector boundry at %llu\n",
+				(unsigned long long)inputoffset);
 			return 1;
 		}
 
@@ -2361,11 +2366,13 @@ compress_status(int sig)
 		(stamp.tv_usec - cstamp.tv_usec) / 1000;
 	fprintf(stderr,
 		"%llu input (%llu compressed) bytes in %u.%03u seconds\n",
-		inputoffset, bytescompressed, ms / 1000, ms % 1000);
+		(unsigned long long)inputoffset,
+		bytescompressed, ms / 1000, ms % 1000);
 	if (badsectors)
 		fprintf(stderr, "%d bad input sectors skipped\n", badsectors);
 	if (sig == 0) {
-		fprintf(stderr, "Image size: %llu bytes\n", datawritten);
+		fprintf(stderr, "Image size: %llu bytes\n",
+			(unsigned long long)datawritten);
 		bps = (bytescompressed * 1000) / ms;
 		fprintf(stderr, "%.3fMB/second compressed\n",
 			(double)bps / (1024*1024));
@@ -2477,7 +2484,7 @@ compress_chunk(off_t off, off_t size, int *full, uint32_t *subblksize)
 		if (cc != count && !tileof) {
 			fprintf(stderr, "Bad count in read, %d != %d at %llu\n",
 				cc, count,
-				off+total);
+				(unsigned long long)off+total);
 			exit(1);
 		}
 

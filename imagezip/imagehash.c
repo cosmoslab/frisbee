@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -662,7 +662,8 @@ checkhash(char *name, struct hashinfo *hinfo)
 	if (badhashes)
 		printf("%s: %u regions (%d chunks) had bad hashes, "
 		       "%llu bytes affected\n",
-		       name, badhashes, badchunks, badhashdata);
+		       name, badhashes, badchunks,
+		       (unsigned long long)badhashdata);
 	dump_readbufs();
 #ifdef TIMEIT
 	printf("%llu bytes: read cycles: %llu, hash cycles: %llu, cmp cycles: %llu\n",
@@ -757,12 +758,13 @@ fullcmp(void *p1, void *p2, off_t sz, uint32_t soff)
 			if (boff != -1 &&
 			    off+1 < sz && ip[off+1] == dp[off+1]) {
 				fprintf(stderr, " [%llu-%llu] (sect %u): bad",
-					byoff+boff, byoff+off-1, soff);
+					(unsigned long long)byoff+boff,
+					(unsigned long long)byoff+off-1, soff);
 				reloc = hasrelocs(byoff+boff, off-boff);
 				if (reloc)
 					fprintf(stderr, " (overlaps reloc [%llu-%llu])",
-						sectobytes(reloc->sector)+reloc->sectoff,
-						sectobytes(reloc->sector)+reloc->sectoff+reloc->size-1);
+						(unsigned long long)sectobytes(reloc->sector)+reloc->sectoff,
+						(unsigned long long)sectobytes(reloc->sector)+reloc->sectoff+reloc->size-1);
 				fprintf(stderr, "\n");
 				if (detail > 1) {
 					fprintf(stderr, "  image: ");
@@ -780,12 +782,14 @@ fullcmp(void *p1, void *p2, off_t sz, uint32_t soff)
 		off++;
 	}
 	if (boff != -1) {
-		fprintf(stderr, " [%llu-%llu] bad", byoff+boff, byoff+off-1);
+		fprintf(stderr, " [%llu-%llu] bad",
+			(unsigned long long)byoff+boff,
+			(unsigned long long)byoff+off-1);
 		reloc = hasrelocs(byoff+boff, off-boff);
 		if (reloc)
 			fprintf(stderr, " (overlaps reloc [%llu-%llu])",
-				sectobytes(reloc->sector)+reloc->sectoff,
-				sectobytes(reloc->sector)+reloc->sectoff+reloc->size-1);
+				(unsigned long long)sectobytes(reloc->sector)+reloc->sectoff,
+				(unsigned long long)sectobytes(reloc->sector)+reloc->sectoff+reloc->size-1);
 		fprintf(stderr, "\n");
 		if (detail > 1) {
 			fprintf(stderr, "  image: ");
@@ -1429,7 +1433,7 @@ readblock(readbuf_t *rbuf)
 		else
 			fprintf(stderr,
 				"%s: incomplete read (%d) at sect %u\n",
-				devfile, cc, rbuf->region.start);
+				devfile, (int)cc, rbuf->region.start);
 		exit(3);
 	}
 #ifdef TIMEIT
