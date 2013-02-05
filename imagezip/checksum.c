@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2009-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -81,19 +81,28 @@ init_checksum(char *keyfile)
 		return 0;
 	}
 
-	fscanf(file, "%1024s", str);
+	if (fscanf(file, "%1024s", str) != 1)
+		goto bad;
 	BN_hex2bn(&signature_key->n, str);
-	fscanf(file, "%1024s", str);
+	if (fscanf(file, "%1024s", str) != 1)
+		goto bad;
 	BN_hex2bn(&signature_key->e, str);
-	fscanf(file, "%1024s", str);
+	if (fscanf(file, "%1024s", str) != 1)
+		goto bad;
 	BN_hex2bn(&signature_key->dmp1, str);
-	fscanf(file, "%1024s", str);
+	if (fscanf(file, "%1024s", str) != 1)
+		goto bad;
 	BN_hex2bn(&signature_key->dmq1, str);
-	fscanf(file, "%1024s", str);
+	if (fscanf(file, "%1024s", str) != 1)
+		goto bad;
 	BN_hex2bn(&signature_key->iqmp, str);
 	fclose(file);
-
 	return 1; 
+
+ bad:
+	fclose(file);
+	fprintf(stderr, "%s: could not parse key\n", keyfile);
+	return 0;
 }
 
 void
@@ -205,7 +214,12 @@ encrypt_readkey(char *keyfile, unsigned char *keybuf, int buflen)
 			keyfile);
 		return 0;
 	}
-	fgets(akeybuf, sizeof(akeybuf), fp);
+	if (fgets(akeybuf, sizeof(akeybuf), fp) == NULL) {
+		fprintf(stderr, "%s: cannot read encryption key\n",
+			keyfile);
+		fclose(fp);
+		return 0;
+	}
 	fclose(fp);
 	if ((cp = strrchr(akeybuf, '\n')))
 		*cp = '\0';
