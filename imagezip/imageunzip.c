@@ -225,7 +225,7 @@ static volatile int	writebufwanted;
 /* stats */
 unsigned long		maxbufsalloced;
 unsigned long long	maxmemalloced;
-unsigned long		splits;
+unsigned long		memsplits;
 
 #ifdef WITH_CRYPTO
 /* security */
@@ -352,8 +352,8 @@ dump_writebufs(void)
 {
 	fprintf(stderr, "%lu max bufs, %llu max memory\n",
 		maxbufsalloced, maxmemalloced);
-	fprintf(stderr, "%lu buffers split\n",
-		splits);
+	fprintf(stderr, "%lu buffers split, %lu blocked on buf memory\n",
+		memsplits, decompblocks);
 }
 
 static writebuf_t *
@@ -435,7 +435,7 @@ split_writebuf(writebuf_t *wbuf, off_t doff, int dowait)
 
 	assert(wbuf->buf != NULL);
 
-	splits++;
+	memsplits++;
 	assert(doff < wbuf->size);
 	size = wbuf->size - doff;
 	nwbuf = alloc_writebuf(wbuf->offset+doff, size, 0, dowait);
@@ -659,7 +659,8 @@ main(int argc, char *argv[])
 #ifndef NOTHREADS
 		case 'W':
 			maxwritebufmem = (unsigned long long)atoi(optarg);
-			if (maxwritebufmem >= MAXWRITEBUFMEM)
+			if (MAXWRITEBUFMEM > 0 &&
+			    maxwritebufmem >= MAXWRITEBUFMEM)
 				maxwritebufmem = MAXWRITEBUFMEM;
 			maxwritebufmem *= (1024 * 1024);
 			break;
