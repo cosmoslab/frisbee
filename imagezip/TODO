@@ -226,3 +226,14 @@ Things to do for image*:
    and that is true. But in those cases the disk is clearly fast enough to
    keep up and it doesn't need any help! So it will benefit the cases that
    matter.
+
+14. Support for TRIM.
+   Both FreeBSD and Linux have block-level support for erase operations
+   that use the TRIM interface on SSDs. Imagezip and imageunzip/frisbee
+   could use this. For imagezip, this would involve ensuring that free
+   ranges are in erase-sized (256K) pieces and appropriately aligned
+   where possible. This would allow imageunzip to inform the OS when it
+   encounters an aligned, appropriate-sized free range that can be erased.
+   Hmm...though it appears that FreeBSD doesn't export an "erase" command
+   to user-mode, only to filesystems. Linux does, at least "hdparm" supports
+   "--trim-sector-ranges" which uses it to erase sections of a disk.
