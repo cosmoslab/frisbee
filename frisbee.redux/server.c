@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -58,6 +58,7 @@ int		maxburstsize = SERVER_DYNBURST_SIZE;
 int		burstinterval = SERVER_BURST_GAP;
 unsigned long	bandwidth;
 int		portnum;
+int		sockbufsize = SOCKBUFSIZE;
 int		killme;
 int		blockslost;
 int		clientretries;
@@ -697,8 +698,9 @@ ServerRecvThread(void *arg)
 static void
 PlayFrisbee(void)
 {
-	int		chunk, block, blockcount, cc, j, idlelastloop = 0;
-	int		startblock, lastblock, throttle = 0;
+	int		chunk = 0, block = 0;
+	int		blockcount, cc, j, idlelastloop = 1;
+	int		startblock, lastblock, throttle = 0, thisburst = 0;
 	Packet_t	packet, *p = &packet;
 	char		*databuf;
 	off_t		offset;
@@ -725,17 +727,24 @@ PlayFrisbee(void)
 
 			gettimeofday(&stamp, 0);
 
-			/*
-			 * Restart an interval on every idle
-			 */
-			if (burstinterval > 0) {
-				addusec(&startnext, &stamp, burstinterval);
-				throttle = 0;
+			/* Record interval termination */
+			if (burstinterval > 0 && thisburst > burstsize) {
+				EVENT(1, EV_LONGBURST2,
+				      mcastaddr,
+				      thisburst,
+				      burstsize,
+				      chunk, block);
+				thisburst = 0;
 			}
 
 			/* If zero, never exit */
-			if (timeout == 0)
+			if (timeout == 0) {
+				if (!idlelastloop) {
+					DOSTAT(goesidle++);
+					idlelastloop = 1;
+				}
 				continue;
+			}
 			
 #ifdef STATS
 			/* If less than zero, exit when last cilent leaves */
@@ -762,7 +771,19 @@ PlayFrisbee(void)
 			}
 			continue;
 		}
-		idlelastloop = 0;
+		/*
+		 * If coming out of idle, restart the interval
+		 */
+		if (idlelastloop) {
+			if (burstinterval > 0) {
+				struct timeval stamp;
+
+				gettimeofday(&stamp, 0);
+				addusec(&startnext, &stamp, burstinterval);
+				throttle = thisburst = 0;
+			}
+			idlelastloop = 0;
+		}
 		
 		lastblock = startblock + blockcount;
 
@@ -774,7 +795,6 @@ PlayFrisbee(void)
 			int	readcount;
 			int	readbytes;
 			int	resends;
-			int	thisburst = 0;
 			int	resid = 0;
 #if defined(NEVENTS) || defined(STATS)
 			struct timeval rstamp;
@@ -939,7 +959,7 @@ main(int argc, char **argv)
 	off_t		fsize;
 	void		*ignored;
 
-	while ((ch = getopt(argc, argv, "dhp:m:i:tbDT:R:B:G:L:W:K:")) != -1)
+	while ((ch = getopt(argc, argv, "dhp:k:m:i:tbDT:R:B:G:L:W:K:")) != -1)
 		switch(ch) {
 		case 'b':
 			broadcast++;
@@ -953,6 +973,15 @@ main(int argc, char **argv)
 			portnum = atoi(optarg);
 			break;
 			
+		case 'k':
+			sockbufsize = atoi(optarg);
+			if (sockbufsize < 1)
+				sockbufsize = 1;
+			else if (sockbufsize > 1024)
+				sockbufsize = 1024;
+			sockbufsize *= 1024 * 1024;
+			break;
+
 		case 'm':
 			inet_aton(optarg, &mcastaddr);
 			break;

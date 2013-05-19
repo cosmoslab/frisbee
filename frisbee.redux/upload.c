@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -61,6 +61,7 @@ static in_addr_t proxyip = 0;
 /* Globals */
 int debug = 0;
 int portnum;
+int sockbufsize = SOCKBUFSIZE;
 
 /* XXX not used but needed by network.c */
 struct in_addr	mcastaddr;

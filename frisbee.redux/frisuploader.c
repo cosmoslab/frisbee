@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -52,6 +52,7 @@ static int sock = -1;
 /* Globals */
 int debug = 0;
 int portnum;
+int sockbufsize = SOCKBUFSIZE;
 
 static void usage(void);
 static void parse_args(int argc, char **argv);

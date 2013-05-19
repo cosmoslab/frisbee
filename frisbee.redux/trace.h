@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2002-2012 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -108,15 +108,16 @@ if (evlogging >= (l)) { \
 #define EV_REQRANGE	37
 #define EV_OVERRUN	38
 #define EV_LONGBURST	39
-#define EV_DUPCHUNK	40
-#define EV_CLIWRSTATUS	41
-#define EV_CLIFOUNDROOM	42
-#define EV_CLIREUSE	43
-#define EV_CLIDUBPROMO	44
-#define EV_CLIDCSTAT	45
-#define EV_CLIREDO	46
+#define EV_LONGBURST2	40
+#define EV_DUPCHUNK	41
+#define EV_CLIWRSTATUS	42
+#define EV_CLIFOUNDROOM	43
+#define EV_CLIREUSE	44
+#define EV_CLIDUBPROMO	45
+#define EV_CLIDCSTAT	46
+#define EV_CLIREDO	47
 
-#define EV_MAX		46
+#define EV_MAX		47
 
 extern void ClientTraceInit(char *file);
 extern void ClientTraceReinit(char *file);

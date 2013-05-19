@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -102,7 +102,7 @@ GetSockbufSize(void)
 		if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
 			pfatal("Could not allocate a socket");
 
-		for (sbsize = SOCKBUFSIZE; sbsize > 0; sbsize -= (16*1024)) {
+		for (sbsize = sockbufsize; sbsize > 0; sbsize -= (16*1024)) {
 			int i = sbsize;
 			if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF,
 				       &i, sizeof(i)) >= 0)
@@ -113,7 +113,7 @@ GetSockbufSize(void)
 			unsigned int ilen = sizeof(i);
 			if (getsockopt(sock, SOL_SOCKET, SO_SNDBUF,
 				       &i, &ilen) < 0)
-				i = SOCKBUFSIZE;
+				i = sockbufsize;
 			sbsize = i;
 		}
 		else {
@@ -135,7 +135,7 @@ GetSockbufSize(void)
 		}
 		close(sock);
 #else
-		sbsize = SOCKBUFSIZE;
+		sbsize = sockbufsize;
 #endif
 		log("Maximum socket buffer size of %d bytes", sbsize);
 	}

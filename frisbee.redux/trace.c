@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2002-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -203,6 +203,12 @@ TraceDump(int serverrel, int level)
 				break;
 			case EV_LONGBURST:
 				fprintf(fd, "finished long burst %u (>%u) "
+					"after %u[%u]\n",
+					ptr->args[0], ptr->args[1],
+					ptr->args[2], ptr->args[3]);
+				break;
+			case EV_LONGBURST2:
+				fprintf(fd, "idle stops long burst %u (>%u) "
 					"after %u[%u]\n",
 					ptr->args[0], ptr->args[1],
 					ptr->args[2], ptr->args[3]);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -473,3 +473,4 @@ extern struct in_addr	mcastaddr;
 extern struct in_addr	mcastif;
 extern char	       *filename;
 extern int		clockres;
+extern int		sockbufsize;

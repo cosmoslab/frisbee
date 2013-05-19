@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2012 University of Utah and the Flux Group.
+# Copyright (c) 2000-2013 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -279,7 +279,8 @@ client-install: client
 	$(INSTALL_PROGRAM) frisupload $(DESTDIR)$(CLIENT_BINDIR)
 
 clean:
-	/bin/rm -f *.o *.a frisbee frisbeed mfrisbeed *.debug
+	/bin/rm -f *.o *.a *.debug
+	/bin/rm -f frisbee frisbeed mfrisbeed frisupload frisuploadd
 	/bin/rm -f frisbee.tar frisbee.tar.gz
 	/bin/rm -rf frisbee-dist
 

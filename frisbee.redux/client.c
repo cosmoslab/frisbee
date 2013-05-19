@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -77,6 +77,7 @@ int		randomize = 1;
 int		zero = 0;
 int		keepalive;
 int		portnum;
+int		sockbufsize = SOCKBUFSIZE;
 struct in_addr	mcastaddr;
 struct in_addr	mcastif;
 char		*imageid;
@@ -199,6 +200,7 @@ char *usagestr =
  " -e enckeyfile   File containing secret used for encrypting image\n"
  "\n"
  "tuning options (if you don't know what they are, don't use em!):\n"
+ " -k MB           Max MB of memory for a socket buffer.\n"
  " -C MB           Max MB of memory to use for network chunk buffering.\n"
  " -W MB           Max MB of memory to use for disk write buffering.\n"
  " -M MB           Max MB of memory to use for buffering\n"
@@ -242,7 +244,7 @@ main(int argc, char **argv)
 	char	*sig_keyfile = 0, *enc_keyfile = 0, *uuidstr = 0;
 	int	islocalproxy = 0;
 
-	while ((ch = getopt(argc, argv, "dqhp:m:s:i:tbznT:r:E:D:C:W:S:M:R:I:ONc:e:u:K:B:F:Q:P:X:f")) != -1)
+	while ((ch = getopt(argc, argv, "dqhp:m:s:i:tbznT:r:E:D:C:W:S:M:R:I:ONc:e:u:K:B:F:Q:P:X:fk:")) != -1)
 		switch(ch) {
 		case 'd':
 			debug++;
@@ -350,6 +352,15 @@ main(int argc, char **argv)
 
 		case 'D':
 			dostype = atoi(optarg);
+			break;
+
+		case 'k':
+			mem = atoi(optarg);
+			if (mem < 1)
+				mem = 1;
+			else if (mem > 1024)
+				mem = 1024;
+			sockbufsize = mem * 1024 * 1024;
 			break;
 
 		case 'C':

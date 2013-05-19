@@ -93,6 +93,7 @@ static int	igmpqueryinterval = 0;
 
 /* XXX the following just keep network.c happy */
 int		portnum = MS_PORTNUM;
+int		sockbufsize = SOCKBUFSIZE;
 struct in_addr	mcastaddr;
 struct in_addr	mcastif;
 
