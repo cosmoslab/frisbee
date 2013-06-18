@@ -818,6 +818,22 @@ main(int argc, char *argv[])
 				exit(1);
 			}
 			outcanseek = 1;
+			/*
+			 * XXX retrywrites is a hack to avoid transient NFS
+			 * write errors: we use fsync after every write to
+			 * check that it worked, re-trying if not. However,
+			 * some devices (e.g., /dev/null) do not support
+			 * fsync, so check for that here and disable the
+			 * retry if necessary.
+			 */
+			if (retrywrites &&
+			    fsync(outfd) < 0 && errno == EINVAL) {
+				fprintf(stderr,
+					"WARNING: '%s' does not support fsync,"
+					" write errors may not be detected "
+					"or corrected.\n", outfilename);
+				retrywrites = 0;
+			}
 		}
 		else {
 			outfd = fileno(stdout);
