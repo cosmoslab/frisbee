@@ -192,7 +192,6 @@ recv_file()
 		setitimer(ITIMER_REAL, &it, NULL);
 	}
 
-	gettimeofday(&st, NULL);	/* XXX for early errors */
 	wbuf = malloc(bufsize);
 	if (wbuf == NULL) {
 		error("Could not allocate %d byte buffer, try using -b",
