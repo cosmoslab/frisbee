@@ -116,7 +116,11 @@ SERVEROBJS	= server.o $(SHAREDOBJS)
 # Default master server config
 MSERVERFLAGS	= -DUSE_NULL_CONFIG $(CFLAGS) -I$(OBJDIR)
 MSERVEROBJS	= mserver.o $(SHAREDOBJS) config.o config_null.o
+ifeq ($(SYSTEM),Linux)
+MSERVERLIBS	= -lrt
+else
 MSERVERLIBS	= 
+endif
 
 # Master server based image uploader client
 UPLOADFLAGS	= $(CFLAGS)
@@ -200,10 +204,11 @@ endif
 #CFLAGS		+= -DNEVENTS=500000
 
 # Turn on client event handling
-#CFLAGS		+= -DDOEVENTS
-#CLIENTOBJS	+= event.o $(OBJDIR)/event/lib/event.o $(OBJDIR)/event/lib/util.o
-#CLIENTLIBS	+= `elvin-config --libs vin4c`
-#EVENTFLAGS	= $(CFLAGS) `elvin-config --cflags vin4c` -I$(TESTBED_SRCDIR)
+# XXX renaming of PacketSend is to avoid a namespace collision with pubsub
+#CFLAGS		+= -DDOEVENTS -DPacketSend=_frisPacketSend
+#CLIENTOBJS	+= event.o $(OBJDIR)/lib/event/event.o $(OBJDIR)/lib/event/util.o
+#CLIENTLIBS	+= -lpubsub
+#EVENTFLAGS	= $(CFLAGS) -I/usr/local/include/pubsub -I$(TESTBED_SRCDIR)
 
 frisbee-debug: $(CLIENTOBJS)
 	$(CC) $(LDFLAGS) $(CLIENTFLAGS) $(CLIENTOBJS) $(CLIENTLIBS) $(IUZLIBS) -o $@

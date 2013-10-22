@@ -47,6 +47,9 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <assert.h>
+#ifdef WITH_IGMP
+#include <sys/time.h>
+#endif
 #include "decls.h"
 #include "utils.h"
 #include "configdefs.h"

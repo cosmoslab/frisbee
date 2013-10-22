@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2003 University of Utah and the Flux Group.
+ * Copyright (c) 2002-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -28,6 +28,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -37,7 +38,7 @@
 #include <sys/time.h> 
 
 #include "lib/libtb/tbdefs.h"
-#include "event/lib/event.h"
+#include "lib/event/event.h"
 
 #include "decls.h"
 #include "log.h"
@@ -330,7 +331,7 @@ EventInit(char *server)
 	tuple->site      = ADDRESSTUPLE_ANY;
 	tuple->group     = ADDRESSTUPLE_ANY;
 	tuple->expt      = ADDRESSTUPLE_ANY;
-	tuple->objtype   = TBDB_OBJECTTYPE_FRISBEE;
+	tuple->objtype   = TBDB_OBJECTTYPE_CUSTOM;
 	tuple->objname   = ADDRESSTUPLE_ANY;
 	tuple->eventtype = ADDRESSTUPLE_ANY;
 

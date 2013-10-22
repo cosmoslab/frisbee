@@ -581,17 +581,17 @@ main(int argc, char **argv)
 		    event.data.start.chunkbufs <= MAXCHUNKBUFS)
 			maxchunkbufs = event.data.start.chunkbufs;
 		else
-			maxchunkbufs = MAXCHUNKBUFS;
+			maxchunkbufs = DEFCHUNKBUFS;
 		if (event.data.start.writebufmem >= 0 &&
 		    event.data.start.writebufmem < MAXWRITEBUFMEM)
 			maxwritebufmem = event.data.start.writebufmem;
 		else
-			maxwritebufmem = MAXWRITEBUFMEM;
+			maxwritebufmem = DEFWRITEBUFMEM;
 		if (event.data.start.maxmem >= 0 &&
 		    event.data.start.maxmem < MAXMEMUSE)
 			maxmem = event.data.start.maxmem;
 		else
-			maxmem = MAXMEMUSE;
+			maxmem = 0;
 		if (event.data.start.readahead >= 0 &&
 		    event.data.start.readahead <= maxchunkbufs)
 			maxreadahead = event.data.start.readahead;
