@@ -359,6 +359,19 @@ ServerNetInit(void)
 	CommonInit(1);
 	isclient = 0;
 
+#ifdef linux
+	/*
+	 * Enabled extended error reporting so that we get back ENOBUFS
+	 * when we overrun the sent socket or NIC send buffers.
+	 * For now we just do this on the client.
+	 */
+	{
+		int i = 1;
+		if (setsockopt(sock, SOL_IP, IP_RECVERR, &i, sizeof(i)) < 0)
+			pwarning("Could not enable extended errors");
+	}
+#endif
+
 	return 1;
 }
 
@@ -485,6 +498,10 @@ PacketReceive(Packet_t *p)
 	return 0;
 }
 
+#ifndef MSG_DONTWAIT
+#define MSG_DONTWAIT 0
+#endif
+
 /*
  * We use blocking sends since there is no point in giving up. All packets
  * go to the same place, whether client or server.
@@ -496,7 +513,7 @@ void
 PacketSend(Packet_t *p, int *resends)
 {
 	struct sockaddr_in to;
-	int		   len, delays;
+	int		   len, delays, rc;
 
 	len = sizeof(p->hdr) + p->hdr.datalen;
 	p->hdr.srcip = myipaddr.s_addr;
@@ -506,14 +523,22 @@ PacketSend(Packet_t *p, int *resends)
 	to.sin_addr.s_addr = mcastaddr.s_addr;
 
 	delays = 0;
-	while (sendto(sock, (void *)p, len, 0, 
-		      (struct sockaddr *)&to, sizeof(to)) < 0) {
-		if (errno != ENOBUFS)
+	while ((rc = sendto(sock, (void *)p, len, MSG_DONTWAIT,
+			    (struct sockaddr *)&to, sizeof(to))) <= 0) {
+		if (rc < 0 && !(errno == ENOBUFS || errno == EAGAIN))
 			pfatal("PacketSend(sendto)");
 
 		/*
-		 * ENOBUFS means we ran out of mbufs. Okay to sleep a bit
-		 * to let things drain.
+		 * ENOBUFS (BSD) or EAGAIN (Linux, because we set DONTWAIT)
+		 * means there was not enough socket space for the packet.
+		 * Okay to sleep a bit to let things drain.
+		 *
+		 * Note that on BSD, ENOBUFS is also returned when the NIC
+		 * send buffers are full, so we should never lose a packet
+		 * on the send path.
+		 *
+		 * On Linux, we get this behavior as well by turning on
+		 * the extended error message passing (IP_RECVERR).
 		 */
 		delays++;
 		fsleep(nobufdelay);
