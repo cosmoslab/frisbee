@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -102,6 +102,7 @@ static long		outputmaxsec	= 0;
  */
 #define SECALIGN(p)	(void *)(((uintptr_t)(p) + (SECSIZE-1)) & ~(SECSIZE-1))
 #define ISSECALIGNED(p)	(((uintptr_t)(p) & (SECSIZE-1)) == 0)
+#define ISSECMULT(s)	(((size_t)(s) & (SECSIZE-1)) == 0)
 
 #define OUTSIZE (256 * 1024)
 static char	 zeros[OUTSIZE+SECSIZE];
@@ -1816,6 +1817,7 @@ writedata(off_t offset, size_t size, void *buf)
 	ssize_t	cc;
 
 	assert(ISSECALIGNED(buf));
+	assert(ISSECMULT(size) || !directio);
 
 	if (offset != nextwriteoffset)
 		totalseekops++;
@@ -2123,7 +2125,14 @@ applyrelocs(off_t offset, size_t size, void *buf)
 				assert(reloc->sectoff == 0);
 				assert(reloc->size < SECSIZE);
 				assert(roffset+SECSIZE == offset+size);
-				nsize -= (SECSIZE - reloc->size);
+				/*
+				 * If we are using O_DIRECT, the size must be a multiple
+				 * of SECSIZE. So in this case, we do not adjust the size
+				 * and write out the padding as well (which imagezip has
+				 * thoughtfully included in the image and zeroed already).
+				 */
+				if (!directio)
+					nsize -= (SECSIZE - reloc->size);
 				break;
 			default:
 				fprintf(stderr,
