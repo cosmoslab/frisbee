@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -59,7 +59,7 @@ conn_accept_tcp(int sock, struct in_addr *client)
 
 	newconn = malloc(sizeof *newconn);
 	if (newconn == NULL) {
-		log("Out of memory");
+		FrisLog("Out of memory");
 		return NULL;
 	}
 
@@ -67,14 +67,14 @@ conn_accept_tcp(int sock, struct in_addr *client)
 	len = sizeof(sin);
 	nsock = accept(sock, (struct sockaddr *)&sin, &len);
 	if (nsock < 0) {
-		pwarning("accept");
+		FrisPwarning("accept");
 		free(newconn);
 		return NULL;
 	}
 	if (client->s_addr != INADDR_ANY) {
 		if (sin.sin_addr.s_addr != client->s_addr) {
-			error("Reject connection from %s",
-			      inet_ntoa(sin.sin_addr));
+			FrisError("Reject connection from %s",
+				  inet_ntoa(sin.sin_addr));
 			close(nsock);
 			goto again;
 		}
@@ -93,7 +93,7 @@ conn_open(in_addr_t addr, in_port_t port, int usessl)
 	conn *newconn = malloc(sizeof *newconn);
 
 	if (newconn == NULL) {
-		log("Out of memory");
+		FrisLog("Out of memory");
 		return NULL;
 	}
 
@@ -107,15 +107,15 @@ conn_open(in_addr_t addr, in_port_t port, int usessl)
 
 		sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
 		if (sock < 0) {
-			pwarning("%s:%d socket",
-				 inet_ntoa(servaddr.sin_addr), port);
+			FrisPwarning("%s:%d socket",
+				     inet_ntoa(servaddr.sin_addr), port);
 			free(newconn);
 			return NULL;
 		}
 		if (connect(sock, (struct sockaddr *)&servaddr,
 			    sizeof(servaddr)) < 0) {
-			pwarning("%s:%d connect",
-				 inet_ntoa(servaddr.sin_addr), port);
+			FrisPwarning("%s:%d connect",
+				     inet_ntoa(servaddr.sin_addr), port);
 			close(sock);
 			free(newconn);
 			return NULL;
@@ -141,13 +141,13 @@ conn_open(in_addr_t addr, in_port_t port, int usessl)
 
 		bio = BIO_new_connect(bioname);
 		if (!bio) {
-			log("Error creating connection BIO");
+			FrisLog("Error creating connection BIO");
 			SSL_CTX_free(ctx);
 			free(newconn);
 			return NULL;
 		}
 		if (BIO_do_connect(bio) <= 0) {
-			log("Error connecting to remote machine.");
+			FrisLog("Error connecting to remote machine.");
 			BIO_free(bio);
 			SSL_CTX_free(ctx);
 			free(newconn);
@@ -157,7 +157,7 @@ conn_open(in_addr_t addr, in_port_t port, int usessl)
 		ssl = SSL_new(ctx);
 		SSL_set_bio(ssl, bio, bio);
 		if (SSL_connect(ssl) <= 0) {
-			log("Error connecting SSL object.");
+			FrisLog("Error connecting SSL object.");
 			SSL_free(ssl);
 			BIO_free(bio);
 			SSL_CTX_free(ctx);
@@ -172,9 +172,9 @@ conn_open(in_addr_t addr, in_port_t port, int usessl)
 
 		err = post_connection_check(ssl, inet_ntoa(in));
 		if (err != X509_V_OK) {
-			log("Error: peer certificate: %s",
-			    X509_verify_cert_error_string(err));
-			log("Error checking SSL object after connection.");
+			FrisLog("Error: peer certificate: %s",
+				X509_verify_cert_error_string(err));
+			FrisLog("Error checking SSL object after connection.");
 			conn_close(newconn);
 			return NULL;
 		}
@@ -302,7 +302,7 @@ void
 init_OpenSSL(void)
 {
 	if (!SSL_library_init())
-		fatal("Error: OpenSSL initialization failed.");
+		FrisFatal("Error: OpenSSL initialization failed.");
 	SSL_load_error_strings();
 }
 
@@ -319,12 +319,12 @@ pem_passwd_cb(char *buf, int size, int flag, void *userdata)
 {
 	int ret;
 
-	log("PEM password callback called.");
+	FrisLog("PEM password callback called.");
 	ret = snprintf(buf, size, PASSWORD);
 	if (ret < 0)
-		log("Error: Could not set password in callback.");
+		FrisLog("Error: Could not set password in callback.");
 	else if (ret >= size)
-		log("Warning: Password was trucated in callback.");
+		FrisLog("Warning: Password was trucated in callback.");
 
 	return strlen(PASSWORD);
 }
@@ -339,13 +339,13 @@ verify_callback(int ok, X509_STORE_CTX * store)
 		int depth = X509_STORE_CTX_get_error_depth(store);
 		int err = X509_STORE_CTX_get_error(store);
 
-		log("Error: Certificate at depth: %d", depth);
+		FrisLog("Error: Certificate at depth: %d", depth);
 		X509_NAME_oneline(X509_get_issuer_name(cert), data, MAXLINE);
-		log("Error:    issuer   = %s", data);
+		FrisLog("Error:    issuer   = %s", data);
 		X509_NAME_oneline(X509_get_subject_name(cert), data, MAXLINE);
-		log("Error:    subject  = %s", data);
-		log("Error:    err %d:%s\n",
-		    err, X509_verify_cert_error_string(err));
+		FrisLog("Error:    subject  = %s", data);
+		FrisLog("Error:    err %d:%s\n",
+			err, X509_verify_cert_error_string(err));
 	}
 
 	return ok;
@@ -360,14 +360,14 @@ setup_client_ctx(void)
 	SSL_CTX_set_default_passwd_cb(ctx, pem_passwd_cb);
 	SSL_CTX_set_mode(ctx, SSL_MODE_AUTO_RETRY);
 	if (SSL_CTX_load_verify_locations(ctx, CLIENT_CAFILE, NULL) != 1)
-		fatal("Error loading CA file and/or directory.");
+		FrisFatal("Error loading CA file and/or directory.");
 	if (SSL_CTX_set_default_verify_paths(ctx) != 1)
-		fatal("Error loading default CA file and/or directory.\n");
+		FrisFatal("Error loading default CA file and/or directory.\n");
 	if (SSL_CTX_use_certificate_chain_file(ctx, CLIENT_CERTFILE) != 1)
-		fatal("Error loading client certificate from file.");
+		FrisFatal("Error loading client certificate from file.");
 	if (SSL_CTX_use_PrivateKey_file(ctx, CLIENT_CERTFILE,
 					SSL_FILETYPE_PEM) != 1)
-		fatal("Error loading private key from file.");
+		FrisFatal("Error loading private key from file.");
 	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, verify_callback);
 	SSL_CTX_set_verify_depth(ctx, 4);
 
@@ -391,15 +391,15 @@ SSL_Read(SSL *ssl, void *buf, int num)
 	if (nread <= 0) {
 		err = SSL_get_error(ssl, nread);
 		if (err == SSL_ERROR_ZERO_RETURN) {
-			log("Error: SSL_read: Connection was closed.");
+			FrisLog("Error: SSL_read: Connection was closed.");
 		} else {
-			log("Error: SSL_read failed with err=%d.", err);
+			FrisLog("Error: SSL_read failed with err=%d.", err);
 		}
 	}
 	/* Cleanup state? */
 	if (nread != num) {
-		log("Warning: SSL_read wanted %d bytes but got %d.",
-		    num, nread);
+		FrisLog("Warning: SSL_read wanted %d bytes but got %d.",
+			num, nread);
 	}
 
 	return nread;
@@ -415,15 +415,15 @@ SSL_Write(SSL * ssl, const void *buf, int num)
 	if (nwrote <= 0) {
 		err = SSL_get_error(ssl, nwrote);
 		if (err == SSL_ERROR_ZERO_RETURN) {
-			log("Error: SSL_write: Connection was closed.");
+			FrisLog("Error: SSL_write: Connection was closed.");
 		} else {
-			log("Error: SSL_write failed with err=%d.", err);
+			FrisLog("Error: SSL_write failed with err=%d.", err);
 		}
 	}
 	/* Clean up state? */
 	if (nwrote != num) {
-		log("Warning: SSL_write tried %d bytes but sent %d.",
-		    num, nwrote);
+		FrisLog("Warning: SSL_write tried %d bytes but sent %d.",
+			num, nwrote);
 	}
 
 	return nwrote;

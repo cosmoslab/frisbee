@@ -126,17 +126,17 @@ main(int argc, char **argv)
 	} else
 		MasterServerLogInit();
 
-	log("mfrisbeed daemon starting as %d/%d, methods=%s (debug level %d)",
-	    myuid, mygid, GetMSMethods(onlymethods), debug);
+	FrisLog("mfrisbeed daemon starting as %d/%d, methods=%s (debug level %d)",
+		myuid, mygid, GetMSMethods(onlymethods), debug);
 	if (fetchfromabove)
-		log("  using parent %s:%d%s, methods=%s",
-		    inet_ntoa(parentip), parentport,
-		    mirrormode ? " in mirror mode" : "",
-		    GetMSMethods(parentmethods));
+		FrisLog("  using parent %s:%d%s, methods=%s",
+			inet_ntoa(parentip), parentport,
+			mirrormode ? " in mirror mode" : "",
+			GetMSMethods(parentmethods));
 #ifdef WITH_IGMP
 	if (igmpqueryinterval)
-		log("  acting as IGMP querier on %s with %d second interval",
-		    inet_ntoa(ifaceip), igmpqueryinterval);
+		FrisLog("  acting as IGMP querier on %s with %d second interval",
+			inet_ntoa(ifaceip), igmpqueryinterval);
 #endif
 	config_init(configstyle, 1, configopts);
 
@@ -150,7 +150,7 @@ main(int argc, char **argv)
 	 * Create TCP server.
 	 */
 	if (makesocket(portnum, &ifaceip, &tcpsock) < 0) {
-		error("Could not make primary tcp socket!");
+		FrisError("Could not make primary tcp socket!");
 		exit(1);
 	}
 #ifdef USE_LOCALHOST_PROXY
@@ -162,7 +162,7 @@ main(int argc, char **argv)
 		struct in_addr localip;
 		localip.s_addr = htonl(INADDR_LOOPBACK);
 		if (makesocket(portnum, &localip, &localsock) < 0) {
-			error("Could not create localhost tcp socket!");
+			FrisError("Could not create localhost tcp socket!");
 			exit(1);
 		}
 	}
@@ -221,7 +221,7 @@ main(int argc, char **argv)
 		if (rv < 0) {
 			if (errno == EINTR)
 				continue;
-			pfatal("select failed");
+			FrisPfatal("select failed");
 		}
 		if (rv) {
 			int sock = tcpsock;
@@ -233,7 +233,7 @@ main(int argc, char **argv)
 			newsock = accept(sock, (struct sockaddr *)&client,
 					 &length);
 			if (newsock < 0)
-				pwarning("accepting TCP connection");
+				FrisPwarning("accepting TCP connection");
 			else {
 				fcntl(newsock, F_SETFD, FD_CLOEXEC);
 				handle_request(newsock);
@@ -247,7 +247,7 @@ main(int argc, char **argv)
 	if (localsock >= 0)
 		close(localsock);
 #endif
-	log("daemon terminating");
+	FrisLog("daemon terminating");
 	exit(0);
 }
 
@@ -420,8 +420,8 @@ fetch_parent(struct in_addr *myip, struct in_addr *hostip,
 	ci = findchild(ii->imageid, PTYPE_CLIENT, methods);
 	if (ci != NULL) {
 		if (debug)
-			info("%s: fetch from %s in progress",
-			     ii->imageid, inet_ntoa(*pip));
+			FrisInfo("%s: fetch from %s in progress",
+				 ii->imageid, inet_ntoa(*pip));
 
 		/*
 		 * Since a download is in progress we don't normally need
@@ -455,11 +455,11 @@ fetch_parent(struct in_addr *myip, struct in_addr *hostip,
 		replyp->losize = ce->losize;
 		if (statusonly) {
 			if (debug)
-				info("%s: parent status: "
-				     "sigtype=%d, sig=0x%08x..., size=%x/%x",
-				     ii->imageid,
-				     ce->sigtype, *(uint32_t *)ce->signature,
-				     ce->hisize, ce->losize);
+				FrisInfo("%s: parent status: "
+					 "sigtype=%d, sig=0x%08x..., size=%x/%x",
+					 ii->imageid,
+					 ce->sigtype, *(uint32_t *)ce->signature,
+					 ce->hisize, ce->losize);
 			return 0;
 		}
 
@@ -472,9 +472,9 @@ fetch_parent(struct in_addr *myip, struct in_addr *hostip,
 	}
 
 	if (debug)
-		info("%s: requesting %simage from %s:%d",
-		     ii->imageid, (statusonly ? "status of ": ""),
-		     inet_ntoa(*pip), pport);
+		FrisInfo("%s: requesting %simage from %s:%d",
+			 ii->imageid, (statusonly ? "status of ": ""),
+			 inet_ntoa(*pip), pport);
 
 	/*
 	 * Image fetch is not in progress.
@@ -497,11 +497,11 @@ fetch_parent(struct in_addr *myip, struct in_addr *hostip,
 	replyp->losize = reply.losize;
 	if (statusonly) {
 		if (debug)
-			info("%s: parent status: "
-			     "sigtype=%d, sig=0x%08x..., size=%x/%x",
-			     ii->imageid,
-			     reply.sigtype, *(uint32_t *)reply.signature,
-			     reply.hisize, reply.losize);
+			FrisInfo("%s: parent status: "
+				 "sigtype=%d, sig=0x%08x..., size=%x/%x",
+				 ii->imageid,
+				 reply.sigtype, *(uint32_t *)reply.signature,
+				 reply.hisize, reply.losize);
 		return 0;
 	}
 
@@ -531,11 +531,11 @@ fetch_parent(struct in_addr *myip, struct in_addr *hostip,
 	ce->hisize = replyp->hisize;
 	ce->losize = replyp->losize;
 	if (debug)
-		info("%s cache status: "
-		     "sigtype=%d, sig=0x%08x..., size=%x/%x",
-		     ii->imageid,
-		     ce->sigtype, *(uint32_t *)ce->signature,
-		     ce->hisize, ce->losize);
+		FrisInfo("%s cache status: "
+			 "sigtype=%d, sig=0x%08x..., size=%x/%x",
+			 ii->imageid,
+			 ce->sigtype, *(uint32_t *)ce->signature,
+			 ce->hisize, ce->losize);
 
  done:
 	if (!canredirect)
@@ -616,11 +616,11 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 
 	strncpy(clientip, inet_ntoa(cip->sin_addr), sizeof clientip);
 	if (host.s_addr != cip->sin_addr.s_addr)
-		log("%s: %s from %s (for %s), methods: 0x%x",
-		    imageid, op, clientip, inet_ntoa(host), methods);
+		FrisLog("%s: %s from %s (for %s), methods: 0x%x",
+			imageid, op, clientip, inet_ntoa(host), methods);
 	else
-		log("%s: %s from %s, (methods: 0x%x)",
-		    imageid, op, clientip, methods);
+		FrisLog("%s: %s from %s, (methods: 0x%x)",
+			imageid, op, clientip, methods);
 
 	memset(msg, 0, sizeof *msg);
 	msg->hdr.type = htonl(MS_MSGTYPE_GETREPLY);
@@ -652,8 +652,8 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 			reply.error = MS_ERROR_NOIMAGE;
 		if (reply.error) {
 			msg->body.getreply.error = reply.error;
-			log("%s: client %s authentication with parent failed: %s",
-			    imageid, clientip, GetMSError(reply.error));
+			FrisLog("%s: client %s authentication with parent failed: %s",
+				imageid, clientip, GetMSError(reply.error));
 			goto reply;
 		}
 	}
@@ -689,8 +689,8 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	 */
 	rv = config_auth_by_IP(1, &cip->sin_addr, &host, imageid, &ai);
 	if (rv) {
-		warning("%s: client %s %s failed: %s",
-			imageid, clientip, op, GetMSError(rv));
+		FrisWarning("%s: client %s %s failed: %s",
+			    imageid, clientip, op, GetMSError(rv));
 		msg->body.getreply.error = rv;
 		goto reply;
 	}
@@ -698,9 +698,9 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		config_dump_host_authinfo(ai);
 	if (ai->numimages > 1) {
 		rv = MS_ERROR_INVALID;
-		warning("%s: client %s %s failed: "
-			"lookup returned multiple (%d) images",
-			imageid, clientip, op, ai->numimages);
+		FrisWarning("%s: client %s %s failed: "
+			    "lookup returned multiple (%d) images",
+			    imageid, clientip, op, ai->numimages);
 		msg->body.getreply.error = rv;
 		goto reply;
 	}
@@ -713,7 +713,7 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	 */
 	if (findchild(ii->imageid, PTYPE_UPLOADER, MS_METHOD_UNICAST)) {
 		rv = MS_ERROR_TRYAGAIN;
-		log("%s: %s currently being uploaded", imageid, op);
+		FrisLog("%s: %s currently being uploaded", imageid, op);
 		msg->body.getreply.error = rv;
 		goto reply;
 	}
@@ -734,9 +734,9 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	    stat(ii->path, &sb) == 0) {
 		if (!S_ISREG(sb.st_mode)) {
 			rv = MS_ERROR_INVALID;
-			warning("%s: client %s %s failed: "
-				"not a regular file",
-				imageid, clientip, op);
+			FrisWarning("%s: client %s %s failed: "
+				    "not a regular file",
+				    imageid, clientip, op);
 			msg->body.getreply.error = rv;
 			goto reply;
 		}
@@ -748,7 +748,7 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		 * We only do this for mirror mode.
 		 */
 		if (mirrormode) {
-			log("%s: have local copy", imageid);
+			FrisLog("%s: have local copy", imageid);
 
 			/*
 			 * See if the signature is out of date.
@@ -780,14 +780,14 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 				if (wantstatus)
 					goto reply;
 
-				log("%s: local copy (sig=%x) "
-				    "is out of date (sig=%x), GET from parent",
-				    imageid, sb.st_mtime, mt);
+				FrisLog("%s: local copy (sig=%x) "
+					"is out of date (sig=%x), GET from parent",
+					imageid, sb.st_mtime, mt);
 				getfromparent = 1;
 			}
 		}
 	} else if (fetchfromabove) {
-		log("%s: no local copy, %s from parent", imageid, op);
+		FrisLog("%s: no local copy, %s from parent", imageid, op);
 
 		/*
 		 * We don't have the image, but we have a parent,
@@ -801,9 +801,9 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 			rv = fetch_parent(&sip->sin_addr, &host, &parentip,
 					  parentport, ii, 1, &reply);
 			if (rv) {
-				log("%s: failed getting parent status: %s, "
-				    "failing",
-				    imageid, GetMSError(rv));
+				FrisLog("%s: failed getting parent status: %s, "
+					"failing",
+					imageid, GetMSError(rv));
 				msg->body.getreply.error = rv;
 				goto reply;
 			}
@@ -831,8 +831,8 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		 * No image and no parent, just flat fail.
 		 */
 		rv = (errno == ENOENT) ? MS_ERROR_NOIMAGE : MS_ERROR_INVALID;
-		warning("%s: client %s %s failed: %s",
-			imageid, clientip, op, GetMSError(rv));
+		FrisWarning("%s: client %s %s failed: %s",
+			    imageid, clientip, op, GetMSError(rv));
 		msg->body.getreply.error = rv;
 		goto reply;
 	}
@@ -859,13 +859,13 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 					htonl(reply.addr);
 				msg->body.getreply.port =
 					htons(reply.port);
-				log("%s: redirecting %s to our parent",
-				    imageid, clientip);
+				FrisLog("%s: redirecting %s to our parent",
+					imageid, clientip);
 				goto reply;
 			}
-			log("%s: cannot redirect %s to parent; "
-			    "incompatible transfer methods",
-			    imageid, clientip);
+			FrisLog("%s: cannot redirect %s to parent; "
+				"incompatible transfer methods",
+				imageid, clientip);
 			rv = MS_ERROR_TRYAGAIN;
 		}
 		/*
@@ -873,17 +873,17 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		 * use our stale version.
 		 */
 		if (rv != MS_ERROR_TRYAGAIN && isize > 0) {
-			warning("%s: client %s %s from parent failed: %s, "
-				"using our stale copy",
-				imageid, clientip, op, GetMSError(rv));
+			FrisWarning("%s: client %s %s from parent failed: %s, "
+				    "using our stale copy",
+				    imageid, clientip, op, GetMSError(rv));
 		}
 		/*
 		 * Otherwise, we are busy fetching the new copy (TRYAGAIN),
 		 * or we had a real failure and we don't have a copy.
 		 */
 		else {
-			warning("%s: client %s %s from parent failed: %s",
-				imageid, clientip, op, GetMSError(rv));
+			FrisWarning("%s: client %s %s from parent failed: %s",
+				    imageid, clientip, op, GetMSError(rv));
 			msg->body.getreply.error = rv;
 			goto reply;
 		}
@@ -893,14 +893,14 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	 * Figure out what transfer method to use.
 	 */
 	if (debug)
-		info("  request methods: 0x%x, image methods: 0x%x",
-		     methods, ii->get_methods);
+		FrisInfo("  request methods: 0x%x, image methods: 0x%x",
+			 methods, ii->get_methods);
 	methods &= ii->get_methods;
 	if (methods == 0) {
 	badmethod:
 		rv = MS_ERROR_NOMETHOD;
-		warning("%s: client %s %s failed: %s",
-			imageid, clientip, op, GetMSError(rv));
+		FrisWarning("%s: client %s %s failed: %s",
+			    imageid, clientip, op, GetMSError(rv));
 		msg->body.getreply.error = rv;
 		goto reply;
 	}
@@ -917,9 +917,9 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	 * for the same image, but we don't.
 	 */
 	if (!wantstatus && ci != NULL && ci->method == MS_METHOD_UNICAST) {
-		warning("%s: client %s %s failed: "
-			"unicast server already running",
-			imageid, clientip, op);
+		FrisWarning("%s: client %s %s failed: "
+			    "unicast server already running",
+			    imageid, clientip, op);
 		msg->body.getreply.error = MS_ERROR_TRYAGAIN;
 		goto reply;
 	}
@@ -941,7 +941,7 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 			msg->body.getreply.isrunning = 0;
 			msg->body.getreply.hisize = htonl(isize >> 32);
 			msg->body.getreply.losize = htonl(isize);
-			log("%s: STATUS is not running", imageid);
+			FrisLog("%s: STATUS is not running", imageid);
 			goto reply;
 		}
 		myaddr = ntohl(sip->sin_addr.s_addr);
@@ -955,8 +955,8 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		if (myaddr == INADDR_LOOPBACK) {
 			myaddr = ntohl(ifaceip.s_addr);
 			if (myaddr == INADDR_ANY) {
-				warning("%s: cannot start server on behalf "
-					"of %s", imageid, clientip);
+				FrisWarning("%s: cannot start server on behalf "
+					    "of %s", imageid, clientip);
 				msg->body.getreply.error = MS_ERROR_FAILED;
 				goto reply;
 			}
@@ -970,12 +970,12 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		}
 
 		in.s_addr = htonl(ci->addr);
-		log("%s: started %s server on %s:%d (pid %d, timo %ds)",
-		    imageid, GetMSMethods(ci->method),
-		    inet_ntoa(in), ci->port, ci->pid, ci->timeout);
+		FrisLog("%s: started %s server on %s:%d (pid %d, timo %ds)",
+			imageid, GetMSMethods(ci->method),
+			inet_ntoa(in), ci->port, ci->pid, ci->timeout);
 		if (debug) {
-			log("  uid: %d, gids: %s",
-			    ci->uid, gidstr(ci->ngids, ci->gids));
+			FrisLog("  uid: %d, gids: %s",
+				ci->uid, gidstr(ci->ngids, ci->gids));
 		}
 
 		/*
@@ -988,9 +988,9 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		sleep(2);
 		if (reapchildren(ci->pid, &stat)) {
 			msg->body.getreply.error = MS_ERROR_TRYAGAIN;
-			log("%s: server immediately exited (stat=0x%x), "
-			    "telling client to try again!",
-			    imageid, stat);
+			FrisLog("%s: server immediately exited (stat=0x%x), "
+				"telling client to try again!",
+				imageid, stat);
 			goto reply;
 		}
 	} else {
@@ -1005,16 +1005,16 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		}
 		in.s_addr = htonl(ci->addr);
 		if (wantstatus)
-			log("%s: STATUS is running %s on %s:%d (pid %d)",
-			    imageid, GetMSMethods(ci->method),
-			    inet_ntoa(in), ci->port, ci->pid);
+			FrisLog("%s: STATUS is running %s on %s:%d (pid %d)",
+				imageid, GetMSMethods(ci->method),
+				inet_ntoa(in), ci->port, ci->pid);
 		else
-			log("%s: %s server already running on %s:%d (pid %d)",
-			    imageid, GetMSMethods(ci->method),
-			    inet_ntoa(in), ci->port, ci->pid);
+			FrisLog("%s: %s server already running on %s:%d (pid %d)",
+				imageid, GetMSMethods(ci->method),
+				inet_ntoa(in), ci->port, ci->pid);
 		if (debug)
-			log("  uid: %d, gids: %s",
-			    ci->uid, gidstr(ci->ngids, ci->gids));
+			FrisLog("  uid: %d, gids: %s",
+				ci->uid, gidstr(ci->ngids, ci->gids));
 	}
 
 	msg->body.getreply.hisize = htonl(isize >> 32);
@@ -1040,15 +1040,16 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
  reply:
 	msg->body.getreply.error = htons(msg->body.getreply.error);
 	if (debug) {
-		info("%s reply: sigtype=%d, sig=0x%08x..., size=%x/%x",
-		     op, ntohs(msg->body.getreply.sigtype),
-		     ntohl(*(uint32_t *)msg->body.getreply.signature),
-		     ntohl(msg->body.getreply.hisize),
-		     ntohl(msg->body.getreply.losize));
+		FrisInfo("%s reply: sigtype=%d, sig=0x%08x..., size=%x/%x",
+			 op, ntohs(msg->body.getreply.sigtype),
+			 ntohl(*(uint32_t *)msg->body.getreply.signature),
+			 ntohl(msg->body.getreply.hisize),
+			 ntohl(msg->body.getreply.losize));
 	}
 	len = sizeof msg->hdr + sizeof msg->body.getreply;
 	if (!MsgSend(sock, msg, len, 10))
-		error("%s: could not send reply", inet_ntoa(cip->sin_addr));
+		FrisError("%s: could not send reply",
+			  inet_ntoa(cip->sin_addr));
 	if (ii)
 		free_imageinfo(ii);
 }
@@ -1094,11 +1095,11 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 
 	strncpy(clientip, inet_ntoa(cip->sin_addr), sizeof clientip);
 	if (host.s_addr != cip->sin_addr.s_addr)
-		log("%s: %s from %s (for %s), size=%llu",
-		    imageid, op, clientip, inet_ntoa(host), isize);
+		FrisLog("%s: %s from %s (for %s), size=%llu",
+			imageid, op, clientip, inet_ntoa(host), isize);
 	else
-		log("%s: %s from %s, size=%llu",
-		    imageid, op, clientip, isize);
+		FrisLog("%s: %s from %s, size=%llu",
+			imageid, op, clientip, isize);
 
 	memset(msg, 0, sizeof *msg);
 	msg->hdr.type = htonl(MS_MSGTYPE_PUTREPLY);
@@ -1110,9 +1111,9 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	 */
 	if (mirrormode) {
 		rv = MS_ERROR_NOTIMPL;
-		warning("%s: client %s %s failed: "
-			"upload not supported in mirror mode",
-			imageid, clientip, op);
+		FrisWarning("%s: client %s %s failed: "
+			    "upload not supported in mirror mode",
+			    imageid, clientip, op);
 		msg->body.putreply.error = rv;
 		goto reply;
 	}
@@ -1123,8 +1124,8 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	 */
 	rv = config_auth_by_IP(0, &cip->sin_addr, &host, imageid, &ai);
 	if (rv) {
-		warning("%s: client %s %s failed: %s",
-			imageid, clientip, op, GetMSError(rv));
+		FrisWarning("%s: client %s %s failed: %s",
+			    imageid, clientip, op, GetMSError(rv));
 		msg->body.putreply.error = rv;
 		goto reply;
 	}
@@ -1132,9 +1133,9 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		config_dump_host_authinfo(ai);
 	if (ai->numimages > 1) {
 		rv = MS_ERROR_INVALID;
-		warning("%s: client %s %s failed: "
-			"lookup returned multiple (%d) images",
-			imageid, clientip, op, ai->numimages);
+		FrisWarning("%s: client %s %s failed: "
+			    "lookup returned multiple (%d) images",
+			    imageid, clientip, op, ai->numimages);
 		msg->body.putreply.error = rv;
 		goto reply;
 	}
@@ -1149,9 +1150,9 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	 */
 	if (isize > ii->put_maxsize) {
 		rv = MS_ERROR_TOOBIG;
-		warning("%s: client %s %s failed: "
-			"upload size (%llu) exceeds maximum for image (%llu)",
-			imageid, clientip, op, isize, ii->put_maxsize);
+		FrisWarning("%s: client %s %s failed: "
+			    "upload size (%llu) exceeds maximum for image (%llu)",
+			    imageid, clientip, op, isize, ii->put_maxsize);
 
 		/*
 		 * We return the max size here along with the error so that
@@ -1174,9 +1175,9 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		gettimeofday(&now, NULL);
 		if (mtime > now.tv_sec) {
 			rv = MS_ERROR_BADMTIME;
-			warning("%s: client %s %s failed: "
-				"attempt to set mtime in the future",
-				imageid, clientip, op);
+			FrisWarning("%s: client %s %s failed: "
+				    "attempt to set mtime in the future",
+				    imageid, clientip, op);
 			msg->body.putreply.error = rv;
 			goto reply;
 		}
@@ -1190,10 +1191,10 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	    (ci = findchild(ii->imageid, PTYPE_CLIENT, onlymethods)) ||
 	    (ci = findchild(ii->imageid, PTYPE_UPLOADER, MS_METHOD_UNICAST))) {
 		msg->body.putreply.error = MS_ERROR_TRYAGAIN;
-		log("%s: %s currently being %s", imageid, op,
-		    (ci->ptype == PTYPE_SERVER) ? "served" :
-		    (ci->ptype == PTYPE_CLIENT) ? "downloaded from parent" :
-		    "uploaded");
+		FrisLog("%s: %s currently being %s", imageid, op,
+			(ci->ptype == PTYPE_SERVER) ? "served" :
+			(ci->ptype == PTYPE_CLIENT) ? "downloaded from parent" :
+			"uploaded");
 		goto reply;
 	}
 
@@ -1212,9 +1213,9 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	    stat(ii->path, &sb) == 0) {
 		if (!S_ISREG(sb.st_mode)) {
 			rv = MS_ERROR_INVALID;
-			warning("%s: client %s %s failed: "
-				"existing target is not a regular file",
-				imageid, clientip, op);
+			FrisWarning("%s: client %s %s failed: "
+				    "existing target is not a regular file",
+				    imageid, clientip, op);
 			msg->body.putreply.error = rv;
 			goto reply;
 		}
@@ -1246,7 +1247,7 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	msg->body.putreply.lomaxsize = htonl(ii->put_maxsize);
 
 	if (wantstatus) {
-		log("%s: PUTSTATUS upload allowed", imageid);
+		FrisLog("%s: PUTSTATUS upload allowed", imageid);
 		goto reply;
 	}
 	myaddr = ntohl(sip->sin_addr.s_addr);
@@ -1258,11 +1259,11 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	}
 
 	in.s_addr = htonl(ci->addr);
-	log("%s: started uploader on %s:%d (pid %d, timo %ds)",
-	    imageid, inet_ntoa(in), ci->port, ci->pid, ci->timeout);
+	FrisLog("%s: started uploader on %s:%d (pid %d, timo %ds)",
+		imageid, inet_ntoa(in), ci->port, ci->pid, ci->timeout);
 	if (debug)
-		log("  uid: %d, gids: %s",
-		    ci->uid, gidstr(ci->ngids, ci->gids));
+		FrisLog("  uid: %d, gids: %s",
+			ci->uid, gidstr(ci->ngids, ci->gids));
 
 	/*
 	 * Watch for an immediate death so we don't tell our client
@@ -1274,9 +1275,9 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	sleep(2);
 	if (reapchildren(ci->pid, &rv)) {
 		msg->body.putreply.error = MS_ERROR_TRYAGAIN;
-		log("%s: uploader immediately exited (stat=0x%x), "
-		    "telling client to try again!",
-		    imageid, rv);
+		FrisLog("%s: uploader immediately exited (stat=0x%x), "
+			"telling client to try again!",
+			imageid, rv);
 		goto reply;
 	}
 
@@ -1286,18 +1287,19 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
  reply:
 	msg->body.putreply.error = htons(msg->body.putreply.error);
 	if (debug) {
-		info("%s reply: sigtype=%d, sig=0x%08x..., "
-		     "size=%x/%x, maxsize=%x/%x",
-		     op, ntohs(msg->body.putreply.sigtype),
-		     ntohl(*(uint32_t *)msg->body.putreply.signature),
-		     ntohl(msg->body.putreply.hisize),
-		     ntohl(msg->body.putreply.losize),
-		     ntohl(msg->body.putreply.himaxsize),
-		     ntohl(msg->body.putreply.lomaxsize));
+		FrisInfo("%s reply: sigtype=%d, sig=0x%08x..., "
+			 "size=%x/%x, maxsize=%x/%x",
+			 op, ntohs(msg->body.putreply.sigtype),
+			 ntohl(*(uint32_t *)msg->body.putreply.signature),
+			 ntohl(msg->body.putreply.hisize),
+			 ntohl(msg->body.putreply.losize),
+			 ntohl(msg->body.putreply.himaxsize),
+			 ntohl(msg->body.putreply.lomaxsize));
 	}
 	len = sizeof msg->hdr + sizeof msg->body.putreply;
 	if (!MsgSend(sock, msg, len, 10))
-		error("%s: could not send reply", inet_ntoa(cip->sin_addr));
+		FrisError("%s: could not send reply",
+			  inet_ntoa(cip->sin_addr));
 	if (ii)
 		free_imageinfo(ii);
 }
@@ -1326,24 +1328,24 @@ handle_request(int sock)
 		if (cc < 0)
 			perror("request message failed");
 		else
-			error("request message too small");
+			FrisError("request message too small");
 		return;
 	}
 	switch (ntohl(msg.hdr.type)) {
 	case MS_MSGTYPE_GETREQUEST:
 		if (cc < sizeof msg.hdr + sizeof msg.body.getrequest)
-			error("GET request message too small");
+			FrisError("GET request message too small");
 		else
 			handle_get(sock, &me, &you, &msg);
 		break;
 	case MS_MSGTYPE_PUTREQUEST:
 		if (cc < sizeof msg.hdr + sizeof msg.body.putrequest)
-			error("PUT request message too small");
+			FrisError("PUT request message too small");
 		else
 			handle_put(sock, &me, &you, &msg);
 		break;
 	default:
-		error("unrecognized message type %d", ntohl(msg.hdr.type));
+		FrisError("unrecognized message type %d", ntohl(msg.hdr.type));
 		break;
 	}
 }
@@ -1524,32 +1526,33 @@ makesocket(int port, struct in_addr *ifip, int *tcpsockp)
 	/* Create socket from which to read. */
 	sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (sock < 0) {
-		pfatal("opening stream socket");
+		FrisPfatal("opening stream socket");
 	}
 	fcntl(sock, F_SETFD, FD_CLOEXEC);
 
 	i = 1;
 	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
 		       (char *)&i, sizeof(i)) < 0)
-		pwarning("setsockopt(SO_REUSEADDR)");
+		FrisPwarning("setsockopt(SO_REUSEADDR)");
 	
 	/* Create name. */
 	name.sin_family = AF_INET;
 	name.sin_addr.s_addr = ifip->s_addr;
 	name.sin_port = htons((u_short) port);
 	if (bind(sock, (struct sockaddr *) &name, sizeof(name))) {
-		pfatal("binding stream socket");
+		FrisPfatal("binding stream socket");
 	}
 	/* Find assigned port value and print it out. */
 	length = sizeof(name);
 	if (getsockname(sock, (struct sockaddr *) &name, &length)) {
-		pfatal("getsockname");
+		FrisPfatal("getsockname");
 	}
 	if (listen(sock, 128) < 0) {
-		pfatal("listen");
+		FrisPfatal("listen");
 	}
 	*tcpsockp = sock;
-	log("listening on TCP %s:%d", inet_ntoa(*ifip), ntohs(name.sin_port));
+	FrisLog("listening on TCP %s:%d",
+		inet_ntoa(*ifip), ntohs(name.sin_port));
 	
 	return 0;
 }
@@ -1575,8 +1578,8 @@ findchild(char *imageid, int ptype, int methods)
 				 bestci->method == MS_METHOD_UNICAST)
 				bestci = ci;
 			else
-				pfatal("multiple unicast servers for %s",
-				       imageid);
+				FrisPfatal("multiple unicast servers for %s",
+					   imageid);
 		}
 
 	return bestci;
@@ -1594,7 +1597,7 @@ startchild(struct childinfo *ci)
 	 */
 	ci->pid = fork();
 	if (ci->pid < 0) {
-		pwarning("startchild");
+		FrisPwarning("startchild");
 		return MS_ERROR_FAILED;
 	}
 	if (ci->pid == 0) {
@@ -1615,8 +1618,8 @@ startchild(struct childinfo *ci)
 			}
 			if ((ci->gids[0] != mygid && setgid(ci->gids[0]) != 0) ||
 			    (ci->uid != myuid && setuid(ci->uid) != 0)) {
-				error("child: could not setuid/gid to %d/%d",
-				      ci->uid, ci->gids[0]);
+				FrisError("child: could not setuid/gid to %d/%d",
+					  ci->uid, ci->gids[0]);
 				exit(-2);
 			}
 		}
@@ -1637,13 +1640,13 @@ startchild(struct childinfo *ci)
 			rname = resolvepath(ci->imageinfo->path,
 					    ci->imageinfo->dir, mkdirs);
 			if (rname == NULL) {
-				error("child: could not resolve '%s'",
-				      ci->imageinfo->path);
+				FrisError("child: could not resolve '%s'",
+					  ci->imageinfo->path);
 				exit(-4);
 			}
 			if (debug)
-				info("child: resolve '%s' to '%s'",
-				     ci->imageinfo->path, rname);
+				FrisInfo("child: resolve '%s' to '%s'",
+					 ci->imageinfo->path, rname);
 
 			/*
 			 * XXX right now we don't do anything with this path.
@@ -1701,7 +1704,7 @@ startchild(struct childinfo *ci)
 			exit(-3);
 		}
 		if (debug)
-			info("execing: %s", argbuf);
+			FrisInfo("execing: %s", argbuf);
 
 		args = argbuf;
 		argc = 0;
@@ -1834,8 +1837,8 @@ finishclient(struct childinfo *ci, int status)
 	ci->imageinfo->path = realname;
 
 	if (status != 0) {
-		error("%s: download failed, removing tmpfile %s",
-		      realname, tmpname);
+		FrisError("%s: download failed, removing tmpfile %s",
+			  realname, tmpname);
 		unlink(tmpname);
 		free(tmpname);
 		return;
@@ -1847,7 +1850,7 @@ finishclient(struct childinfo *ci, int status)
 		tv[1].tv_sec = mtime;
 		tv[1].tv_usec = 0;
 		if (utimes(tmpname, tv) < 0)
-			warning("%s: failed to set mtime", tmpname);
+			FrisWarning("%s: failed to set mtime", tmpname);
 	}
 
 	len = strlen(realname) + 5;
@@ -1857,14 +1860,14 @@ finishclient(struct childinfo *ci, int status)
 	if (rename(realname, bakname) < 0)
 		didbackup = 0;
 	if (rename(tmpname, realname) < 0) {
-		error("%s: failed to install new version, leaving as %s",
-		      realname, tmpname);
+		FrisError("%s: failed to install new version, leaving as %s",
+			  realname, tmpname);
 		if (didbackup)
 			rename(bakname, realname);
 	}
 	free(tmpname);
 	free(bakname);
-	log("%s: download complete", realname);
+	FrisLog("%s: download complete", realname);
 }
 
 static struct childinfo *
@@ -1950,8 +1953,8 @@ finishupload(struct childinfo *ci, int status)
 	ci->imageinfo->path = realname;
 
 	if (status != 0) {
-		error("%s: upload failed, removing tmpfile %s",
-		      realname, tmpname);
+		FrisError("%s: upload failed, removing tmpfile %s",
+			  realname, tmpname);
 		unlink(tmpname);
 		free(tmpname);
 		return;
@@ -1963,7 +1966,7 @@ finishupload(struct childinfo *ci, int status)
 		tv[1].tv_sec = mtime;
 		tv[1].tv_usec = 0;
 		if (utimes(tmpname, tv) < 0)
-			warning("%s: failed to set mtime", tmpname);
+			FrisWarning("%s: failed to set mtime", tmpname);
 	}
 
 	/*
@@ -1982,8 +1985,8 @@ finishupload(struct childinfo *ci, int status)
 	if (rename(realname, bakname) < 0)
 		didbackup = 0;
 	if ((!didbackup && errno != ENOENT) || rename(tmpname, realname) < 0) {
-		error("%s: failed to install new version (%d), leaving as %s",
-		      realname, errno, tmpname);
+		FrisError("%s: failed to install new version (%d), leaving as %s",
+			  realname, errno, tmpname);
 		if (didbackup)
 			rename(bakname, realname);
 	}
@@ -1991,7 +1994,7 @@ finishupload(struct childinfo *ci, int status)
 	free(tmpname);
 	if (ci->imageinfo->put_oldversion == NULL)
 		free(bakname);
-	log("%s: upload complete", realname);
+	FrisLog("%s: upload complete", realname);
 }
 
 /*
@@ -2124,8 +2127,8 @@ reapchildren(int wpid, int *statusp)
 
 		pid = waitpid(wpid, &status, WNOHANG);
 		if (debug && wpid)
-			log("wait for %d returns %d, status=%x",
-			    wpid, pid, pid > 0 ? status : 0);
+			FrisLog("wait for %d returns %d, status=%x",
+				wpid, pid, pid > 0 ? status : 0);
 		if (pid <= 0)
 			return 0;
 		for (cip = &children; *cip != NULL; cip = &(*cip)->next) {
@@ -2134,7 +2137,7 @@ reapchildren(int wpid, int *statusp)
 		}
 		ci = *cip;
 		if (ci == NULL) {
-			error("Child died that was not ours!?");
+			FrisError("Child died that was not ours!?");
 			if (wpid)
 				break;
 			continue;
@@ -2147,11 +2150,11 @@ reapchildren(int wpid, int *statusp)
 		}
 		nchildren--;
 		in.s_addr = htonl(ci->addr);
-		log("%s: %s process %d on %s:%d exited (status=0x%x)",
-		    ci->imageinfo->imageid,
-		    ci->ptype == PTYPE_SERVER ? "server" :
-		    ci->ptype == PTYPE_CLIENT ? "client" : "uploader",
-		    pid, inet_ntoa(in), ci->port, status);
+		FrisLog("%s: %s process %d on %s:%d exited (status=0x%x)",
+			ci->imageinfo->imageid,
+			ci->ptype == PTYPE_SERVER ? "server" :
+			ci->ptype == PTYPE_CLIENT ? "client" : "uploader",
+			pid, inet_ntoa(in), ci->port, status);
 
 		/*
 		 * Special case exit value.
@@ -2172,12 +2175,12 @@ reapchildren(int wpid, int *statusp)
 				/* give it a chance to run, and check again */
 				sleep(1);
 				in.s_addr = htonl(ci->addr);
-				log("%s: restarted %s process on %s:%d"
-				    " (pid %d)",
-				    ci->imageinfo->imageid,
-				    ci->ptype == PTYPE_SERVER ?
-				    "server" : "uploader",
-				    inet_ntoa(in), ci->port, ci->pid);
+				FrisLog("%s: restarted %s process on %s:%d"
+					" (pid %d)",
+					ci->imageinfo->imageid,
+					ci->ptype == PTYPE_SERVER ?
+					"server" : "uploader",
+					inet_ntoa(in), ci->port, ci->pid);
 				if (wpid)
 					wpid = ci->pid;
 				continue;
@@ -2192,7 +2195,8 @@ reapchildren(int wpid, int *statusp)
 		corpses++;
 		if (wpid) {
 			if (debug)
-				error("  process %d exited immediately", wpid);
+				FrisError("  process %d exited immediately",
+					  wpid);
 			if (statusp)
 				*statusp = status;
 			break;
@@ -2223,10 +2227,10 @@ handle_igmp(void)
 	timersub(&now, &lastquery, &delta);
 	if (delta.tv_sec >= igmpqueryinterval) {
 		if (debug)
-			log("sending IGMP membership query after %d seconds",
-			    delta.tv_sec);
+			FrisLog("sending IGMP membership query after %d seconds",
+				delta.tv_sec);
 		if (IGMPSendQuery())
-			warning("could not send IGMP membership query!");
+			FrisWarning("could not send IGMP membership query!");
 		lastquery = now;
 	}
 }

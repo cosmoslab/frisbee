@@ -49,19 +49,19 @@ config_signal(int sig)
 	if (myconfig == NULL)
 		return;
 
-	log("Reading new configuration.");
+	FrisLog("Reading new configuration.");
 	savedconfig = myconfig->config_save();
 	if (myconfig->config_read() != 0) {
-		warning("WARNING: could not load new configuration, "
-			"restoring old config.");
+		FrisWarning("WARNING: could not load new configuration, "
+			    "restoring old config.");
 		if (savedconfig == NULL ||
 		    myconfig->config_restore(savedconfig)) {
-			error("*** Could not restore old configuration; "
-			      "aborting!");
+			FrisError("*** Could not restore old configuration; "
+				  "aborting!");
 			abort();
 		}
 	} else
-		log("New configuration loaded.");
+		FrisLog("New configuration loaded.");
 	if (savedconfig)
 		myconfig->config_free(savedconfig);
 }
@@ -76,11 +76,11 @@ config_init(char *style, int readit, char *opts)
 		extern struct config *emulab_init(char *);
 		if (myconfig == NULL) {
 			if ((myconfig = emulab_init(opts)) != NULL)
-				log("Using Emulab configuration");
+				FrisLog("Using Emulab configuration");
 		} else
-			log("Emulab config init failed");
+			FrisLog("Emulab config init failed");
 #else
-		log("Not built with Emulab configuration");
+		FrisLog("Not built with Emulab configuration");
 #endif
 	}
 	if (strcmp(style, "null") == 0) {
@@ -88,15 +88,15 @@ config_init(char *style, int readit, char *opts)
 		extern struct config *null_init(char *);
 		if (myconfig == NULL) {
 			if ((myconfig = null_init(opts)) != NULL)
-				log("Using null configuration");
+				FrisLog("Using null configuration");
 		} else
-			log("Null config init failed");
+			FrisLog("Null config init failed");
 #else
-		log("Not built with Null configuration");
+		FrisLog("Not built with Null configuration");
 #endif
 	}
 	if (myconfig == NULL) {
-		error("*** No configuration found");
+		FrisError("*** No configuration found");
 		return -1;
 	}
 
@@ -215,7 +215,7 @@ config_dump(FILE *fd)
 {
 	signal(SIGHUP, SIG_IGN);
 	if (myconfig == NULL)
-		warning("config_dump: config file not yet read.");
+		FrisWarning("config_dump: config file not yet read.");
 	else
 		myconfig->config_dump(fd);
 	signal(SIGHUP, config_signal);
@@ -324,21 +324,21 @@ resolvepath(char *path, char *dir, int create)
 	char *npath;
 
 	if (debug > 1)
-		info("resolvepath '%s' in dir '%s'", path, dir);
+		FrisInfo("resolvepath '%s' in dir '%s'", path, dir);
 	/* validate path */
 	if (path == NULL) {
 		if (debug > 1)
-			info(" null path");
+			FrisInfo(" null path");
 		return NULL;
 	}
 	if (path[0] != '/') {
 		if (debug > 1)
-			info(" path is not absolute");
+			FrisInfo(" path is not absolute");
 		return NULL;
 	}
 	if (pathlen >= sizeof rpath) {
 		if (debug > 1)
-			info(" path is too long");
+			FrisInfo(" path is too long");
 		return NULL;
 	}
 
@@ -347,8 +347,8 @@ resolvepath(char *path, char *dir, int create)
 		dirlen = strlen(dir);
 		if (dir[0] != '/') {
 			if (debug > 1)
-				info(" path and dir (%s) must be absolute",
-				     dir);
+				FrisInfo(" path and dir (%s) must be absolute",
+					 dir);
 			return NULL;
 		}
 		/* XXX make dir=='/' work */
@@ -365,20 +365,21 @@ resolvepath(char *path, char *dir, int create)
 	if (myrealpath(path, rpath) != NULL) {
 		if (dir && !INDIR(dir, dirlen, rpath)) {
 			if (debug > 1)
-				info(" resolved path (%s) not in dir (%s)",
-				     rpath, dir);
+				FrisInfo(" resolved path (%s) not in dir (%s)",
+					 rpath, dir);
 			return NULL;
 		}
 		if (stat(rpath, &sb) < 0 || !S_ISREG(sb.st_mode)) {
 			if (debug > 1)
-				info(" not a regular file");
+				FrisInfo(" not a regular file");
 			return NULL;
 		}
 		return strdup(rpath);
 	}
 	if (debug > 1) {
 		int oerrno = errno;
-		info(" partially resolved to '%s' (errno %d)", rpath, errno);
+		FrisInfo(" partially resolved to '%s' (errno %d)",
+			 rpath, errno);
 		errno = oerrno;
 	}
 
@@ -388,8 +389,8 @@ resolvepath(char *path, char *dir, int create)
 	 */
 	if (!create || errno != ENOENT) {
 		if (debug > 1)
-			info(" realpath failed at %s with %d",
-			     rpath, errno);
+			FrisInfo(" realpath failed at %s with %d",
+				 rpath, errno);
 		return NULL;
 	}
 
@@ -402,8 +403,8 @@ resolvepath(char *path, char *dir, int create)
 	assert(dir != NULL);
 	if (!INDIR(dir, dirlen, rpath)) {
 		if (debug > 1)
-			info(" resolved path (%s) not in dir (%s)",
-			     rpath, dir);
+			FrisInfo(" resolved path (%s) not in dir (%s)",
+				 rpath, dir);
 		return NULL;
 	}
 
@@ -415,13 +416,14 @@ resolvepath(char *path, char *dir, int create)
 	 */
 	if (stat(dir, &sb) < 0) {
 		if (debug > 1)
-			info(" stat failed on dir (%s)?!", dir);
+			FrisInfo(" stat failed on dir (%s)?!", dir);
 		return NULL;
 	}
 	cmask = (sb.st_mode & (S_IRWXU|S_IRWXG|S_IRWXO)) | S_IRWXU;
 	omask = umask(0);
 	if (debug > 1)
-		info(" umask=0 (was 0%o), initial cmask=0%o", omask, cmask);
+		FrisInfo(" umask=0 (was 0%o), initial cmask=0%o",
+			 omask, cmask);
 
 	/*
 	 * Find the first component of the original path that does not
@@ -460,13 +462,13 @@ resolvepath(char *path, char *dir, int create)
 	assert(*next == '/');
 	next++;
 	if (debug > 1)
-		info(" pathscan: path='%s', rpath='%s', start at '%s'",
-		     pathcopy, rpath, next);
+		FrisInfo(" pathscan: path='%s', rpath='%s', start at '%s'",
+			 pathcopy, rpath, next);
 
 	while ((ep = index(next, '/')) != NULL) {
 		*ep = '\0';
 		if (debug > 1)
-			info(" testing: %s", pathcopy);
+			FrisInfo(" testing: %s", pathcopy);
 
 		/*
 		 * We use realpath here instead of just stat to make
@@ -481,8 +483,8 @@ resolvepath(char *path, char *dir, int create)
 			if (errno != ENOENT ||
 			    (dir && !INDIR(dir, dirlen, rpath))) {
 				if (debug > 1)
-					info("  resolves bad (%s)\n",
-					     rpath);
+					FrisInfo("  resolves bad (%s)\n",
+						 rpath);
 				goto done;
 			}
 			/*
@@ -491,21 +493,21 @@ resolvepath(char *path, char *dir, int create)
 			 */
 			if (mkdir(rpath, cmask) < 0) {
 				if (debug > 1)
-					info("  create failed (%s)\n",
-					     rpath);
+					FrisInfo("  create failed (%s)\n",
+						 rpath);
 				goto done;
 			}
 			if (debug > 1)
-				info("  created (%s)", rpath);
+				FrisInfo("  created (%s)", rpath);
 		} else {
 			if (debug > 1)
-				info("  exists (%s)", rpath);
+				FrisInfo("  exists (%s)", rpath);
 			/*
 			 * Update the creation permission; see comment above.
 			 */
 			if (stat(rpath, &sb) < 0) {
 				if (debug > 1)
-					info(" stat failed (%s)?!", rpath);
+					FrisInfo(" stat failed (%s)?!", rpath);
 				goto done;
 			}
 			cmask = (sb.st_mode & (S_IRWXU|S_IRWXG|S_IRWXO)) |
@@ -523,8 +525,8 @@ resolvepath(char *path, char *dir, int create)
 	if (myrealpath(pathcopy, rpath) == NULL &&
 	    (errno != ENOENT || !INDIR(dir, dirlen, rpath))) {
 		if (debug > 1)
-			info(" final resolved path (%s) bad (%d)",
-			     rpath, errno);
+			FrisInfo(" final resolved path (%s) bad (%d)",
+				 rpath, errno);
 		goto done;
 	}
 
@@ -533,7 +535,7 @@ resolvepath(char *path, char *dir, int create)
 	 */
 	npath = strdup(rpath);
 	if (debug > 1)
-		info("resolvepath: '%s' resolved to '%s'", path, npath);
+		FrisInfo("resolvepath: '%s' resolved to '%s'", path, npath);
 
  done:
 	umask(omask);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -91,7 +91,7 @@ MasterServerLogInit(void)
 }
 
 void
-info(const char *fmt, ...)
+FrisInfo(const char *fmt, ...)
 {
 	va_list args;
 	char	buf[BUFSIZ];
@@ -109,7 +109,7 @@ info(const char *fmt, ...)
 }
 
 void
-log(const char *fmt, ...)
+FrisLog(const char *fmt, ...)
 {
 	va_list args;
 	char	buf[BUFSIZ];
@@ -127,7 +127,7 @@ log(const char *fmt, ...)
 }
 
 void
-warning(const char *fmt, ...)
+FrisWarning(const char *fmt, ...)
 {
 	va_list args;
 
@@ -144,7 +144,7 @@ warning(const char *fmt, ...)
 }
 
 void
-error(const char *fmt, ...)
+FrisError(const char *fmt, ...)
 {
 	va_list args;
 
@@ -161,7 +161,7 @@ error(const char *fmt, ...)
 }
 
 void
-fatal(const char *fmt, ...)
+FrisFatal(const char *fmt, ...)
 {
 	va_list args;
 
@@ -179,7 +179,7 @@ fatal(const char *fmt, ...)
 }
 
 void
-pwarning(const char *fmt, ...)
+FrisPwarning(const char *fmt, ...)
 {
 	va_list args;
 	char	buf[BUFSIZ];
@@ -188,11 +188,11 @@ pwarning(const char *fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 
-	warning("%s : %s", buf, strerror(errno));
+	FrisWarning("%s : %s", buf, strerror(errno));
 }
 
 void
-pfatal(const char *fmt, ...)
+FrisPfatal(const char *fmt, ...)
 {
 	va_list args;
 	char	buf[BUFSIZ];
@@ -201,5 +201,5 @@ pfatal(const char *fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 
-	fatal("%s : %s", buf, strerror(errno));
+	FrisFatal("%s : %s", buf, strerror(errno));
 }

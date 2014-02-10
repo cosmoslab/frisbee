@@ -142,7 +142,7 @@ IGMPSendQuery(void)
 
 	return (rv != sizeof(qpacket));
 #else
-	fatal("IGMPSendQuery not implemented");
+	FrisFatal("IGMPSendQuery not implemented");
 #endif
 }
 
@@ -166,7 +166,7 @@ IGMPSendReport(void)
 
 	return (rv != sizeof(rpacket));
 #else
-	fatal("IGMPSendReport not implemented");
+	FrisFatal("IGMPSendReport not implemented");
 #endif
 }
 

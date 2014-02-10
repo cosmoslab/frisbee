@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -104,22 +104,24 @@ sleeptime(unsigned int usecs, char *str, int doround)
 		else
 #endif
 		{
-			warning("cannot get clock resolution, assuming 100HZ");
+			FrisWarning("cannot get clock resolution, assuming 100HZ");
 			clockres_us = 10000;
 		}
 
 		if (debug)
-			log("clock resolution: %d us", clockres_us);
+			FrisLog("clock resolution: %d us", clockres_us);
 	}
 	nusecs = ((usecs + clockres_us - 1) / clockres_us) * clockres_us;
 	if (doround) {
 		if (nusecs != usecs && str != NULL)
-			warning("%s: rounded to %d from %d "
-				"due to clock resolution", str, nusecs, usecs);
+			FrisWarning("%s: rounded to %d from %d "
+				    "due to clock resolution",
+				    str, nusecs, usecs);
 	} else {
 		if (nusecs != usecs && str != NULL) {
-			warning("%s: may be up to %d (instead of %d) "
-				"due to clock resolution", str, nusecs, usecs);
+			FrisWarning("%s: may be up to %d (instead of %d) "
+				    "due to clock resolution",
+				    str, nusecs, usecs);
 		}
 		nusecs = usecs;
 	}
@@ -172,7 +174,7 @@ sleeptil(struct timeval *nexttime)
 		left.tv_sec = left.tv_nsec = 0;
 		while (nanosleep(&todo, &left) != 0) {
 			if (errno != EINTR) {
-				log("nanosleep failed\n");
+				FrisLog("nanosleep failed\n");
 				exit(1);
 			}
 			todo = left;
@@ -569,59 +571,59 @@ ClientStatsDump(unsigned int id, ClientStats_t *stats)
 			stats->u.v1.runmsec += 1000;
 		}
 
-		log("Client %u Performance:", id);
-		log("  runtime:                %d.%03d sec",
-		    stats->u.v1.runsec, stats->u.v1.runmsec);
-		log("  start delay:            %d.%03d sec",
-		    stats->u.v1.delayms/1000, stats->u.v1.delayms%1000);
+		FrisLog("Client %u Performance:", id);
+		FrisLog("  runtime:                %d.%03d sec",
+			stats->u.v1.runsec, stats->u.v1.runmsec);
+		FrisLog("  start delay:            %d.%03d sec",
+			stats->u.v1.delayms/1000, stats->u.v1.delayms%1000);
 		seconds = stats->u.v1.runsec;
 		if (seconds == 0)
 			seconds = 1;
-		log("  real data written:      %qu (%qu Bps)",
-		    stats->u.v1.rbyteswritten,
-		    stats->u.v1.rbyteswritten/seconds);
-		log("  effective data written: %qu (%qu Bps)",
-		    stats->u.v1.ebyteswritten,
-		    stats->u.v1.ebyteswritten/seconds);
-		log("Client %u Params:", id);
-		log("  chunk/block size:     %d/%d",
-		    CHUNKSIZE, BLOCKSIZE);
-		log("  chunk buffers:        %d",
-		    stats->u.v1.chunkbufs);
+		FrisLog("  real data written:      %qu (%qu Bps)",
+			stats->u.v1.rbyteswritten,
+			stats->u.v1.rbyteswritten/seconds);
+		FrisLog("  effective data written: %qu (%qu Bps)",
+			stats->u.v1.ebyteswritten,
+			stats->u.v1.ebyteswritten/seconds);
+		FrisLog("Client %u Params:", id);
+		FrisLog("  chunk/block size:     %d/%d",
+			CHUNKSIZE, BLOCKSIZE);
+		FrisLog("  chunk buffers:        %d",
+			stats->u.v1.chunkbufs);
 		if (stats->u.v1.writebufmem)
-			log("  disk buffering:       %dMB",
-			    stats->u.v1.writebufmem);
-		log("  readahead/inprogress: %d/%d",
-		    stats->u.v1.maxreadahead, stats->u.v1.maxinprogress);
-		log("  recv timo/count:      %d/%d",
-		    stats->u.v1.pkttimeout, stats->u.v1.idletimer);
-		log("  re-request delay:     %d",
-		    stats->u.v1.redodelay);
-		log("  writer idle delay:    %d",
-		    stats->u.v1.idledelay);
-		log("  randomize requests:   %d",
-		    stats->u.v1.randomize);
-		log("Client %u Stats:", id);
-		log("  net thread idle/blocked:        %d/%d",
-		    stats->u.v1.recvidles, stats->u.v1.nofreechunks);
-		log("  decompress thread idle/blocked: %d/%d",
-		    stats->u.v1.nochunksready, stats->u.v1.decompblocks);
-		log("  disk thread idle:        %d",
-		    stats->u.v1.writeridles);
-		log("  join/request msgs:       %d/%d",
-		    stats->u.v1.joinattempts, stats->u.v1.requests);
-		log("  dupblocks(chunk done):   %d",
-		    stats->u.v1.dupchunk);
-		log("  dupblocks(in progress):  %d",
-		    stats->u.v1.dupblock);
-		log("  partial requests/blocks: %d/%d",
-		    stats->u.v1.prequests, stats->u.v1.lostblocks);
-		log("  re-requests:             %d",
-		    stats->u.v1.rerequests);
+			FrisLog("  disk buffering:       %dMB",
+				stats->u.v1.writebufmem);
+		FrisLog("  readahead/inprogress: %d/%d",
+			stats->u.v1.maxreadahead, stats->u.v1.maxinprogress);
+		FrisLog("  recv timo/count:      %d/%d",
+			stats->u.v1.pkttimeout, stats->u.v1.idletimer);
+		FrisLog("  re-request delay:     %d",
+			stats->u.v1.redodelay);
+		FrisLog("  writer idle delay:    %d",
+			stats->u.v1.idledelay);
+		FrisLog("  randomize requests:   %d",
+			stats->u.v1.randomize);
+		FrisLog("Client %u Stats:", id);
+		FrisLog("  net thread idle/blocked:        %d/%d",
+			stats->u.v1.recvidles, stats->u.v1.nofreechunks);
+		FrisLog("  decompress thread idle/blocked: %d/%d",
+			stats->u.v1.nochunksready, stats->u.v1.decompblocks);
+		FrisLog("  disk thread idle:        %d",
+			stats->u.v1.writeridles);
+		FrisLog("  join/request msgs:       %d/%d",
+			stats->u.v1.joinattempts, stats->u.v1.requests);
+		FrisLog("  dupblocks(chunk done):   %d",
+			stats->u.v1.dupchunk);
+		FrisLog("  dupblocks(in progress):  %d",
+			stats->u.v1.dupblock);
+		FrisLog("  partial requests/blocks: %d/%d",
+			stats->u.v1.prequests, stats->u.v1.lostblocks);
+		FrisLog("  re-requests:             %d",
+			stats->u.v1.rerequests);
 		break;
 
 	default:
-		log("Unknown stats version %d", stats->version);
+		FrisLog("Unknown stats version %d", stats->version);
 		break;
 	}
 }

@@ -100,7 +100,7 @@ GetSockbufSize(void)
 		int sock;
 
 		if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
-			pfatal("Could not allocate a socket");
+			FrisPfatal("Could not allocate a socket");
 
 		for (sbsize = sockbufsize; sbsize > 0; sbsize -= (16*1024)) {
 			int i = sbsize;
@@ -121,15 +121,15 @@ GetSockbufSize(void)
 			unsigned int ilen = sizeof(i);
 			if (getsockopt(sock, SOL_SOCKET, SO_SNDBUF,
 				       &i, &ilen) < 0)
-				pfatal("Could not read sockbuf size");
+				FrisPfatal("Could not read sockbuf size");
 #ifdef linux
 			/* In Linux, getsockopt returns 2 * actual value */
 			if (i == 2 * sbsize)
 				i = sbsize;
 #endif
 			if (i != sbsize) {
-				warning("Actual socket buffer size is %d"
-					" (instead of %d)", i, sbsize);
+				FrisWarning("Actual socket buffer size is %d"
+					    " (instead of %d)", i, sbsize);
 				sbsize = i;
 			}
 		}
@@ -137,7 +137,7 @@ GetSockbufSize(void)
 #else
 		sbsize = sockbufsize;
 #endif
-		log("Maximum socket buffer size of %d bytes", sbsize);
+		FrisLog("Maximum socket buffer size of %d bytes", sbsize);
 	}
 	return sbsize;
 }
@@ -155,7 +155,7 @@ GetBcastAddr(struct in_addr *ifaddr, struct in_addr *bcaddr)
 	struct sockaddr_in *sin;
 
 	if (getifaddrs(&ifa) != 0) {
-		pwarning("Could not get interface list");
+		FrisPwarning("Could not get interface list");
 		return 1;
 	}
 
@@ -174,7 +174,7 @@ GetBcastAddr(struct in_addr *ifaddr, struct in_addr *bcaddr)
 	}
 	freeifaddrs(ifa);
 
-	warning("Could not find interface %s", inet_ntoa(*ifaddr));
+	FrisWarning("Could not find interface %s", inet_ntoa(*ifaddr));
 	return 1;
 }
 
@@ -187,15 +187,16 @@ CommonInit(int dobind)
 	struct hostent		*he;
 	
 	if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
-		pfatal("Could not allocate a socket");
+		FrisPfatal("Could not allocate a socket");
 
 	i = GetSockbufSize();
 	if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &i, sizeof(i)) < 0)
-		pwarning("Could not increase send socket buffer size to %d", i);
+		FrisPwarning("Could not set send socket buffer size to %d", i);
     
 	i = GetSockbufSize();
 	if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &i, sizeof(i)) < 0)
-		pwarning("Could not increase recv socket buffer size to %d", i);
+		FrisPwarning("Could not set receive socket buffer size to %d",
+			     i);
 
 	if (dobind) {
 		name.sin_family      = AF_INET;
@@ -214,17 +215,18 @@ CommonInit(int dobind)
 			 * different port.
 			 */
 			if (--i == 0) {
-				error("Could not bind to port %d!\n", portnum);
+				FrisError("Could not bind to port %d!\n",
+					  portnum);
 				exit(EADDRINUSE);
 			}
 
-			pwarning("Bind to port %d failed. Will try %d more times!",
-				 portnum, i);
+			FrisPwarning("Bind to port %d failed. Will try %d more times!",
+				     portnum, i);
 			sleep(5);
 		}
-		log("Bound to port %d", portnum);
+		FrisLog("Bound to port %d", portnum);
 	} else {
-		log("NOT binding to port %d", portnum);
+		FrisLog("NOT binding to port %d", portnum);
 	}
 	sndportnum = htons(portnum);
 
@@ -235,7 +237,7 @@ CommonInit(int dobind)
 		unsigned int loop = 0, ttl = MCAST_TTL;
 		struct ip_mreq mreq;
 
-		log("Using Multicast %s", inet_ntoa(mcastaddr));
+		FrisLog("Using Multicast %s", inet_ntoa(mcastaddr));
 
 		mreq.imr_multiaddr.s_addr = mcastaddr.s_addr;
 
@@ -246,21 +248,21 @@ CommonInit(int dobind)
 
 		if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
 			       &mreq, sizeof(mreq)) < 0)
-			pfatal("setsockopt(IPPROTO_IP, IP_ADD_MEMBERSHIP)");
+			FrisPfatal("setsockopt(IPPROTO_IP, IP_ADD_MEMBERSHIP)");
 
 		if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL,
 			       &ttl, sizeof(ttl)) < 0) 
-			pfatal("setsockopt(IPPROTO_IP, IP_MULTICAST_TTL)");
+			FrisPfatal("setsockopt(IPPROTO_IP, IP_MULTICAST_TTL)");
 
 		/* Disable local echo */
 		if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP,
 			       &loop, sizeof(loop)) < 0)
-			pfatal("setsockopt(IPPROTO_IP, IP_MULTICAST_LOOP)");
+			FrisPfatal("setsockopt(IPPROTO_IP, IP_MULTICAST_LOOP)");
 
 		if (mcastif.s_addr &&
 		    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF,
 			       &mcastif, sizeof(mcastif)) < 0) {
-			pfatal("setsockopt(IPPROTO_IP, IP_MULTICAST_IF)");
+			FrisPfatal("setsockopt(IPPROTO_IP, IP_MULTICAST_IF)");
 		}
 
 #ifdef WITH_IGMP
@@ -268,7 +270,7 @@ CommonInit(int dobind)
 #endif
 	}
 	else if (broadcast) {
-		log("Setting broadcast mode");
+		FrisLog("Setting broadcast mode");
 
 		/*
 		 * If they are using the local broadcast address and they
@@ -281,18 +283,18 @@ CommonInit(int dobind)
 			struct in_addr bcaddr;
 			if (mcastif.s_addr &&
 			    GetBcastAddr(&mcastif, &bcaddr) == 0) {
-				log("Limiting broadcasts using %s",
-				    inet_ntoa(bcaddr));
+				FrisLog("Limiting broadcasts using %s",
+					inet_ntoa(bcaddr));
 				mcastaddr = bcaddr;
 			} else
-				warning("WARNING: will broadcast "
-					"to ALL configured interfaces!");
+				FrisWarning("WARNING: will broadcast "
+					    "to ALL configured interfaces!");
 		}
 
 		i = 1;
 		if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST,
 			       &i, sizeof(i)) < 0)
-			pfatal("setsockopt(SOL_SOCKET, SO_BROADCAST)");
+			FrisPfatal("setsockopt(SOL_SOCKET, SO_BROADCAST)");
 	}
 
 #ifndef NO_SOCKET_TIMO
@@ -306,7 +308,7 @@ CommonInit(int dobind)
 		timeout.tv_usec = PKTRCV_TIMEOUT;
 		if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
 			       &timeout, sizeof(timeout)) < 0)
-			pfatal("setsockopt(SOL_SOCKET, SO_RCVTIMEO)");
+			FrisPfatal("setsockopt(SOL_SOCKET, SO_RCVTIMEO)");
 	}
 #endif
 
@@ -319,10 +321,10 @@ CommonInit(int dobind)
 		myipaddr.s_addr = mcastif.s_addr;
 	else {
 		if (gethostname(buf, sizeof(buf)) < 0)
-			pfatal("gethostname failed");
+			FrisPfatal("gethostname failed");
 
 		if ((he = gethostbyname(buf)) == 0)
-			fatal("gethostbyname: %s", hstrerror(h_errno));
+			FrisFatal("gethostbyname: %s", hstrerror(h_errno));
 
 		memcpy((char *)&myipaddr, he->h_addr, sizeof(myipaddr));
 	}
@@ -368,7 +370,7 @@ ServerNetInit(void)
 	{
 		int i = 1;
 		if (setsockopt(sock, SOL_IP, IP_RECVERR, &i, sizeof(i)) < 0)
-			pwarning("Could not enable extended errors");
+			FrisPwarning("Could not enable extended errors");
 	}
 #endif
 
@@ -446,7 +448,7 @@ PacketReceive(Packet_t *p)
 	if (rv < 0) {
 		if (errno == EINTR)
 			return -1;
-		pfatal("PacketReceive(select)");
+		FrisPfatal("PacketReceive(select)");
 	}
 	if (rv == 0)
 		return -1;
@@ -457,15 +459,15 @@ PacketReceive(Packet_t *p)
 			     (struct sockaddr *)&from, &alen)) < 0) {
 		if (errno == EWOULDBLOCK)
 			return -1;
-		pfatal("PacketReceive(recvfrom)");
+		FrisPfatal("PacketReceive(recvfrom)");
 	}
 
 	/*
 	 * Basic integrity checks
 	 */
 	if (mlen < sizeof(p->hdr) + p->hdr.datalen) {
-		log("Bad message length (%d != %d)",
-		    mlen, p->hdr.datalen);
+		FrisLog("Bad message length (%d != %d)",
+			mlen, p->hdr.datalen);
 		return 1;
 	}
 #ifdef SAME_HOST_HACK
@@ -486,13 +488,13 @@ PacketReceive(Packet_t *p)
 		sndportnum = from.sin_port;
 #endif
 	if (p->hdr.srcip != from.sin_addr.s_addr) {
-		log("Bad message source (%x != %x)",
-		    ntohl(from.sin_addr.s_addr), ntohl(p->hdr.srcip));
+		FrisLog("Bad message source (%x != %x)",
+			ntohl(from.sin_addr.s_addr), ntohl(p->hdr.srcip));
 		return 1;
 	}
 	if (sndportnum != from.sin_port) {
-		log("Bad message port (%d != %d)",
-		    ntohs(from.sin_port), ntohs(sndportnum));
+		FrisLog("Bad message port (%d != %d)",
+			ntohs(from.sin_port), ntohs(sndportnum));
 		return 1;
 	}
 	return 0;
@@ -526,7 +528,7 @@ PacketSend(Packet_t *p, int *resends)
 	while ((rc = sendto(sock, (void *)p, len, MSG_DONTWAIT,
 			    (struct sockaddr *)&to, sizeof(to))) <= 0) {
 		if (rc < 0 && !(errno == ENOBUFS || errno == EAGAIN))
-			pfatal("PacketSend(sendto)");
+			FrisPfatal("PacketSend(sendto)");
 
 		/*
 		 * ENOBUFS (BSD) or EAGAIN (Linux, because we set DONTWAIT)
@@ -571,7 +573,7 @@ PacketReply(Packet_t *p)
 	while (sendto(sock, (void *)p, len, 0, 
 		      (struct sockaddr *)&to, sizeof(to)) < 0) {
 		if (errno != ENOBUFS)
-			pfatal("PacketSend(sendto)");
+			FrisPfatal("PacketSend(sendto)");
 
 		/*
 		 * ENOBUFS means we ran out of mbufs. Okay to sleep a bit

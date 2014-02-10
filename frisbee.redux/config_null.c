@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2013 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -228,20 +228,20 @@ null_get_server_address(struct config_imageinfo *ii, int methods, int first,
 
 #if 0
 	if ((methods & (CONFIG_IMAGE_MCAST|CONFIG_IMAGE_UCAST)) == 0) {
-		error("get_server_address: only support UCAST/MCAST");
+		FrisError("get_server_address: only support UCAST/MCAST");
 		return 1;
 	}
 #endif
 
  again:
 	if ((fd = fopen(indexfile, "r+")) == NULL) {
-		error("get_server_address: could not open index file '%s'!",
-		      indexfile);
+		FrisError("get_server_address: could not open index file '%s'!",
+			  indexfile);
 		return 1;
 	}
 	if (fscanf(fd, "%d", &idx) != 1 || idx < 0) {
-		error("get_server_address: bogus index in '%s'!",
-		      indexfile);
+		FrisError("get_server_address: bogus index in '%s'!",
+			  indexfile);
 		fclose(fd);
 		return 1;
 	}
@@ -253,8 +253,8 @@ null_get_server_address(struct config_imageinfo *ii, int methods, int first,
 	idx += incr;
 
 	if (fseek(fd, 0L, SEEK_SET) != 0 || fprintf(fd, "%d\n", idx) < 0) {
-		error("get_server_address: cannot update index in '%s'!",
-		      indexfile);
+		FrisError("get_server_address: cannot update index in '%s'!",
+			  indexfile);
 		fclose(fd);
 		return 1;
 	}
@@ -275,7 +275,7 @@ null_get_server_address(struct config_imageinfo *ii, int methods, int first,
 		c = (c % 254) + 1;
 	}
 	if (b > 254) {
-		error("get_server_address: ran out of MC addresses!");
+		FrisError("get_server_address: ran out of MC addresses!");
 		return 1;
 	}
 
@@ -721,7 +721,7 @@ null_init(char *opts)
 	if (imagedir == NULL)
 		imagedir = DEFAULT_IMAGEDIR;
 	if ((path = myrealpath(imagedir, pathbuf)) == NULL) {
-		error("null_init: could not resolve '%s'", imagedir);
+		FrisError("null_init: could not resolve '%s'", imagedir);
 		return NULL;
 	}
 	rimagedir = mystrdup(path);
@@ -732,8 +732,8 @@ null_init(char *opts)
 		FILE *fd;
 
 		if ((fd = fopen(indexfile, "w")) == NULL) {
-			error("null_init: could not create index file '%s'",
-			      indexfile);
+			FrisError("null_init: could not create index file '%s'",
+				  indexfile);
 			unlink(indexfile);
 			free(indexfile);
 			return NULL;
@@ -744,15 +744,15 @@ null_init(char *opts)
 
 	/* One time parsing of MC address info */
 	if (sscanf(DEFAULT_MCADDR, "%d.%d.%d", &mc_a, &mc_b, &mc_c) != 3) {
-		error("null_init: MC base addr '%s' not in A.B.C format!",
-		      DEFAULT_MCADDR);
+		FrisError("null_init: MC base addr '%s' not in A.B.C format!",
+			  DEFAULT_MCADDR);
 		return NULL;
 	}
 	mc_port_lo = atoi(DEFAULT_MCPORT);
 	mc_port_num = atoi(DEFAULT_MCNUMPORT);
 	if (mc_port_num < 0 || mc_port_num >= 65536) {
-		error("emulab_init: MC numports '%s' not in valid range!",
-		      DEFAULT_MCNUMPORT);
+		FrisError("emulab_init: MC numports '%s' not in valid range!",
+			  DEFAULT_MCNUMPORT);
 		return NULL;
 	}
 
@@ -768,7 +768,7 @@ mymalloc(size_t size)
 {
 	void *ptr = malloc(size);
 	if (ptr == NULL) {
-		error("config_null: out of memory!");
+		FrisError("config_null: out of memory!");
 		abort();
 	}
 	return ptr;
@@ -779,7 +779,7 @@ myrealloc(void *ptr, size_t size)
 {
 	void *nptr = realloc(ptr, size);
 	if (nptr == NULL) {
-		error("config_null: out of memory!");
+		FrisError("config_null: out of memory!");
 		abort();
 	}
 	return nptr;
@@ -790,7 +790,7 @@ mystrdup(const char *str)
 {
 	char *nstr = strdup(str);
 	if (nstr == NULL) {
-		error("config_null: out of memory!");
+		FrisError("config_null: out of memory!");
 		abort();
 	}
 	return nstr;

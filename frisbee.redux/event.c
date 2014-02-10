@@ -266,7 +266,7 @@ callback(event_handle_t handle, event_notification_t notification, void *data)
 	}
 #endif
 	if (parse_event(&lastevent, buf[6], args))
-		log("bogus event '%s %s' ignored", buf[6], args);
+		FrisLog("bogus event '%s %s' ignored", buf[6], args);
 }
 
 int
@@ -279,17 +279,17 @@ EventInit(char *server)
 	address_tuple_t	tuple;
 	    
 	if (server == NULL) {
-		warning("no event server specified");
+		FrisWarning("no event server specified");
 		return 1;
 	}
 
 	if (gethostname(buf, sizeof(buf)) < 0) {
-		pwarning("could not get hostname");
+		FrisPwarning("could not get hostname");
 		return 1;
 	}
 
 	if ((he = gethostbyname(buf)) == NULL) {
-		warning("could not get IP address from hostname");
+		FrisWarning("could not get IP address from hostname");
 		return 1;
 	}
 
@@ -306,11 +306,11 @@ EventInit(char *server)
 	 * field to determine if we should process an event.
 	 */
 	if (sscanf(buf, "c-%d.", &clientnum) != 1) {
-		warning("could not determine client number from hostname %s",
-			buf);
+		FrisWarning("could not determine client number from hostname %s",
+			    buf);
 		return 1;
 	} else if (debug)
-		log("client number %d for event handling", clientnum);
+		FrisLog("client number %d for event handling", clientnum);
 
 	/*
 	 * Convert server/port to elvin thing.
@@ -324,7 +324,7 @@ EventInit(char *server)
 	 */
 	tuple = address_tuple_alloc();
 	if (tuple == NULL) {
-		warning("could not allocate an address tuple");
+		FrisWarning("could not allocate an address tuple");
 		return 1;
 	}
 	tuple->host	 = ADDRESSTUPLE_ANY; /* ipaddr; */
@@ -340,7 +340,7 @@ EventInit(char *server)
 	 */
 	ehandle = event_register(server, 0);
 	if (ehandle == NULL) {
-		warning("could not register with event system");
+		FrisWarning("could not register with event system");
 		address_tuple_free(tuple);
 		return 1;
 	}
@@ -349,7 +349,7 @@ EventInit(char *server)
 	 * Subscribe to the event we specified above.
 	 */
 	if (!event_subscribe(ehandle, callback, tuple, NULL)) {
-		warning("could not subscribe to FRISBEE events");
+		FrisWarning("could not subscribe to FRISBEE events");
 		address_tuple_free(tuple);
 		return 1;
 	}
@@ -365,7 +365,7 @@ EventCheck(Event_t *event)
 	gotevent = 0;
 	rv = event_poll(ehandle);
 	if (rv)
-		fatal("event_poll failed, err=%d\n", rv);
+		FrisFatal("event_poll failed, err=%d\n", rv);
 	if (gotevent)
 		memcpy(event, &lastevent, sizeof lastevent);
 	return gotevent;

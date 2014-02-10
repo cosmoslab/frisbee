@@ -69,8 +69,8 @@ main(int argc, char **argv)
 
 	net_init();
 
-	log("%s: listening on port %d for image data from %s (max of %llu bytes)",
-	    path, portnum, inet_ntoa(clientip), maxsize);
+	FrisLog("%s: listening on port %d for image data from %s (max of %llu bytes)",
+		path, portnum, inet_ntoa(clientip), maxsize);
 
 	rv = recv_file();
 	close(sock);
@@ -195,8 +195,8 @@ recv_file()
 	gettimeofday(&st, NULL);	/* XXX for early errors */
 	wbuf = malloc(bufsize);
 	if (wbuf == NULL) {
-		error("Could not allocate %d byte buffer, try using -b",
-		      bufsize);
+		FrisError("Could not allocate %d byte buffer, try using -b",
+			  bufsize);
 		goto done;
 	}
 
@@ -205,16 +205,16 @@ recv_file()
 	else
 		fd = open(path, O_WRONLY|O_CREAT, 0644);
 	if (fd < 0) {
-		pwarning(path);
+		FrisPwarning(path);
 		goto done;
 	}
 
 	conn = conn_accept_tcp(sock, &clientip);
 	if (conn == NULL) {
-		error("Error accepting from %s", inet_ntoa(clientip));
+		FrisError("Error accepting from %s", inet_ntoa(clientip));
 		goto done;
 	}
-	log("%s: upload from %s started", path, inet_ntoa(clientip));
+	FrisLog("%s: upload from %s started", path, inet_ntoa(clientip));
 
 	gettimeofday(&st, NULL);
 	while (maxsize == 0 || remaining > 0) {
@@ -226,7 +226,7 @@ recv_file()
 			cc = remaining;
 		ncc = conn_read(conn, wbuf, cc);
 		if (ncc < 0) {
-			pwarning("socket read");
+			FrisPwarning("socket read");
 			goto done;
 		}
 		if (ncc == 0)
@@ -234,12 +234,12 @@ recv_file()
 
 		cc = write(fd, wbuf, ncc);
 		if (cc < 0) {
-			pwarning("file write");
+			FrisPwarning("file write");
 			goto done;
 		}
 		remaining -= cc;
 		if (cc != ncc) {
-			error("short write on file (%d != %d)", cc, ncc);
+			FrisError("short write on file (%d != %d)", cc, ncc);
 			goto done;
 		}
 	}
@@ -273,14 +273,14 @@ recv_file()
 
 	stat = rv == 0 ? "completed" : (rv == 1 ? "terminated" : "timed-out");
 	if (maxsize && remaining)
-		log("%s: upload %s after %llu (of max %llu) bytes "
-		    "in %d.%03d seconds",
-		    path, stat, maxsize-remaining, maxsize,
-		    et.tv_sec, et.tv_usec/1000);
+		FrisLog("%s: upload %s after %llu (of max %llu) bytes "
+			"in %d.%03d seconds",
+			path, stat, maxsize-remaining, maxsize,
+			et.tv_sec, et.tv_usec/1000);
 	else
-		log("%s: upload %s after %llu bytes in %d.%03d seconds",
-		    path, stat, maxsize-remaining,
-		    et.tv_sec, et.tv_usec/1000);
+		FrisLog("%s: upload %s after %llu bytes in %d.%03d seconds",
+			path, stat, maxsize-remaining,
+			et.tv_sec, et.tv_usec/1000);
 
 	/* XXX unlink file on error? */
 	return rv;
@@ -297,7 +297,7 @@ net_init(void)
 	struct sockaddr_in name;
 	
 	if ((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
-		pfatal("Could not allocate socket");
+		FrisPfatal("Could not allocate socket");
 
 	name.sin_family = AF_INET;
 	name.sin_addr.s_addr = clientif.s_addr;
@@ -315,6 +315,6 @@ net_init(void)
 	}
 	if (listen(sock, 128) < 0) {
 		close(sock);
-		pfatal("Could not listen on socket");
+		FrisPfatal("Could not listen on socket");
 	}
 }

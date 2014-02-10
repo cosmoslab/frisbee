@@ -96,9 +96,9 @@ main(int argc, char **argv)
 		struct stat sb;
 
 		if (stat(uploadpath, &sb))
-			pfatal(uploadpath);
+			FrisPfatal(uploadpath);
 		if (!S_ISREG(sb.st_mode))
-			fatal("%s: not a regular file\n", uploadpath);
+			FrisFatal("%s: not a regular file\n", uploadpath);
 		filesize = sb.st_size;
 		mtime = (uint32_t)sb.st_mtime;
 
@@ -118,7 +118,8 @@ main(int argc, char **argv)
 		if (!put_request(imageid, ntohl(msip.s_addr), msport, proxyip,
 				 filesize, mtime, timeout, askonly, timo,
 				 &reply))
-			fatal("Could not get upload info for '%s'", imageid);
+			FrisFatal("Could not get upload info for '%s'",
+				  imageid);
 
 		if (askonly) {
 			PrintPutInfo(imageid, &reply, 1);
@@ -136,12 +137,12 @@ main(int argc, char **argv)
 
 				maxsize = ((uint64_t)reply.himaxsize << 32) |
 					reply.lomaxsize;
-				fatal("%s: file too large for server"
-				      " (%llu > %llu)",
-				      imageid, filesize, maxsize);
+				FrisFatal("%s: file too large for server"
+					  " (%llu > %llu)",
+					  imageid, filesize, maxsize);
 			} else
-				fatal("%s: server returned error: %s", imageid,
-				      GetMSError(reply.error));
+				FrisFatal("%s: server returned error: %s",
+					  imageid, GetMSError(reply.error));
 		}
 
 		serverip.s_addr = htonl(reply.addr);
@@ -158,8 +159,8 @@ main(int argc, char **argv)
 		verify = 0;
 	}
 		
-	log("%s: upload to %s:%d from %s",
-	    imageid, inet_ntoa(serverip), portnum, uploadpath);
+	FrisLog("%s: upload to %s:%d from %s",
+		imageid, inet_ntoa(serverip), portnum, uploadpath);
 
 	rv = send_file();
 
@@ -178,8 +179,8 @@ main(int argc, char **argv)
 			sleep(1);
 			if (!put_request(imageid, ntohl(msip.s_addr), msport,
 					 proxyip, 0, 0, 0, 1, timo, &reply)) {
-				warning("%s: status request failed",
-					imageid);
+				FrisWarning("%s: status request failed",
+					    imageid);
 				goto vdone;
 			}
 			if (reply.error == 0)
@@ -188,25 +189,25 @@ main(int argc, char **argv)
 			if (reply.error &&
 			    (reply.error != MS_ERROR_TRYAGAIN ||
 			     --retries == 0)) {
-				warning("%s: status returned error %s",
-					imageid, GetMSError(reply.error));
+				FrisWarning("%s: status returned error %s",
+					    imageid, GetMSError(reply.error));
 				goto vdone;
 			}
 		}
 
 		/* dpes it exist? */
 		if (!reply.exists) {
-			warning("%s: uploaded file does not exist?!",
-				imageid);
+			FrisWarning("%s: uploaded file does not exist?!",
+				    imageid);
 			goto vdone;
 		}
 
 		/* is it the right size? */
 		isize = ((uint64_t)reply.hisize << 32) | reply.losize;
 		if (filesize && isize != filesize) {
-			warning("%s: uploaded file is the wrong size: "
-				"%llu bytes but should be %llu bytes",
-				imageid, isize, filesize);
+			FrisWarning("%s: uploaded file is the wrong size: "
+				    "%llu bytes but should be %llu bytes",
+				    imageid, isize, filesize);
 			goto vdone;
 		}
 
@@ -215,9 +216,9 @@ main(int argc, char **argv)
 		case MS_SIGTYPE_MTIME:
 			mt = *(uint32_t *)reply.signature;
 			if (mtime && mt != mtime) {
-				warning("%s: uploaded file has wrong mtime: "
-					"%u but should be %u",
-					imageid, mt, mtime);
+				FrisWarning("%s: uploaded file has wrong mtime: "
+					    "%u but should be %u",
+					    imageid, mt, mtime);
 				goto vdone;
 			}
 			break;
@@ -229,7 +230,8 @@ main(int argc, char **argv)
 
 	vdone:
 		if (bad)
-			warning("%s: uploaded image did not verify!", imageid);
+			FrisWarning("%s: uploaded image did not verify!",
+				    imageid);
 	}
 
 	exit(rv);
@@ -380,8 +382,8 @@ send_file(void)
 
 	rbuf = malloc(bufsize);
 	if (rbuf == NULL) {
-		error("Could not allocate %d byte buffer, try using -b",
-		      bufsize);
+		FrisError("Could not allocate %d byte buffer, try using -b",
+			  bufsize);
 		goto done;
 	}
 
@@ -390,14 +392,14 @@ send_file(void)
 	else
 		fd = open(uploadpath, O_RDONLY);
 	if (fd < 0) {
-		pwarning(uploadpath);
+		FrisPwarning(uploadpath);
 		goto done;
 	}
 
 	conn = conn_open(ntohl(serverip.s_addr), portnum, usessl);
 	if (conn == NULL) {
-		error("Could not open connection with server %s:%d",
-		      inet_ntoa(serverip), portnum);
+		FrisError("Could not open connection with server %s:%d",
+			  inet_ntoa(serverip), portnum);
 		goto done;
 	}
 
@@ -411,7 +413,7 @@ send_file(void)
 			cc = remaining;
 		ncc = read(fd, rbuf, cc);
 		if (ncc < 0) {
-			pwarning("file read");
+			FrisPwarning("file read");
 			goto done;
 		}
 		if (ncc == 0)
@@ -419,12 +421,12 @@ send_file(void)
 
 		cc = conn_write(conn, rbuf, ncc);
 		if (cc < 0) {
-			pwarning("socket write");
+			FrisPwarning("socket write");
 			goto done;
 		}
 		remaining -= cc;
 		if (cc != ncc) {
-			error("short write on socket (%d != %d)", cc, ncc);
+			FrisError("short write on socket (%d != %d)", cc, ncc);
 			goto done;
 		}
 	}
@@ -454,14 +456,14 @@ send_file(void)
 	/* Note that remaining will be negative if filesize==0 */
 	stat = rv == 0 ? "completed" : (rv == 1 ? "terminated" : "timed-out");
 	if (filesize && remaining)
-		log("%s: upload %s after %llu (of %llu) bytes "
-		    "in %d.%03d seconds",
-		    imageid, stat, filesize-remaining, filesize,
-		    et.tv_sec, et.tv_usec/1000);
+		FrisLog("%s: upload %s after %llu (of %llu) bytes "
+			"in %d.%03d seconds",
+			imageid, stat, filesize-remaining, filesize,
+			et.tv_sec, et.tv_usec/1000);
 	else
-		log("%s: upload %s after %llu bytes in %d.%03d seconds",
-		    imageid, stat, filesize-remaining,
-		    et.tv_sec, et.tv_usec/1000);
+		FrisLog("%s: upload %s after %llu bytes in %d.%03d seconds",
+			imageid, stat, filesize-remaining,
+			et.tv_sec, et.tv_usec/1000);
 
 	/* Set filesize to bytes written so verify has something to check */
 	if (verify && rv == 0 && filesize == 0)

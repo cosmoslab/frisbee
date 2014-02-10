@@ -76,6 +76,7 @@ void		reinit(int);
 static ssize_t	mypread(int fd, void *buf, size_t nbytes, off_t offset);
 static void	calcburst(void);
 static void	compute_sendrate(void);
+static void	dumpstats(void);
 
 #ifdef STATS
 /*
@@ -256,7 +257,7 @@ WorkQueueEnqueue(int chunk, BlockMap_t *map, int count)
 
 	wqel = calloc(1, sizeof(WQelem_t));
 	if (wqel == NULL)
-		fatal("WorkQueueEnqueue: No more memory");
+		FrisFatal("WorkQueueEnqueue: No more memory");
 
 	wqel->chunk = chunk;
 	wqel->nblocks = count;
@@ -341,7 +342,7 @@ ClientEnqueueMap(int chunk, BlockMap_t *map, int count, int isretry)
 	else if (chunkmap != 0 && count == MAXCHUNKSIZE) {
 		if (chunkmap[chunk]) {
 			if (debug > 1)
-				log("Duplicate chunk request: %d", chunk);
+				FrisLog("Duplicate chunk request: %d", chunk);
 			EVENT(1, EV_DUPCHUNK, mcastaddr, chunk, 0, 0, 0);
 			DOSTAT(dupsent++);
 		} else
@@ -396,8 +397,8 @@ ClientJoin(Packet_t *p, int version)
 		 * but I'm not sure that is any better.
 		 */
 		if (!FileInfo.isimage) {
-			log("%s requested JOINv1 for non-image file, "
-			    "ignoring...", inet_ntoa(ipaddr));
+			FrisLog("%s requested JOINv1 for non-image file, "
+				"ignoring...", inet_ntoa(ipaddr));
 			return;
 		}
 		p->hdr.datalen = sizeof(p->msg.join);
@@ -417,15 +418,15 @@ ClientJoin(Packet_t *p, int version)
 		for (i = 0; i < MAXCLIENTS; i++) {
 			if (clients[i].id == clientid) {
 				if (clients[i].ip != ipaddr.s_addr) {
-					log("%s reuses active client id",
-					    inet_ntoa(ipaddr));
+					FrisLog("%s reuses active client id",
+						inet_ntoa(ipaddr));
 					clients[i].ip = ipaddr.s_addr;
 				}
 				break;
 			}
 			if (clients[i].ip == ipaddr.s_addr) {
-				log("%s rejoins with different cid, ocid=%u",
-				    inet_ntoa(ipaddr), clients[i].id);
+				FrisLog("%s rejoins with different cid, ocid=%u",
+					inet_ntoa(ipaddr), clients[i].id);
 				clients[i].id = clientid;
 				break;
 			}
@@ -452,9 +453,9 @@ ClientJoin(Packet_t *p, int version)
 	 * Log after we send reply so that we get the packet off as
 	 * quickly as possible!
 	 */
-	log("%s (id %u, image %s) joins (v%d) at %s!  %d active clients.",
-	    inet_ntoa(ipaddr), clientid, filename, version,
-	    CurrentTimeString(), activeclients);
+	FrisLog("%s (id %u, image %s) joins (v%d) at %s!  %d active clients.",
+		inet_ntoa(ipaddr), clientid, filename, version,
+		CurrentTimeString(), activeclients);
 }
 
 /*
@@ -478,23 +479,23 @@ ClientLeave(Packet_t *p)
 				activeclients--;
 				clients[i].id = 0;
 				clients[i].ip = 0;
-				log("%s (id %u, image %s): leaves at %s, "
-				    "ran for %d seconds.  %d active clients",
-				    inet_ntoa(ipaddr), clientid, filename,
-				    CurrentTimeString(),
-				    p->msg.leave.elapsed, activeclients);
+				FrisLog("%s (id %u, image %s): leaves at %s, "
+					"ran for %d seconds.  %d active clients",
+					inet_ntoa(ipaddr), clientid, filename,
+					CurrentTimeString(),
+					p->msg.leave.elapsed, activeclients);
 				break;
 			}
 		if (i == MAXCLIENTS)
-			log("%s (id %u): spurious leave ignored",
-			    inet_ntoa(ipaddr), clientid);
+			FrisLog("%s (id %u): spurious leave ignored",
+				inet_ntoa(ipaddr), clientid);
 	}
 #else
 	activeclients--;
-	log("%s (id %u, image %s): leaves at %s, ran for %d seconds.  "
-	    "%d active clients",
-	    inet_ntoa(ipaddr), clientid, filename, CurrentTimeString(),
-	    p->msg.leave.elapsed, activeclients);
+	FrisLog("%s (id %u, image %s): leaves at %s, ran for %d seconds.  "
+		"%d active clients",
+		inet_ntoa(ipaddr), clientid, filename, CurrentTimeString(),
+		p->msg.leave.elapsed, activeclients);
 #endif
 }
 
@@ -519,24 +520,24 @@ ClientLeave2(Packet_t *p)
 				clients[i].id = 0;
 				clients[i].ip = 0;
 				activeclients--;
-				log("%s (id %u, image %s): leaves at %s, "
-				    "ran for %d seconds.  %d active clients",
-				    inet_ntoa(ipaddr), clientid, filename,
-				    CurrentTimeString(),
-				    p->msg.leave2.elapsed, activeclients);
+				FrisLog("%s (id %u, image %s): leaves at %s, "
+					"ran for %d seconds.  %d active clients",
+					inet_ntoa(ipaddr), clientid, filename,
+					CurrentTimeString(),
+					p->msg.leave2.elapsed, activeclients);
 				ClientStatsDump(clientid, &p->msg.leave2.stats);
 				break;
 			}
 		if (i == MAXCLIENTS)
-			log("%s (id %u): spurious leave ignored",
-			    inet_ntoa(ipaddr), clientid);
+			FrisLog("%s (id %u): spurious leave ignored",
+				inet_ntoa(ipaddr), clientid);
 	}
 #else
 	activeclients--;
-	log("%s (id %u, image %s): leaves at %s, ran for %d seconds.  "
-	    "%d active clients",
-	    inet_ntoa(ipaddr), clientid, filename, CurrentTimeString(),
-	    p->msg.leave2.elapsed, activeclients);
+	FrisLog("%s (id %u, image %s): leaves at %s, ran for %d seconds.  "
+		"%d active clients",
+		inet_ntoa(ipaddr), clientid, filename, CurrentTimeString(),
+		p->msg.leave2.elapsed, activeclients);
 #endif
 }
 
@@ -555,19 +556,19 @@ ClientRequest(Packet_t *p)
 	BlockMap_t	tmp;
 
 	if (count == 0)
-		log("WARNING: ClientRequest with zero count");
+		FrisLog("WARNING: ClientRequest with zero count");
 
 	EVENT(1, EV_REQMSG, ipaddr, chunk, block, count, 0);
 	if (block + count > MAXCHUNKSIZE)
-		fatal("Bad request from %s - chunk:%d block:%d size:%d", 
-		      inet_ntoa(ipaddr), chunk, block, count);
+		FrisFatal("Bad request from %s - chunk:%d block:%d size:%d", 
+			  inet_ntoa(ipaddr), chunk, block, count);
 
 	BlockMapInit(&tmp, block, count);
 	ClientEnqueueMap(chunk, &tmp, count, 0);
 
 	if (debug > 1) {
-		log("Client %s requests chunk:%d block:%d size:%d",
-		    inet_ntoa(ipaddr), chunk, block, count);
+		FrisLog("Client %s requests chunk:%d block:%d size:%d",
+			inet_ntoa(ipaddr), chunk, block, count);
 	}
 }
 
@@ -586,15 +587,15 @@ ClientPartialRequest(Packet_t *p)
 	count = BlockMapIsAlloc(&p->msg.prequest.blockmap, 0, MAXCHUNKSIZE);
 
 	if (count == 0)
-		log("WARNING: ClientPartialRequest with zero count");
+		FrisLog("WARNING: ClientPartialRequest with zero count");
 
 	EVENT(1, EV_PREQMSG, ipaddr, chunk, count, p->msg.prequest.retries, 0);
 	ClientEnqueueMap(chunk, &p->msg.prequest.blockmap, count,
 			 p->msg.prequest.retries);
 
 	if (debug > 1) {
-		log("Client %s requests %d blocks of chunk:%d",
-		    inet_ntoa(ipaddr), count, chunk);
+		FrisLog("Client %s requests %d blocks of chunk:%d",
+			inet_ntoa(ipaddr), count, chunk);
 	}
 }
 
@@ -610,7 +611,7 @@ ServerRecvThread(void *arg)
 	static int	gotone;
 
 	if (debug > 1)
-		log("Server pthread starting up ...");
+		FrisLog("Server pthread starting up ...");
 	
 	/*
 	 * Recalculate keepalive interval in terms of packet receive
@@ -624,16 +625,16 @@ ServerRecvThread(void *arg)
 		if (PacketReceive(p) != 0) {
 			if (keepalive && ++idles > keepalive) {
 				if (NetMCKeepAlive()) {
-					warning("Multicast keepalive failed");
+					FrisWarning("Multicast keepalive failed");
 					if (++kafails > 5) {
-						warning("too many failures, disabled");
+						FrisWarning("too many failures, disabled");
 						keepalive = 0;
 					}
 				} else {
 					kafails = 0;
 					idles = 0;
 					if (debug > 1)
-						log("Ping...");
+						FrisLog("Ping...");
 				}
 			}
 			continue;
@@ -644,14 +645,15 @@ ServerRecvThread(void *arg)
 		if (! PacketValid(p, FileInfo.chunks)) {
 			struct in_addr ipaddr = { p->hdr.srcip };
 			DOSTAT(badpackets++);
-			log("bad packet %d/%d from %s, ignored",
-			    p->hdr.type, p->hdr.subtype, inet_ntoa(ipaddr));
+			FrisLog("bad packet %d/%d from %s, ignored",
+				p->hdr.type, p->hdr.subtype,
+				inet_ntoa(ipaddr));
 			if (p->hdr.type == PKTTYPE_REQUEST &&
 			    (p->hdr.subtype == PKTSUBTYPE_REQUEST ||
 			     p->hdr.subtype == PKTSUBTYPE_PREQUEST))
-				log("  len=%d, chunk=%d(%d), word2=%d",
-				    p->hdr.datalen, p->msg.request.chunk,
-				    FileInfo.chunks, p->msg.request.block);
+				FrisLog("  len=%d, chunk=%d(%d), word2=%d",
+					p->hdr.datalen, p->msg.request.chunk,
+					FileInfo.chunks, p->msg.request.block);
 			continue;
 		}
 		gettimeofday(&LastReq, 0);
@@ -707,11 +709,11 @@ PlayFrisbee(void)
 	struct timeval	startnext;
 
 	if ((databuf = malloc(readsize * MAXBLOCKSIZE)) == NULL)
-		fatal("could not allocate read buffer");
+		FrisFatal("could not allocate read buffer");
 
 	while (1) {
 		if (killme) {
-			log("Interrupted!");
+			FrisLog("Interrupted!");
 			break;
 		}
 		
@@ -751,7 +753,7 @@ PlayFrisbee(void)
 			if (timeout < 0 &&
 			    Stats.joins > 0 && activeclients == 0) {
 				fsleep(2000000);
-				log("Last client left!");
+				FrisLog("Last client left!");
 				break;
 			}
 #endif
@@ -760,8 +762,8 @@ PlayFrisbee(void)
 				if (timeout > 0 &&
 				    stamp.tv_sec - IdleTimeStamp.tv_sec >
 				    timeout) {
-					log("No requests for %d seconds!",
-					    timeout);
+					FrisLog("No requests for %d seconds!",
+						timeout);
 					break;
 				}
 			} else {
@@ -824,10 +826,10 @@ PlayFrisbee(void)
 					readbytes -= diff;
 					resid = (int)diff;
 				} else {
-					warning("Attempt to read beyond EOF "
-						"(offset %llu > %llu)\n",
-						offset+readbytes,
-						FileInfo.filesize);
+					FrisWarning("Attempt to read beyond EOF "
+						    "(offset %llu > %llu)\n",
+						    offset+readbytes,
+						    FileInfo.filesize);
 					/* XXX just do not respond */
 					break;
 				}
@@ -836,8 +838,8 @@ PlayFrisbee(void)
 			if ((cc = mypread(FileInfo.fd, databuf,
 					  readbytes, offset)) <= 0) {
 				if (cc < 0)
-					pfatal("Reading File");
-				fatal("EOF on file");
+					FrisPfatal("Reading File");
+				FrisFatal("EOF on file");
 			}
 #ifdef STATS
 			{
@@ -857,7 +859,7 @@ PlayFrisbee(void)
 			EVENT(2, EV_READFILE, mcastaddr,
 			      offset, readbytes, rstamp.tv_sec, rstamp.tv_usec);
 			if (cc != readbytes)
-				fatal("Short read: %d!=%d", cc, readbytes);
+				FrisFatal("Short read: %d!=%d", cc, readbytes);
 
 			for (j = 0; j < readcount; j++) {
 				p->hdr.type    = PKTTYPE_REQUEST;
@@ -879,7 +881,8 @@ PlayFrisbee(void)
 					memset(&p->msg.block.buf[count],
 					       0, resid);
 					if (debug)
-						log("Handle partial final block, padded with %d bytes", resid);
+						FrisLog("Handle partial final block, padded with %d bytes",
+							resid);
 				} else {
 					memcpy(p->msg.block.buf,
 					       &databuf[j * MAXBLOCKSIZE],
@@ -1001,7 +1004,8 @@ main(int argc, char **argv)
 		case 'R':
 			readsize = atoi(optarg);
 			if (readsize == 0 || readsize > MAXCHUNKSIZE) {
-				warning("readsize set to %d", MAXCHUNKSIZE);
+				FrisWarning("readsize set to %d",
+					    MAXCHUNKSIZE);
 				readsize = MAXCHUNKSIZE;
 			}
 			break;
@@ -1033,7 +1037,7 @@ main(int argc, char **argv)
 		usage();
 
 	if (timeout > 0 && keepalive > timeout) {
-		warning("keepalive > timeout, disabling keepalive");
+		FrisWarning("keepalive > timeout, disabling keepalive");
 		keepalive = 0;
 	}
 
@@ -1045,17 +1049,17 @@ main(int argc, char **argv)
 	
 	filename = argv[0];
 	if (access(filename, R_OK) < 0)
-		pfatal("Cannot read %s", filename);
+		FrisPfatal("Cannot read %s", filename);
 
 	/*
 	 * Open the file and get its size so that we can tell clients how
 	 * much to expect/require.
 	 */
 	if ((fd = open(filename, O_RDONLY)) < 0)
-		pfatal("Cannot open %s", filename);
+		FrisPfatal("Cannot open %s", filename);
 
 	if ((fsize = lseek(fd, (off_t)0, SEEK_END)) < 0)
-		pfatal("Cannot lseek to end of file");
+		FrisPfatal("Cannot lseek to end of file");
 
 	InitSizes(MAXCHUNKSIZE, MAXBLOCKSIZE, fsize);
 	FileInfo.fd = fd;
@@ -1065,10 +1069,10 @@ main(int argc, char **argv)
 	if ((FileInfo.filesize % (BLOCKSIZE * CHUNKSIZE)) == 0)
 		FileInfo.isimage = 1;
 	else
-		warning("NOTE: serving non-image file, will ignore V1 JOINs");
+		FrisWarning("NOTE: serving non-image file, will ignore V1 JOINs");
 
-	log("Opened %s: %d blocks (%lld bytes)",
-	    filename, FileInfo.blocks, FileInfo.filesize);
+	FrisLog("Opened %s: %d blocks (%lld bytes)",
+		filename, FileInfo.blocks, FileInfo.filesize);
 
 	compute_sendrate();
 
@@ -1089,7 +1093,7 @@ main(int argc, char **argv)
 	 * Create the subthread to listen for packets.
 	 */
 	if (pthread_create(&child_pid, NULL, ServerRecvThread, (void *)0)) {
-		fatal("Failed to create pthread!");
+		FrisFatal("Failed to create pthread!");
 	}
 	gettimeofday(&IdleTimeStamp, 0);
 	
@@ -1103,60 +1107,12 @@ main(int argc, char **argv)
 	}
 	subtime(&LastReq, &LastReq, &FirstReq);
 
-#ifdef  STATS
-	{
-		struct rusage ru;
-		extern unsigned long nonetbufs;
-
-		getrusage(RUSAGE_SELF, &ru);
-		log("Params:");
-		log("  chunk/block size    %d/%d", MAXCHUNKSIZE, MAXBLOCKSIZE);
-		log("  burst size/interval %d/%d", burstsize, burstinterval);
-		log("  file read size      %d", readsize);
-		log("  file:size           %s:%qd",
-		    filename, (long long)fsize);
-		log("Stats:");
-		log("  service time:      %d.%03d sec",
-		    LastReq.tv_sec, LastReq.tv_usec/1000);
-		log("  user/sys CPU time: %d.%03d/%d.%03d",
-		    ru.ru_utime.tv_sec, ru.ru_utime.tv_usec/1000,
-		    ru.ru_stime.tv_sec, ru.ru_stime.tv_usec/1000);
-		log("  msgs in/out:       %d/%d",
-		    Stats.msgin, Stats.joinrep + Stats.blockssent);
-		log("  joins/leaves:      %d/%d", Stats.joins, Stats.leaves);
-		log("  requests:          %d (%d merged in queue)",
-		    Stats.requests, Stats.qmerges);
-		log("  partial req/blks:  %d/%d",
-		    Stats.partialreq, Stats.blockslost);
-		log("  duplicate req:     %d",
-		    Stats.dupsent);
-		log("  client re-req:     %d",
-		    Stats.clientlost);
-		log("  %dk blocks sent:    %d (%d repeated)",
-		    (MAXBLOCKSIZE/1024),
-		    Stats.blockssent, Stats.blockssent ?
-		    (Stats.blockssent-FileInfo.blocks) : 0);
-		log("  file reads:        %d (%qu bytes, %qu repeated)",
-		    Stats.filereads, Stats.filebytes, Stats.filebytes ?
-		    (Stats.filebytes - FileInfo.filesize) : 0);
-		log("  file read time:    %d.%03d sec (%llu us/op, %d us max)",
-		    (int)(Stats.fileusecs / 1000000),
-		    (int)((Stats.fileusecs % 1000000) / 1000),
-		    Stats.fileusecs / (Stats.filereads ? Stats.filereads : 1),
-		    Stats.filemaxusec);
-		log("  net idle/blocked:  %d/%d", Stats.goesidle, nonetbufs);
-		log("  send intvl/missed: %d/%d",
-		    Stats.intervals, Stats.missed);
-		log("  spurious wakeups:  %d", Stats.wakeups);
-		log("  max workq size:    %d elts, %lu blocks",
-		    WorkQMax, WorkQMaxBlocks);
-	}
-#endif
+	dumpstats();
 
 	/*
 	 * Exit from main thread will kill all the children.
 	 */
-	log("Exiting!");
+	FrisLog("Exiting!");
 	exit(0);
 }
 
@@ -1176,7 +1132,7 @@ quit(int sig)
 void
 reinit(int sig)
 {
-	log("Caught signal %d. Exiting ...", sig);
+	FrisLog("Caught signal %d. Exiting ...", sig);
 	exit(1);
 }
 
@@ -1197,7 +1153,7 @@ mypread(int fd, void *buf, size_t nbytes, off_t offset)
 		for (i = 0; i < maxretries; i++) {
 			cc = pread(fd, buf, nbytes, offset);
 			if (cc == 0)
-				fatal("EOF on file");
+				FrisFatal("EOF on file");
 
 			if (cc > 0) {
 				nbytes -= cc;
@@ -1208,11 +1164,11 @@ mypread(int fd, void *buf, size_t nbytes, off_t offset)
 			}
 
 			if (i == 0)
-				pwarning("read error: will retry");
+				FrisPwarning("read error: will retry");
 
 			fsleep(NFS_READ_DELAY);
 		}
-		pfatal("read error: busted for too long");
+		FrisPfatal("read error: busted for too long");
 		return -1;
 	again:
 		;
@@ -1287,10 +1243,10 @@ calcburst(void)
 		hadloss = 1;
 
 	if (debug && hadloss)
-		log("%d client retries for %d chunks from %d clients, "
-		    "%d overruns in %d bursts",
-		    clientlost, lostchunks, activeclients,
-		    sendretries-lastsendretries, bursts);
+		FrisLog("%d client retries for %d chunks from %d clients, "
+			"%d overruns in %d bursts",
+			clientlost, lostchunks, activeclients,
+			sendretries-lastsendretries, bursts);
 
 	if (hadloss) {
 		/*
@@ -1301,7 +1257,7 @@ calcburst(void)
 			if (burstsize < 1)
 				burstsize = 1;
 			if (debug)
-				log("Decrement burstsize to %d", burstsize);
+				FrisLog("Decrement burstsize to %d", burstsize);
 		}
 	} else {
 		/*
@@ -1312,7 +1268,7 @@ calcburst(void)
 			if (burstsize > maxburstsize)
 				burstsize = maxburstsize;
 			if (debug)
-				log("Increment burstsize to %d", burstsize);
+				FrisLog("Increment burstsize to %d", burstsize);
 		}
 	}
 
@@ -1343,7 +1299,7 @@ compute_sendrate(void)
 
 	if (burstinterval == 0) {
 		burstsize = 1;
-		log("Maximum send bandwidth unlimited");
+		FrisLog("Maximum send bandwidth unlimited");
 		return;
 	}
 
@@ -1400,13 +1356,66 @@ compute_sendrate(void)
 		maxburstsize = burstsize;
 
 	if (burstsize * sizeof(Packet_t) > GetSockbufSize()) {
-		warning("NOTE: burst size exceeds socket buffer size, "
-			"may drop packets");
+		FrisWarning("NOTE: burst size exceeds socket buffer size, "
+			    "may drop packets");
 	}
 
-	log("Maximum send bandwidth %.3f Mbits/sec (%d blocks/sec)",
-	    bandwidth / 1000000.0, bandwidth / wireblocksize);
+	FrisLog("Maximum send bandwidth %.3f Mbits/sec (%d blocks/sec)",
+		bandwidth / 1000000.0, bandwidth / wireblocksize);
 	if (debug)
-		log("  burstsize=%d, burstinterval=%dus",
-		    burstsize, burstinterval);
+		FrisLog("  burstsize=%d, burstinterval=%dus",
+			burstsize, burstinterval);
 }
+
+static void
+dumpstats(void)
+{
+#ifdef  STATS
+	struct rusage ru;
+	extern unsigned long nonetbufs;
+
+	getrusage(RUSAGE_SELF, &ru);
+	FrisLog("Params:");
+	FrisLog("  chunk/block size    %d/%d", MAXCHUNKSIZE, MAXBLOCKSIZE);
+	FrisLog("  burst size/interval %d/%d", burstsize, burstinterval);
+	FrisLog("  file read size      %d", readsize);
+	FrisLog("  file:size           %s:%qd",
+		filename, (long long)FileInfo.filesize);
+	FrisLog("Stats:");
+	FrisLog("  service time:      %d.%03d sec",
+		LastReq.tv_sec, LastReq.tv_usec/1000);
+	FrisLog("  user/sys CPU time: %d.%03d/%d.%03d",
+		ru.ru_utime.tv_sec, ru.ru_utime.tv_usec/1000,
+		ru.ru_stime.tv_sec, ru.ru_stime.tv_usec/1000);
+	FrisLog("  msgs in/out:       %d/%d",
+		Stats.msgin, Stats.joinrep + Stats.blockssent);
+	FrisLog("  joins/leaves:      %d/%d", Stats.joins, Stats.leaves);
+	FrisLog("  requests:          %d (%d merged in queue)",
+		Stats.requests, Stats.qmerges);
+	FrisLog("  partial req/blks:  %d/%d",
+		Stats.partialreq, Stats.blockslost);
+	FrisLog("  duplicate req:     %d",
+		Stats.dupsent);
+	FrisLog("  client re-req:     %d",
+		Stats.clientlost);
+	FrisLog("  %dk blocks sent:    %d (%d repeated)",
+		(MAXBLOCKSIZE/1024),
+		Stats.blockssent, Stats.blockssent ?
+		(Stats.blockssent-FileInfo.blocks) : 0);
+	FrisLog("  file reads:        %d (%qu bytes, %qu repeated)",
+		Stats.filereads, Stats.filebytes, Stats.filebytes ?
+		(Stats.filebytes - FileInfo.filesize) : 0);
+	FrisLog("  file read time:    %d.%03d sec (%llu us/op, %d us max)",
+		(int)(Stats.fileusecs / 1000000),
+		(int)((Stats.fileusecs % 1000000) / 1000),
+		Stats.fileusecs / (Stats.filereads ? Stats.filereads : 1),
+		Stats.filemaxusec);
+	FrisLog("  net idle/blocked:  %d/%d", Stats.goesidle, nonetbufs);
+	FrisLog("  send intvl/missed: %d/%d",
+		Stats.intervals, Stats.missed);
+	FrisLog("  spurious wakeups:  %d", Stats.wakeups);
+	FrisLog("  max workq size:    %d elts, %lu blocks",
+		WorkQMax, WorkQMaxBlocks);
+}
+#endif
+

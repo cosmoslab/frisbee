@@ -51,7 +51,7 @@ TraceInit(char *file)
 	if (file) {
 		fd = fopen(file, "a+");
 		if (fd == NULL)
-			pfatal("Cannot open logfile %s", file);
+			FrisPfatal("Cannot open logfile %s", file);
 	} else
 		fd = stderr;
 

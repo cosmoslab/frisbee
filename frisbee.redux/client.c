@@ -466,8 +466,8 @@ main(int argc, char **argv)
 			struct in_addr in;
 
 			if (!GetIP(proxyfor, &in))
-				fatal("Could not resolve host '%s'\n",
-				      proxyfor);
+				FrisFatal("Could not resolve host '%s'\n",
+					  proxyfor);
 			host = ntohl(in.s_addr);
 
 			/*
@@ -483,8 +483,8 @@ main(int argc, char **argv)
 						 portnum, host, imageid,
 						 method, askonly, timo,
 						 &reply, &pif))
-				fatal("Could not get download info for '%s'",
-				      imageid);
+				FrisFatal("Could not get download info for '%s'",
+					  imageid);
 
 			if (askonly) {
 				PrintGetInfo(imageid, &reply, 1);
@@ -493,10 +493,10 @@ main(int argc, char **argv)
 			if (reply.error) {
 				if (busywait == 0 ||
 				    reply.error != MS_ERROR_TRYAGAIN)
-					fatal("%s: server returned error: %s",
-					      imageid,
-					      GetMSError(reply.error));
-				log("%s: image busy, waiting %d seconds...",
+					FrisFatal("%s: server returned error: %s",
+						  imageid,
+						  GetMSError(reply.error));
+				FrisLog("%s: image busy, waiting %d seconds...",
 				    imageid, busywait);
 				sleep(busywait);
 				continue;
@@ -516,18 +516,18 @@ main(int argc, char **argv)
 				mcastif = pif;
 
 			if (serverip.s_addr == mcastaddr.s_addr)
-				log("%s: address: %s:%d%s",
-				    imageid, inet_ntoa(mcastaddr), portnum,
-				    broadcast ? " (broadcast)" : "");
+				FrisLog("%s: address: %s:%d%s",
+					imageid, inet_ntoa(mcastaddr), portnum,
+					broadcast ? " (broadcast)" : "");
 			else {
 				char serverstr[sizeof("XXX.XXX.XXX.XXX")+1];
 
 				strncpy(serverstr, inet_ntoa(serverip),
 					sizeof serverstr);
-				log("%s: address: %s:%d%s, server: %s",
-				    imageid, inet_ntoa(mcastaddr), portnum,
-				    broadcast ? " (broadcast)" : "",
-				    serverstr);
+				FrisLog("%s: address: %s:%d%s, server: %s",
+					imageid, inet_ntoa(mcastaddr), portnum,
+					broadcast ? " (broadcast)" : "",
+					serverstr);
 			}
 			break;
 		}
@@ -543,7 +543,7 @@ main(int argc, char **argv)
 	 * we can set to really small value to handle immediate termination.
 	 */
 	if (proxyfor && islocalproxy) {
-		log("frisbeed server started on behalf of %s", proxyfor);
+		FrisLog("frisbeed server started on behalf of %s", proxyfor);
 		exit(0);
 	}
 #endif
@@ -551,11 +551,11 @@ main(int argc, char **argv)
 
 #ifdef DOEVENTS
 	if (eventserver != NULL && EventInit(eventserver) != 0) {
-		log("Failed to initialize event system, events ignored");
+		FrisLog("Failed to initialize event system, events ignored");
 		eventserver = NULL;
 	}
 	if (eventserver != NULL) {
-		log("Waiting for START event...");
+		FrisLog("Waiting for START event...");
 		EventWait(EV_ANY, &event);
 		if (event.type != EV_START)
 			goto done;
@@ -644,15 +644,15 @@ main(int argc, char **argv)
 		else
 			traceprefix[0] = 0;
 
-		log("Starting: slice=%d, startat=%d, startdelay=%d, zero=%d, "
-		    "randomize=%d, nothreads=%d, debug=%d, tracing=%d, "
-		    "pkttimeout=%d, idletimer=%d, idledelay=%d, redodelay=%d, "
-		    "maxmem=%d, chunkbufs=%d, maxwritebumfem=%d, "
-		    "maxreadahead=%d, maxinprogress=%d",
-		    slice, startat, startdelay, zero, randomize, nothreads,
-		    debug, tracing, pkttimeout, idletimer, idledelay, redodelay,
-		    maxmem, maxchunkbufs, maxwritebufmem,
-		    maxreadahead, maxinprogress);
+		FrisLog("Starting: slice=%d, startat=%d, startdelay=%d, zero=%d, "
+			"randomize=%d, nothreads=%d, debug=%d, tracing=%d, "
+			"pkttimeout=%d, idletimer=%d, idledelay=%d, redodelay=%d, "
+			"maxmem=%d, chunkbufs=%d, maxwritebumfem=%d, "
+			"maxreadahead=%d, maxinprogress=%d",
+			slice, startat, startdelay, zero, randomize, nothreads,
+			debug, tracing, pkttimeout, idletimer, idledelay, redodelay,
+			maxmem, maxchunkbufs, maxwritebufmem,
+			maxreadahead, maxinprogress);
 	}
 #endif
 
@@ -697,7 +697,7 @@ main(int argc, char **argv)
 	if (broadcast || (ntohl(mcastaddr.s_addr) >> 28) != 14)
 		keepalive = 0;
 	if (keepalive)
-		log("Enabling MC keepalive at %d seconds", keepalive);
+		FrisLog("Enabling MC keepalive at %d seconds", keepalive);
 
 	PlayFrisbee();
 
@@ -710,7 +710,7 @@ main(int argc, char **argv)
 
 #ifdef DOEVENTS
 	if (eventserver != NULL) {
-		log("Waiting for START/STOP event...");
+		FrisLog("Waiting for START/STOP event...");
 		EventWait(EV_ANY, &event);
 		if (event.type == EV_START) {
 #ifdef STATS
@@ -743,7 +743,7 @@ ClientRecvThread(void *arg)
 	static int	gotone;
 
 	if (debug)
-		log("Receive pthread starting up ...");
+		FrisLog("Receive pthread starting up ...");
 
 	/*
 	 * Use this to control the rate at which we request blocks.
@@ -807,10 +807,10 @@ ClientRecvThread(void *arg)
 			if (KACounter == 1) {
 				/* If for some reason it fails, stop trying */
 				if (debug)
-					log("sending keepalive...");
+					FrisLog("sending keepalive...");
 				if (NetMCKeepAlive()) {
-					log("Multicast keepalive failed, "
-					    "disabling keepalive");
+					FrisLog("Multicast keepalive failed, "
+						"disabling keepalive");
 					keepalive = 0;
 				}
 				KACounter = keepalive * TIMEOUT_HZ;
@@ -842,8 +842,8 @@ ClientRecvThread(void *arg)
 		gotone = 1;
 
 		if (! PacketValid(p, TotalChunkCount)) {
-			log("received bad packet %d/%d, ignored",
-			    p->hdr.type, p->hdr.subtype);
+			FrisLog("received bad packet %d/%d, ignored",
+				p->hdr.type, p->hdr.subtype);
 			continue;
 		}
 
@@ -856,8 +856,8 @@ ClientRecvThread(void *arg)
 			if (serverip.s_addr != 0 &&
 			    serverip.s_addr != p->hdr.srcip) {
 				struct in_addr tmp = { p->hdr.srcip };
-				log("received BLOCK from non-server %s",
-				    inet_ntoa(tmp));
+				FrisLog("received BLOCK from non-server %s",
+					inet_ntoa(tmp));
 				continue;
 			}
 
@@ -982,15 +982,15 @@ ChunkerStartup(void)
 	 */
 	Chunks = calloc(chunkcount, sizeof(*Chunks));
 	if (Chunks == NULL)
-		fatal("Chunks: No more memory");
+		FrisFatal("Chunks: No more memory");
 
 	ChunkRequestList = calloc(chunkcount, sizeof(*ChunkRequestList));
 	if (ChunkRequestList == NULL)
-		fatal("ChunkRequestList: No more memory");
+		FrisFatal("ChunkRequestList: No more memory");
 
 	ChunkBuffer = malloc(maxchunkbufs * sizeof(ChunkBuffer_t));
 	if (ChunkBuffer == NULL)
-		fatal("ChunkBuffer: No more memory");
+		FrisFatal("ChunkBuffer: No more memory");
 
 	/*
 	 * Set all the buffers to "free"
@@ -1026,7 +1026,7 @@ ChunkerStartup(void)
 #endif
 	if (pthread_create(&child_pid, NULL,
 			   ClientRecvThread, (void *)0)) {
-		fatal("Failed to create pthread!");
+		FrisFatal("Failed to create pthread!");
 	}
 
 	/*
@@ -1068,15 +1068,15 @@ ChunkerStartup(void)
 			Event_t event;
 			if (eventserver != NULL &&
 			    EventCheck(&event) && event.type == EV_STOP) {
-				log("Aborted after %d chunks",
-				    TotalChunkCount-chunkcount);
+				FrisLog("Aborted after %d chunks",
+					TotalChunkCount-chunkcount);
 				break;
 			}
 #endif
 			if (!wasidle) {
 				CLEVENT(1, EV_CLIDCIDLE, 0, 0, 0, 0);
 				if (debug)
-					log("No chunks ready to write!");
+					FrisLog("No chunks ready to write!");
 			}
 			if (gotone)
 				DOSTAT(nochunksready++);
@@ -1091,10 +1091,10 @@ ChunkerStartup(void)
 		 */
 		chunkbytes = ChunkBytes(ChunkBuffer[i].thischunk);
 		if (debug)
-			log("Writing chunk %d (buffer %d), size %d, after idle=%d.%03d",
-			    ChunkBuffer[i].thischunk, i, chunkbytes,
-			    (wasidle*idledelay) / 1000000,
-			    ((wasidle*idledelay) % 1000000) / 1000);
+			FrisLog("Writing chunk %d (buffer %d), size %d, after idle=%d.%03d",
+				ChunkBuffer[i].thischunk, i, chunkbytes,
+				(wasidle*idledelay) / 1000000,
+				((wasidle*idledelay) % 1000000) / 1000);
 
 		CLEVENT(1, EV_CLIDCSTART,
 			ChunkBuffer[i].thischunk, wasidle,
@@ -1105,11 +1105,11 @@ ChunkerStartup(void)
 			if (ImageWriteChunk(ChunkBuffer[i].thischunk,
 					    ChunkBuffer[i].blocks[0].data,
 					    chunkbytes))
-				pfatal("ImageWriteChunk failed");
+				FrisPfatal("ImageWriteChunk failed");
 		} else {
 			if (ImageUnzipChunk(ChunkBuffer[i].blocks[0].data,
 					    chunkbytes))
-				pfatal("ImageUnzipChunk failed");
+				FrisPfatal("ImageUnzipChunk failed");
 		}
 
 		CLEVENT(1, EV_CLIDCDONE, ChunkBuffer[i].thischunk,
@@ -1136,7 +1136,7 @@ ChunkerStartup(void)
 	 * and collect stats from the unzipper.
 	 */
 	if (ImageUnzipFlush())
-		pfatal("ImageUnzipFlush failed");
+		FrisPfatal("ImageUnzipFlush failed");
 
 #ifdef STATS
 	{
@@ -1289,7 +1289,7 @@ GotBlock(Packet_t *p)
 		CLEVENT((block==0)? 3 : 4, EV_CLIDUPCHUNK, chunk, block, 0, 0);
 		DOSTAT(dupchunk++);
 		if (debug > 2)
-			log("Duplicate chunk %d data ignored!", chunk);
+			FrisLog("Duplicate chunk %d data ignored!", chunk);
 		return 0;
 	}
 #endif
@@ -1319,8 +1319,8 @@ GotBlock(Packet_t *p)
 				dubious = i;
 			continue;
 		default:
-			fatal("Unknown state %d for chunk %d",
-			      ChunkBuffer[i].state, chunk);
+			FrisFatal("Unknown state %d for chunk %d",
+				  ChunkBuffer[i].state, chunk);
 		}
 		break;
 	}
@@ -1365,8 +1365,8 @@ GotBlock(Packet_t *p)
 					lastnoroomchunk = chunk;
 					lastnoroomblocks = 0;
 					if (debug)
-						log("No free buffer for chunk %d!",
-						    chunk);
+						FrisLog("No free buffer for chunk %d!",
+							chunk);
 				}
 				lastnoroomblocks++;
 				DOSTAT(nofreechunks++);
@@ -1405,14 +1405,15 @@ GotBlock(Packet_t *p)
 			CLEVENT(3, EV_CLIDUPCHUNK, chunk, block, 0, 0);
 			DOSTAT(dupchunk++);
 			if (debug > 2)
-				log("Duplicate chunk %d data ignored!", chunk);
+				FrisLog("Duplicate chunk %d data ignored!",
+					chunk);
 			return 0;
 		}
 #endif
 		Chunks[chunk].seen = 1;
 
 		if (debug)
-			log("Starting chunk %d (buffer %d)", chunk, free);
+			FrisLog("Starting chunk %d (buffer %d)", chunk, free);
 
 		i = free;
 		ChunkBuffer[i].state      = state;
@@ -1436,7 +1437,8 @@ GotBlock(Packet_t *p)
 		CLEVENT(3, EV_CLIDUPBLOCK, chunk, block, 0, 0);
 		DOSTAT(dupblock++);
 		if (debug > 2)
-			log("Duplicate block %d in chunk %d", block, chunk);
+			FrisLog("Duplicate block %d in chunk %d",
+				block, chunk);
 		return 0;
 	}
 	ChunkBuffer[i].blockcount--;
@@ -1475,7 +1477,7 @@ GotBlock(Packet_t *p)
 		CLEVENT(1, EV_CLIECHUNK, chunk, block, inprogress,
 			goodblocksrecv);
 		if (debug)
-			log("Releasing chunk %d to main thread", chunk);
+			FrisLog("Releasing chunk %d to main thread", chunk);
 		ChunkBuffer[i].state = CHUNK_FULL;
 
 		/*
@@ -1510,7 +1512,8 @@ RequestMissing(int chunk, BlockMap_t *map, int count)
 	int		csize = ChunkSize(chunk);
 
 	if (debug)
-		log("Requesting %d missing blocks of chunk:%d", count, chunk);
+		FrisLog("Requesting %d missing blocks of chunk:%d",
+			count, chunk);
 	
 	p->hdr.type       = PKTTYPE_REQUEST;
 	p->hdr.subtype    = PKTSUBTYPE_PREQUEST;
@@ -1532,7 +1535,7 @@ RequestMissing(int chunk, BlockMap_t *map, int count)
 #ifdef STATS
 	assert(count == BlockMapIsAlloc(&p->msg.prequest.blockmap, 0, CHUNKSIZE));
 	if (count == 0)
-		log("Request 0 blocks from chunk %d", chunk);
+		FrisLog("Request 0 blocks from chunk %d", chunk);
 	Stats.u.v1.lostblocks += count;
 	Stats.u.v1.requests++;
 	if (Chunks[chunk].ours)
@@ -1558,8 +1561,8 @@ RequestRange(int chunk, int block, int count)
 	Packet_t	packet, *p = &packet;
 
 	if (debug)
-		log("Requesting chunk:%d block:%d count:%d",
-		    chunk, block, count);
+		FrisLog("Requesting chunk:%d block:%d count:%d",
+			chunk, block, count);
 	
 	p->hdr.type       = PKTTYPE_REQUEST;
 	p->hdr.subtype    = PKTSUBTYPE_REQUEST;
@@ -1722,8 +1725,8 @@ PlayFrisbee(void)
 		delay = 0;
 	if (delay) {
 		if (debug)
-			log("Startup delay: %d.%03d seconds",
-			    delay/1000, delay%1000);
+			FrisLog("Startup delay: %d.%03d seconds",
+				delay/1000, delay%1000);
 		DOSTAT(delayms = delay);
 		fsleep(delay * 1000);
 	}
@@ -1743,7 +1746,7 @@ PlayFrisbee(void)
 			Event_t event;
 			if (eventserver != NULL &&
 			    EventCheck(&event) && event.type == EV_STOP) {
-				log("Aborted during JOIN");
+				FrisLog("Aborted during JOIN");
 				return;
 			}
 #endif
@@ -1778,7 +1781,7 @@ PlayFrisbee(void)
 			timeo.tv_usec = 500000;
 			timeradd(&timeo, &now, &timeo);
 			if (debug > 1)
-				log("sent JOIN (%d)", p->hdr.subtype);
+				FrisLog("sent JOIN (%d)", p->hdr.subtype);
 		}
 
 		/*
@@ -1796,7 +1799,7 @@ PlayFrisbee(void)
 					MAXBLOCKSIZE;
 			}
 			if (debug > 1)
-				log("got JOIN (%d) reply", jtype);
+				FrisLog("got JOIN (%d) reply", jtype);
 			CLEVENT(1, EV_CLIJOINREP,
 				p->msg.join2.chunksize,
 				p->msg.join2.blocksize,
@@ -1834,10 +1837,10 @@ PlayFrisbee(void)
 		}
 	}
  
-	log("Joined the team after %d sec. ID is %u. "
-	    "File is %d chunks (%lld bytes)",
-	    timeo.tv_sec - stamp.tv_sec,
-	    myid, TotalChunkCount, p->msg.join2.bytecount);
+	FrisLog("Joined the team after %d sec. ID is %u. "
+		"File is %d chunks (%lld bytes)",
+		timeo.tv_sec - stamp.tv_sec,
+		myid, TotalChunkCount, p->msg.join2.bytecount);
 
 	ChunkerStartup();
 
@@ -1874,9 +1877,9 @@ PlayFrisbee(void)
 	PacketSend(p, 0);
 
 	if (!quiet) {
-		log("");
+		FrisLog("");
 		ClientStatsDump(myid, &Stats);
-		log("");
+		FrisLog("");
 	}
 #else
 	p->hdr.type       = PKTTYPE_REQUEST;
@@ -1886,5 +1889,6 @@ PlayFrisbee(void)
 	p->msg.leave.elapsed  = estamp.tv_sec;
 	PacketSend(p, 0);
 #endif
-	log("Left the team after %ld seconds on the field!", estamp.tv_sec);
+	FrisLog("Left the team after %ld seconds on the field!",
+		estamp.tv_sec);
 }

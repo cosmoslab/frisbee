@@ -171,8 +171,8 @@ emulab_read(void)
 			put_maxsize = (uint64_t)ival * 1024 * 1024 * 1024;
 		free(val);
 	}
-	log("  image_put_maxsize = %d GB",
-	    (int)(put_maxsize/(1024*1024*1024)));
+	FrisLog("  image_put_maxsize = %d GB",
+		(int)(put_maxsize/(1024*1024*1024)));
 
 	val = emulab_getsitevar("images/create/maxwait");
 	if (val) {
@@ -182,8 +182,8 @@ emulab_read(void)
 			put_maxwait = (uint32_t)ival * 60;
 		free(val);
 	}
-	log("  image_put_maxwait = %d min",
-	    (int)(put_maxwait/60));
+	FrisLog("  image_put_maxwait = %d min",
+		(int)(put_maxwait/60));
 
 	val = emulab_getsitevar("images/frisbee/maxrate_std");
 	if (val) {
@@ -193,8 +193,8 @@ emulab_read(void)
 			get_maxrate_std = (uint32_t)ival;
 		free(val);
 	}
-	log("  image_get_maxrate_std = %d MB/sec",
-	    (int)(get_maxrate_std/1000000));
+	FrisLog("  image_get_maxrate_std = %d MB/sec",
+		(int)(get_maxrate_std/1000000));
 
 	val = emulab_getsitevar("images/frisbee/maxrate_usr");
 	if (val) {
@@ -204,8 +204,8 @@ emulab_read(void)
 			get_maxrate_usr = (uint32_t)ival;
 		free(val);
 	}
-	log("  image_get_maxrate_usr = %d MB/sec",
-	    (int)(get_maxrate_usr/1000000));
+	FrisLog("  image_get_maxrate_usr = %d MB/sec",
+		(int)(get_maxrate_usr/1000000));
 
 	return 0;
 }
@@ -229,17 +229,17 @@ emulab_restore(void *state)
 	struct emulab_configstate *cs = state;
 
 	put_maxsize = cs->image_maxsize;
-	log("  image_put_maxsize = %d GB",
-	    (int)(put_maxsize/(1024*1024*1024)));
+	FrisLog("  image_put_maxsize = %d GB",
+		(int)(put_maxsize/(1024*1024*1024)));
 	put_maxwait = cs->image_maxwait;
-	log("  image_put_maxwait = %d min",
-	    (int)(put_maxwait/60));
+	FrisLog("  image_put_maxwait = %d min",
+		(int)(put_maxwait/60));
 	get_maxrate_std = cs->image_maxrate_std;
-	log("  image_get_maxrate_std = %d MB/sec",
-	    (int)(get_maxrate_std/1000000));
+	FrisLog("  image_get_maxrate_std = %d MB/sec",
+		(int)(get_maxrate_std/1000000));
 	get_maxrate_usr = cs->image_maxrate_usr;
-	log("  image_get_maxrate_usr = %d MB/sec",
-	    (int)(get_maxrate_usr/1000000));
+	FrisLog("  image_get_maxrate_usr = %d MB/sec",
+		(int)(get_maxrate_usr/1000000));
 
 	return 0;
 }
@@ -435,7 +435,7 @@ emulab_get_server_address(struct config_imageinfo *ii, int methods, int first,
 
 #if 0
 	if ((methods & (CONFIG_IMAGE_MCAST|CONFIG_IMAGE_UCAST)) == 0) {
-		error("get_server_address: only support UCAST/MCAST");
+		FrisError("get_server_address: only support UCAST/MCAST");
 		return 1;
 	}
 #endif
@@ -443,7 +443,7 @@ emulab_get_server_address(struct config_imageinfo *ii, int methods, int first,
 	if (!mydb_update("UPDATE emulab_indicies "
 			" SET idx=LAST_INSERT_ID(idx+1) "
 			" WHERE name='frisbee_index'")) {
-		error("get_server_address: DB update error!");
+		FrisError("get_server_address: DB update error!");
 		return 1;
 	}
  again:
@@ -465,7 +465,7 @@ emulab_get_server_address(struct config_imageinfo *ii, int methods, int first,
 		c = (c % 254) + 1;
 	}
 	if (b > 254) {
-		error("get_server_address: ran out of MC addresses!");
+		FrisError("get_server_address: ran out of MC addresses!");
 		return 1;
 	}
 
@@ -489,7 +489,7 @@ emulab_get_server_address(struct config_imageinfo *ii, int methods, int first,
 			if (!mydb_update("UPDATE emulab_indicies "
 					 " SET idx=LAST_INSERT_ID(idx+254) "
 					 " WHERE name='frisbee_index'")) {
-				error("get_server_address: DB update error!");
+				FrisError("get_server_address: DB update error!");
 				return 1;
 			}
 			goto again;
@@ -691,8 +691,8 @@ allow_stddirs(char *imageid,
 		exists = 1;
 	fpath = mystrdup(tpath);
 	if (debug)
-		info("%s: exists=%d, resolves to: '%s'",
-		     imageid, exists, tpath);
+		FrisInfo("%s: exists=%d, resolves to: '%s'",
+			 imageid, exists, tpath);
 
 	/*
 	 * Make the appropriate access checks for get/put
@@ -793,7 +793,7 @@ emulab_nodeid(struct in_addr *cnetip)
 	/* NULL node_id!? */
 	row = mysql_fetch_row(res);
 	if (!row[0]) {
-		error("config_host_authinfo: null node_id!?");
+		FrisError("config_host_authinfo: null node_id!?");
 		mysql_free_result(res);
 		return NULL;
 	}
@@ -829,7 +829,7 @@ emulab_imageid(char *ipid, char *iname)
 	/* NULL imageid!? */
 	row = mysql_fetch_row(res);
 	if (!row[0]) {
-		error("config_host_authinfo: null imageid!?");
+		FrisError("config_host_authinfo: null imageid!?");
 		mysql_free_result(res);
 		return 0;
 	}
@@ -857,13 +857,13 @@ emulab_imagegids(int imageidx, int *igids)
 			 " AND (g.gid_idx=g.pid_idx OR g.gid_idx=i.gid_idx)"
 			 " AND imageid=%d", 1, imageidx);
 	if (res == NULL) {
-		error("config_host_authinfo: image gid query failed!?");
+		FrisError("config_host_authinfo: image gid query failed!?");
 		return 0;
 	}
 
 	nrows = mysql_num_rows(res);
 	if (nrows > 2) {
-		error("config_host_authinfo: image gid query returned too many rows!?");
+		FrisError("config_host_authinfo: image gid query returned too many rows!?");
 		mysql_free_result(res);
 		return 0;
 	}
@@ -1174,7 +1174,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	row = mysql_fetch_row(res);
 	if (!row[0] || !row[1] || !row[2] || !row[3] || !row[4] ||
 	    !row[5] || !row[6] || !row[7] || !row[8]) {
-		error("config_host_authinfo: null pid/gid/eid/uname/uid!?");
+		FrisError("config_host_authinfo: null pid/gid/eid/uname/uid!?");
 		mysql_free_result(res);
 		emulab_free_host_authinfo(get);
 		emulab_free_host_authinfo(put);
@@ -1225,8 +1225,8 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 
 	nrows = mysql_num_rows(res);
 	if (nrows > MAXGIDS)
-		warning("User '%s' in more than %d groups, truncating list",
-			ei->sname, MAXGIDS);
+		FrisWarning("User '%s' in more than %d groups, truncating list",
+			    ei->sname, MAXGIDS);
 	for (i = 0; i < nrows; i++) {
 		row = mysql_fetch_row(res);
 		if (get != NULL) {
@@ -1347,8 +1347,8 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			 * without revoking the access of the previous user.
 			 */
 			if (isindir(STDIMAGEDIR, row[3])) {
-				error("%s: cannot update standard images "
-				      "right now", row[3]);
+				FrisError("%s: cannot update standard images "
+					  "right now", row[3]);
 				continue;
 			}
 
@@ -1711,12 +1711,12 @@ emulab_dump(FILE *fd)
 			inet_aton(row[1], &in);
 			if (emulab_get_host_authinfo(&in, &in, NULL,
 						     &get, &put)) {
-				warning("Could not get node authinfo for %s",
-					row[0]);
+				FrisWarning("Could not get node authinfo for %s",
+					    row[0]);
 			}
 			if (strcmp(get->hostid, row[0])) {
-				warning("node_id mismatch (%s != %s)",
-					get->hostid, row[0]);
+				FrisWarning("node_id mismatch (%s != %s)",
+					    get->hostid, row[0]);
 			}
 			if (get->numimages)
 				dump_host_authinfo(fd, row[0], "GET", get);
@@ -1757,46 +1757,50 @@ emulab_init(char *opts)
 
 	/* One time parsing of MC address info */
 	if (sscanf(MC_BASEADDR, "%d.%d.%d", &mc_a, &mc_b, &mc_c) != 3) {
-		error("emulab_init: MC_BASEADDR '%s' not in A.B.C format!",
-		      MC_BASEADDR);
+		FrisError("emulab_init: MC_BASEADDR '%s' not in A.B.C format!",
+			  MC_BASEADDR);
 		return NULL;
 	}
 	mc_port_lo = atoi(MC_BASEPORT);
 	mc_port_num = atoi(MC_NUMPORTS);
 	if (mc_port_num < 0 || mc_port_num >= 65536) {
-		error("emulab_init: MC_NUMPORTS '%s' not in valid range!",
-		      MC_NUMPORTS);
+		FrisError("emulab_init: MC_NUMPORTS '%s' not in valid range!",
+			  MC_NUMPORTS);
 		return NULL;
 	}
 
 	if ((path = realpath(SHAREROOT_DIR, pathbuf)) == NULL) {
-		error("emulab_init: could not resolve '%s'", SHAREROOT_DIR);
+		FrisError("emulab_init: could not resolve '%s'",
+			  SHAREROOT_DIR);
 		return NULL;
 	}
 	SHAREDIR = mystrdup(path);
 
 	if ((path = realpath(PROJROOT_DIR, pathbuf)) == NULL) {
-		error("emulab_init: could not resolve '%s'", PROJROOT_DIR);
+		FrisError("emulab_init: could not resolve '%s'",
+			  PROJROOT_DIR);
 		return NULL;
 	}
 	PROJDIR = mystrdup(path);
 
 	if ((path = realpath(GROUPSROOT_DIR, pathbuf)) == NULL) {
-		error("emulab_init: could not resolve '%s'", GROUPSROOT_DIR);
+		FrisError("emulab_init: could not resolve '%s'",
+			  GROUPSROOT_DIR);
 		return NULL;
 	}
 	GROUPSDIR = mystrdup(path);
 
 	if ((path = realpath(USERSROOT_DIR, pathbuf)) == NULL) {
-		error("emulab_init: could not resolve '%s'", USERSROOT_DIR);
+		FrisError("emulab_init: could not resolve '%s'",
+			  USERSROOT_DIR);
 		return NULL;
 	}
 	USERSDIR = mystrdup(path);
 
 	if (strlen(SCRATCHROOT_DIR) > 0) {
 		if ((path = realpath(SCRATCHROOT_DIR, pathbuf)) == NULL) {
-			error("emulab_init: could not resolve '%s'",
-			      SCRATCHROOT_DIR);
+			FrisError("emulab_init: could not resolve '%s'",
+				  SCRATCHROOT_DIR);
 			return NULL;
 		}
 		SCRATCHDIR = mystrdup(path);
@@ -1823,7 +1827,7 @@ mymalloc(size_t size)
 {
 	void *ptr = malloc(size);
 	if (ptr == NULL) {
-		error("config_emulab: out of memory!");
+		FrisError("config_emulab: out of memory!");
 		abort();
 	}
 	return ptr;
@@ -1834,7 +1838,7 @@ myrealloc(void *ptr, size_t size)
 {
 	void *nptr = realloc(ptr, size);
 	if (nptr == NULL) {
-		error("config_emulab: out of memory!");
+		FrisError("config_emulab: out of memory!");
 		abort();
 	}
 	return nptr;
@@ -1845,7 +1849,7 @@ mystrdup(const char *str)
 {
 	char *nstr = strdup(str);
 	if (nstr == NULL) {
-		error("config_emulab: out of memory!");
+		FrisError("config_emulab: out of memory!");
 		abort();
 	}
 	return nstr;
