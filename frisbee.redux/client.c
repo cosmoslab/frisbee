@@ -222,6 +222,7 @@ void (*DiskStatusCallback)();
 static void
 WriterStatusCallback(int isbusy)
 {
+#ifdef NEVENTS
 	uint32_t hi, lo;
 
 	if (zero) {
@@ -232,6 +233,7 @@ WriterStatusCallback(int isbusy)
 		lo = totalrdata;
 	}
 	CLEVENT((isbusy != 2) ? 1 : 3, EV_CLIWRSTATUS, isbusy, hi, lo, 0);
+#endif
 }
 
 int
