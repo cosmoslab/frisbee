@@ -591,8 +591,10 @@ ClientStatsDump(unsigned int id, ClientStats_t *stats)
 		FrisLog("  chunk buffers:        %d",
 			stats->u.v1.chunkbufs);
 		if (stats->u.v1.writebufmem)
-			FrisLog("  disk buffering:       %dMB",
+			FrisLog("  disk buffering (MB):  %d",
 				stats->u.v1.writebufmem);
+		FrisLog("  sockbuf size (KB):    %d",
+			sockbufsize/1024);
 		FrisLog("  readahead/inprogress: %d/%d",
 			stats->u.v1.maxreadahead, stats->u.v1.maxinprogress);
 		FrisLog("  recv timo/count:      %d/%d",

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -93,11 +93,14 @@
 
 /*
  * Socket buffer size, used for both send and receive in client and
- * server right now.  If DYN_SOCKBUFSIZE is set, we find the larger
- * socketbuffer size possible that is less than or equal to SOCKBUFSIZE.
+ * server right now.  Set to:
+ *    min(sockbufsize, maximum-value-the-system-supports)
+ * where "sockbufsize" defaults to SOCKBUFSIZE but can be changed via
+ * the -k option to any value up to MAXSOCKBUFSIZE (a value of 0 implies
+ * MAXSOCKBUFSIZE).
  */
-#define SOCKBUFSIZE	(512 * 1024)
-#define DYN_SOCKBUFSIZE	1
+#define SOCKBUFSIZE	(1 * 1024 * 1024)
+#define MAXSOCKBUFSIZE	(4 * 1024 * 1024)
 
 /*
  * The number of read-ahead chunks that the client will request

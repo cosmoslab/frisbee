@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -978,11 +978,11 @@ main(int argc, char **argv)
 			
 		case 'k':
 			sockbufsize = atoi(optarg);
-			if (sockbufsize < 1)
-				sockbufsize = 1;
-			else if (sockbufsize > 1024)
-				sockbufsize = 1024;
-			sockbufsize *= 1024 * 1024;
+			if (sockbufsize <= 0 ||
+			    (sockbufsize * 1024) > MAXSOCKBUFSIZE)
+				sockbufsize = MAXSOCKBUFSIZE;
+			else
+				sockbufsize *= 1024;
 			break;
 
 		case 'm':

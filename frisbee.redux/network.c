@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -96,7 +96,6 @@ GetSockbufSize(void)
 	static int sbsize = 0;
 
 	if (sbsize == 0) {
-#if DYN_SOCKBUFSIZE > 0
 		int sock;
 
 		if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
@@ -134,9 +133,6 @@ GetSockbufSize(void)
 			}
 		}
 		close(sock);
-#else
-		sbsize = sockbufsize;
-#endif
 		FrisLog("Maximum socket buffer size of %d bytes", sbsize);
 	}
 	return sbsize;
@@ -186,14 +182,15 @@ CommonInit(int dobind)
 	char			buf[BUFSIZ];
 	struct hostent		*he;
 	
+	sockbufsize = GetSockbufSize();
 	if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
 		FrisPfatal("Could not allocate a socket");
 
-	i = GetSockbufSize();
+	i = sockbufsize;
 	if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &i, sizeof(i)) < 0)
 		FrisPwarning("Could not set send socket buffer size to %d", i);
     
-	i = GetSockbufSize();
+	i = sockbufsize;
 	if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &i, sizeof(i)) < 0)
 		FrisPwarning("Could not set receive socket buffer size to %d",
 			     i);

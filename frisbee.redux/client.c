@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -200,7 +200,7 @@ char *usagestr =
  " -e enckeyfile   File containing secret used for encrypting image\n"
  "\n"
  "tuning options (if you don't know what they are, don't use em!):\n"
- " -k MB           Max MB of memory for a socket buffer.\n"
+ " -k KB           Max KB of memory for a socket buffer (default is 1024).\n"
  " -C MB           Max MB of memory to use for network chunk buffering.\n"
  " -W MB           Max MB of memory to use for disk write buffering.\n"
  " -M MB           Max MB of memory to use for buffering\n"
@@ -358,11 +358,10 @@ main(int argc, char **argv)
 
 		case 'k':
 			mem = atoi(optarg);
-			if (mem < 1)
-				mem = 1;
-			else if (mem > 1024)
-				mem = 1024;
-			sockbufsize = mem * 1024 * 1024;
+			if (mem <= 0 || (mem * 1024) > MAXSOCKBUFSIZE)
+				sockbufsize = MAXSOCKBUFSIZE;
+			else
+				sockbufsize = mem * 1024;
 			break;
 
 		case 'C':
