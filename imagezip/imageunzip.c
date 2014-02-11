@@ -1557,6 +1557,18 @@ inflate_subblock(const char *chunkbufp)
 	assert(blockhdr->size > 0);
 
 	while (d_stream.avail_in) {
+#if !defined(NOTHREADS) && defined(FRISBEE)
+		/*
+		 * XXX this may be a FreeBSD/linuxthreads specific thing
+		 * but it seems that the decompression thread can run way
+		 * longer than a timeslice causing incoming packets to
+		 * get dropped before the network thread can be rescheduled.
+		 * So force the decompressor to take a break once in awhile.
+		 */
+		if (!nothreads)
+			sched_yield();
+#endif
+
 		assert(wbuf == NULL);
 		wbuf = alloc_writebuf(offset, OUTSIZE, 1, 1);
 
@@ -1573,17 +1585,6 @@ inflate_subblock(const char *chunkbufp)
 		d_stream.next_out  = (Bytef *)&wbuf->data[ibleft];
 		d_stream.avail_out = OUTSIZE - ibleft;
 
-#if !defined(NOTHREADS) && defined(FRISBEE)
-		/*
-		 * XXX this may be a FreeBSD/linuxthreads specific thing
-		 * but it seems that the decompression thread can run way
-		 * longer than a timeslice causing incoming packets to
-		 * get dropped before the network thread can be rescheduled.
-		 * So force the decompressor to take a break once in awhile.
-		 */
-		if (!nothreads)
-			sched_yield();
-#endif
 		/*
 		 * Inflate a chunk
 		 */
@@ -2126,10 +2127,12 @@ applyrelocs(off_t offset, size_t size, void *buf)
 				assert(reloc->size < SECSIZE);
 				assert(roffset+SECSIZE == offset+size);
 				/*
-				 * If we are using O_DIRECT, the size must be a multiple
-				 * of SECSIZE. So in this case, we do not adjust the size
-				 * and write out the padding as well (which imagezip has
-				 * thoughtfully included in the image and zeroed already).
+				 * If we are using O_DIRECT, the size must
+				 * be a multiple of SECSIZE. So in this case,
+				 * we do not adjust the size and write out
+				 * the padding as well (which imagezip has
+				 * thoughtfully included in the image and
+				 * zeroed already).
 				 */
 				if (!directio)
 					nsize -= (SECSIZE - reloc->size);
