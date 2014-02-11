@@ -101,6 +101,9 @@ struct {
 	unsigned long	joinrep;
 	unsigned long	blockssent;
 	unsigned long   dupsent;
+	unsigned long long netusecs;
+	unsigned long	netmaxusec;
+	unsigned long	netmsplus;
 	unsigned long	filereads;
 	unsigned long long filebytes;
 	unsigned long long fileusecs;
@@ -888,7 +891,27 @@ PlayFrisbee(void)
 					       &databuf[j * MAXBLOCKSIZE],
 					       MAXBLOCKSIZE);
 				}
+#ifdef STATS
+				struct timeval wstamp;
+				gettimeofday(&wstamp, 0);
+#endif
 				PacketSend(p, &resends);
+#ifdef STATS
+				{
+					struct timeval now;
+					int us;
+					gettimeofday(&now, 0);
+					timersub(&now, &wstamp, &now);
+					us = now.tv_sec * 1000000 +
+						now.tv_usec;
+					assert(us >= 0);
+					Stats.netusecs += us;
+					if (us > Stats.netmaxusec)
+						Stats.netmaxusec = us;
+					if (us >= 1000)
+						Stats.netmsplus++;
+				}
+#endif
 				sendretries += resends;
 				DOSTAT(blockssent++);
 				EVENT(resends ? 1 : 3, EV_BLOCKMSG, mcastaddr,
@@ -1176,6 +1199,18 @@ mypread(int fd, void *buf, size_t nbytes, off_t offset)
 	return count;
 }
 
+#define LINK_OVERHEAD	(14+4+8+12)	/* ethernet (hdr+CRC+preamble+gap) */
+#define IP_OVERHEAD	(20+8)		/* IP + UDP hdrs */
+
+static unsigned long
+compute_bandwidth(int bsize, int binterval)
+{
+	int wireblocksize = (sizeof(Packet_t)+IP_OVERHEAD+LINK_OVERHEAD) * 8;
+	double burstspersec = 1000000.0 / binterval;
+
+	return (unsigned long)(burstspersec*bsize*wireblocksize);
+}
+
 #define LOSS_INTERVAL	250	/* interval in which we collect data (ms) */
 #define MULT_DECREASE	0.95	/* mult factor to decrease burst rate */
 #define ADD_INCREASE	1	/* add factore to increase burst rate */
@@ -1281,9 +1316,6 @@ calcburst(void)
 	bursts = 0;
 }
 
-#define LINK_OVERHEAD	(14+4+8+12)	/* ethernet (hdr+CRC+preamble+gap) */
-#define IP_OVERHEAD	(20+8)		/* IP + UDP hdrs */
-
 /*
  * Compute the approximate send rate.  Due to typically coarse grained
  * timers, send rate is implemented as a burst rate and a burst interval;
@@ -1377,8 +1409,18 @@ dumpstats(void)
 	getrusage(RUSAGE_SELF, &ru);
 	FrisLog("Params:");
 	FrisLog("  chunk/block size    %d/%d", MAXCHUNKSIZE, MAXBLOCKSIZE);
-	FrisLog("  burst size/interval %d/%d", burstsize, burstinterval);
-	FrisLog("  file read size      %d", readsize);
+	FrisLog("  sockbuf size        %d KB", sockbufsize/1024);
+	if (burstinterval == 0) {
+		FrisLog("  burst size/interval unlimited");
+		FrisLog("  bandwidth           unlimited");
+	} else {
+		unsigned long bw = compute_bandwidth(burstsize, burstinterval);
+		FrisLog("  burst size/interval %d/%d",
+			burstsize, burstinterval);
+		FrisLog("  bandwidth           %d.%03d Mbit/sec",
+			(int)(bw / 1000000), (int)((bw % 1000000) / 1000));
+	}
+	FrisLog("  file read size      %d blocks", readsize);
 	FrisLog("  file:size           %s:%qd",
 		filename, (long long)FileInfo.filesize);
 	FrisLog("Stats:");
@@ -1402,6 +1444,11 @@ dumpstats(void)
 		(MAXBLOCKSIZE/1024),
 		Stats.blockssent, Stats.blockssent ?
 		(Stats.blockssent-FileInfo.blocks) : 0);
+	FrisLog("  block write time:  %d.%03d sec (%llu us/op, %d us max, %d 1ms+)",
+		(int)(Stats.netusecs / 1000000),
+		(int)((Stats.netusecs % 1000000) / 1000),
+		Stats.netusecs / (Stats.blockssent ? Stats.blockssent : 1),
+		Stats.netmaxusec, Stats.netmsplus);
 	FrisLog("  file reads:        %d (%qu bytes, %qu repeated)",
 		Stats.filereads, Stats.filebytes, Stats.filebytes ?
 		(Stats.filebytes - FileInfo.filesize) : 0);
@@ -1413,6 +1460,7 @@ dumpstats(void)
 	FrisLog("  net idle/blocked:  %d/%d", Stats.goesidle, nonetbufs);
 	FrisLog("  send intvl/missed: %d/%d",
 		Stats.intervals, Stats.missed);
+	FrisLog("  sendbuf overruns:  %d", sendretries);
 	FrisLog("  spurious wakeups:  %d", Stats.wakeups);
 	FrisLog("  max workq size:    %d elts, %lu blocks",
 		WorkQMax, WorkQMaxBlocks);
