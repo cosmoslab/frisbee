@@ -117,6 +117,9 @@ struct {
 	unsigned long	wakeups;
 	unsigned long	intervals;
 	unsigned long	missed;
+	unsigned long	dynminburst;
+	unsigned long	dynmaxburst;
+	unsigned long	dynincs, dyndecs;
 } Stats;
 #define DOSTAT(x)	(Stats.x)
 #else
@@ -790,6 +793,21 @@ PlayFrisbee(void)
 			idlelastloop = 0;
 		}
 		
+#ifdef PRINT_GRAPH_INFO
+		{
+		static int firsttime = 1;
+		if (firsttime) {
+			struct timeval stamp;
+			firsttime = 0;
+
+			gettimeofday(&stamp, 0);
+			fprintf(stderr, "%u.%06u %d\n",
+				(unsigned)stamp.tv_sec,
+				(unsigned)stamp.tv_usec, burstsize);
+		}
+		}
+#endif
+
 		lastblock = startblock + blockcount;
 
 		/* Offset within the file */
@@ -1211,9 +1229,9 @@ compute_bandwidth(int bsize, int binterval)
 	return (unsigned long)(burstspersec*bsize*wireblocksize);
 }
 
-#define LOSS_INTERVAL	250	/* interval in which we collect data (ms) */
-#define MULT_DECREASE	0.95	/* mult factor to decrease burst rate */
-#define ADD_INCREASE	1	/* add factore to increase burst rate */
+#define LOSS_INTERVAL	500	/* interval in which we collect data (ms) */
+#define MULT_DECREASE	0.90	/* mult factor to decrease burst rate */
+#define ADD_INCREASE	1	/* add factor to increase burst rate */
 
 #define CHUNK_LIMIT	0
 
@@ -1259,9 +1277,9 @@ calcburst(void)
 
 	/*
 	 * If we are overrunning our UDP socket then we are certainly
-	 * transmitting too fast.  Allow one overrun per burst.
+	 * transmitting too fast.
 	 */
-	if (sendretries - lastsendretries > bursts)
+	if (sendretries - lastsendretries > 0)
 		hadloss = 1;
 
 	lostchunks = 0;
@@ -1277,7 +1295,7 @@ calcburst(void)
 	if (lostchunks > CHUNK_LIMIT)
 		hadloss = 1;
 
-	if (debug && hadloss)
+	if (debug > 1 && hadloss)
 		FrisLog("%d client retries for %d chunks from %d clients, "
 			"%d overruns in %d bursts",
 			clientlost, lostchunks, activeclients,
@@ -1288,11 +1306,26 @@ calcburst(void)
 		 * Decrement the burstsize slowly.
 		 */
 		if (burstsize > 1) {
+			int obsize = burstsize;
+
 			burstsize = (int)(burstsize * MULT_DECREASE);
+			if (burstsize == obsize)
+				burstsize--;
 			if (burstsize < 1)
 				burstsize = 1;
-			if (debug)
-				FrisLog("Decrement burstsize to %d", burstsize);
+#ifdef PRINT_GRAPH_INFO
+			fprintf(stderr, "%u.%06u %d\n",
+				(unsigned)stamp.tv_sec,
+				(unsigned)stamp.tv_usec, burstsize);
+#endif
+			if (debug > 1)
+				FrisLog("Decrement burstsize to %d",
+					burstsize);
+#ifdef STATS
+			Stats.dyndecs++;
+			if (burstsize < Stats.dynminburst)
+				Stats.dynminburst = burstsize;
+#endif
 		}
 	} else {
 		/*
@@ -1302,8 +1335,19 @@ calcburst(void)
 			burstsize += ADD_INCREASE;
 			if (burstsize > maxburstsize)
 				burstsize = maxburstsize;
-			if (debug)
-				FrisLog("Increment burstsize to %d", burstsize);
+#ifdef PRINT_GRAPH_INFO
+			fprintf(stderr, "%u.%06u %d\n",
+				(unsigned)stamp.tv_sec,
+				(unsigned)stamp.tv_usec, burstsize);
+#endif
+			if (debug > 1)
+				FrisLog("Increment burstsize to %d",
+					burstsize);
+#ifdef STATS
+			Stats.dynincs++;
+			if (burstsize > Stats.dynmaxburst)
+				Stats.dynmaxburst = burstsize;
+#endif
 		}
 	}
 
@@ -1365,11 +1409,12 @@ compute_sendrate(void)
 	/*
 	 * For the dynamic rate throttle, we use the standard parameters
 	 * as a cap.  We adjust the burstsize to ensure it is large
-	 * enough to ensure a reasonable starting multiplicitive decrement.
-	 * If we cannot do that while still maintaining a reasonable
-	 * burstinterval (< 0.5 seconds), just cancel the dynamic behavior.
+	 * enough to ensure that an initial multiplicitive decrement
+	 * will produce a reasonable result (>= 4). If we cannot do
+	 * that while still maintaining a reasonable burstinterval
+	 * (< 0.5 seconds), just cancel the dynamic behavior.
 	 */
-	minburst = (int)(4.0 / (1.0 - MULT_DECREASE));
+	minburst = (int)((4.0 / MULT_DECREASE) + 0.5);
 	if (dynburst && burstsize < minburst) {
 		double burstfactor = (double)minburst / burstsize;
 
@@ -1384,8 +1429,12 @@ compute_sendrate(void)
 		} else
 			dynburst = 0;
 	}
-	if (dynburst)
+	if (dynburst) {
 		maxburstsize = burstsize;
+#ifdef STATS
+		Stats.dynminburst = Stats.dynmaxburst = burstsize;
+#endif
+	}
 
 	if (burstsize * sizeof(Packet_t) > GetSockbufSize()) {
 		FrisWarning("NOTE: burst size exceeds socket buffer size, "
@@ -1464,6 +1513,17 @@ dumpstats(void)
 	FrisLog("  spurious wakeups:  %d", Stats.wakeups);
 	FrisLog("  max workq size:    %d elts, %lu blocks",
 		WorkQMax, WorkQMaxBlocks);
-}
+	if (dynburst) {
+		unsigned long lbw, hbw;
+		FrisLog("  dynburst incr/decr %d/%d",
+			Stats.dynincs, Stats.dyndecs);
+		FrisLog("    min/max burst    %d/%d",
+			Stats.dynminburst, Stats.dynmaxburst);
+		lbw = compute_bandwidth(Stats.dynminburst, burstinterval);
+		hbw = compute_bandwidth(Stats.dynmaxburst, burstinterval);
+		FrisLog("    min/max bw       %d.%03d/%d.%03d Mbit/sec",
+			(int)(lbw / 1000000), (int)((lbw % 1000000) / 1000),
+			(int)(hbw / 1000000), (int)((hbw % 1000000) / 1000));
+	}
 #endif
-
+}
