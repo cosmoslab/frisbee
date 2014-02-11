@@ -1407,6 +1407,7 @@ GotBlock(Packet_t *p)
 				ChunkBuffer[dubious].state = CHUNK_EMPTY;
 				free = dubious;
 				inprogress--;
+				DOSTAT(partialdrops++);
 			} else {
 				if (chunk != lastnoroomchunk) {
 					CLEVENT(1, EV_CLINOROOM, chunk, block,

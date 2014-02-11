@@ -231,6 +231,7 @@ typedef struct {
 			int32_t	 writebufmem;
 			uint32_t lostblocks;
 			uint32_t rerequests;
+			uint32_t partialdrops;
 		} __attribute__((__packed__)) v1;
 		uint32_t limit[256];
 	} u;

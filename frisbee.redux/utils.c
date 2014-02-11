@@ -622,6 +622,8 @@ ClientStatsDump(unsigned int id, ClientStats_t *stats)
 			stats->u.v1.prequests, stats->u.v1.lostblocks);
 		FrisLog("  re-requests:             %d",
 			stats->u.v1.rerequests);
+		FrisLog("  partially-filled drops:  %d",
+			stats->u.v1.partialdrops);
 		break;
 
 	default:
