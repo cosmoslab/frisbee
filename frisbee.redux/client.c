@@ -150,6 +150,10 @@ Chunk_t		*Chunks;		/* Chunk descriptors */
 ChunkBuffer_t   *ChunkBuffer;		/* The cache */
 int		*ChunkRequestList;	/* Randomized chunk request order */
 int		TotalChunkCount;	/* Total number of chunks in file */
+#ifdef CONDVARS_WORK
+static pthread_mutex_t	chunkbuf_mutex;
+static pthread_cond_t	chunkbuf_cond;
+#endif
 
 #ifdef NEVENTS
 int blocksrecv, goodblocksrecv;
@@ -977,6 +981,9 @@ ChunkerStartup(void)
 	int		chunkcount = TotalChunkCount;
 	int		i, wasidle = 0;
 	static int	gotone;
+#ifdef NEVENTS
+	uint32_t	idleus = 0;
+#endif
 
 	/*
 	 * Allocate the chunk descriptors, request list and cache buffers.
@@ -992,6 +999,10 @@ ChunkerStartup(void)
 	ChunkBuffer = malloc(maxchunkbufs * sizeof(ChunkBuffer_t));
 	if (ChunkBuffer == NULL)
 		FrisFatal("ChunkBuffer: No more memory");
+#ifdef CONDVARS_WORK
+	pthread_mutex_init(&chunkbuf_mutex, 0);
+	pthread_cond_init(&chunkbuf_cond, 0);
+#endif
 
 	/*
 	 * Set all the buffers to "free"
@@ -1036,6 +1047,9 @@ ChunkerStartup(void)
 	while (chunkcount) {
 		int chunkbytes;
 
+#ifdef CONDVARS_WORK
+		pthread_mutex_lock(&chunkbuf_mutex);
+#endif
 		/*
 		 * Search the chunk cache for a chunk that is ready to write.
 		 */
@@ -1045,7 +1059,6 @@ ChunkerStartup(void)
 
 		/*
 		 * If nothing to do, then get out of the way for a while.
-		 * XXX should be a condition variable.
 		 */
 		if (i == maxchunkbufs) {
 #ifndef linux
@@ -1060,6 +1073,9 @@ ChunkerStartup(void)
 			 * needs to be rewritten!
 			 */
 			if (child_error) {
+#ifdef CONDVARS_WORK
+				pthread_mutex_unlock(&chunkbuf_mutex);
+#endif
 				pthread_join(child_pid, &ignored);
 				_exit(child_error);
 			}
@@ -1069,6 +1085,9 @@ ChunkerStartup(void)
 			Event_t event;
 			if (eventserver != NULL &&
 			    EventCheck(&event) && event.type == EV_STOP) {
+#ifdef CONDVARS_WORK
+				pthread_mutex_unlock(&chunkbuf_mutex);
+#endif
 				FrisLog("Aborted after %d chunks",
 					TotalChunkCount-chunkcount);
 				break;
@@ -1081,10 +1100,37 @@ ChunkerStartup(void)
 			}
 			if (gotone)
 				DOSTAT(nochunksready++);
+#ifdef CONDVARS_WORK
+			{
+#ifdef NEVENTS
+				struct timeval _istamp, _eistamp;
+				gettimeofday(&_istamp, 0);
+#endif
+				pthread_cond_wait(&chunkbuf_cond,
+						  &chunkbuf_mutex);
+				pthread_mutex_unlock(&chunkbuf_mutex);
+#ifdef NEVENTS
+				gettimeofday(&_eistamp, 0);
+				timersub(&_eistamp, &_istamp, &_eistamp);
+				/* XXX yes, this can wrap */
+				idleus += (uint32_t)
+					((_eistamp.tv_sec * 1000000) +
+					 _eistamp.tv_usec);
+#endif
+			}
+#else
 			fsleep(idledelay);
+#ifdef NEVENTS
+			/* XXX yes, this can wrap */
+			idleus += idledelay;
+#endif
+#endif
 			wasidle++;
 			continue;
 		}
+#ifdef CONDVARS_WORK
+		pthread_mutex_unlock(&chunkbuf_mutex);
+#endif
 		gotone = 1;
 
 		/*
@@ -1092,15 +1138,17 @@ ChunkerStartup(void)
 		 */
 		chunkbytes = ChunkBytes(ChunkBuffer[i].thischunk);
 		if (debug)
-			FrisLog("Writing chunk %d (buffer %d), size %d, after idle=%d.%03d",
+			FrisLog("Writing chunk %d (buffer %d), size %d, after %d idle intervals",
 				ChunkBuffer[i].thischunk, i, chunkbytes,
-				(wasidle*idledelay) / 1000000,
-				((wasidle*idledelay) % 1000000) / 1000);
+				wasidle);
 
 		CLEVENT(1, EV_CLIDCSTART,
-			ChunkBuffer[i].thischunk, wasidle,
+			ChunkBuffer[i].thischunk, idleus,
 			decompblocks, writeridles);
 		wasidle = 0;
+#ifdef NEVENTS
+		idleus = 0;
+#endif
 
 		if (nodecompress) {
 			if (ImageWriteChunk(ChunkBuffer[i].thischunk,
@@ -1479,7 +1527,14 @@ GotBlock(Packet_t *p)
 			goodblocksrecv);
 		if (debug)
 			FrisLog("Releasing chunk %d to main thread", chunk);
+#ifdef CONDVARS_WORK
+		pthread_mutex_lock(&chunkbuf_mutex);
+#endif
 		ChunkBuffer[i].state = CHUNK_FULL;
+#ifdef CONDVARS_WORK
+		pthread_cond_signal(&chunkbuf_cond);
+		pthread_mutex_unlock(&chunkbuf_mutex);
+#endif
 
 		/*
 		 * Mark the chunk as "done."  Technically, it isn't since

@@ -190,7 +190,7 @@
 #define CLIENT_REQUEST_REDO_DELAY	1000000
 
 /*
- * How long for the writer to sleep if there are no blocks currently
+ * How long (in usec) for the writer to sleep if there are no blocks currently
  * ready to write.  Allow a full server burst period, assuming that
  * something in the next burst will complete a block.
  */

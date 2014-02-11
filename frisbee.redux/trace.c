@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2002-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -426,7 +426,7 @@ TraceDump(int serverrel, int level)
 				break;
 			case EV_CLIDCSTART:
 				fprintf(fd, "%s: decompressing chunk %u, "
-					"idle=%u, (dblock=%u, widle=%u)\n",
+					"idle=%u, (dblock=%u, widle=%uus)\n",
 					inet_ntoa(ptr->srcip),
 					ptr->args[0], ptr->args[1],
 					ptr->args[2], ptr->args[3]);
