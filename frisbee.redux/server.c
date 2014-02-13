@@ -561,13 +561,16 @@ ClientRequest(Packet_t *p)
 	int		count = p->msg.request.count;
 	BlockMap_t	tmp;
 
-	if (count == 0)
-		FrisLog("WARNING: ClientRequest with zero count");
+	if (block < 0 || block >= MAXCHUNKSIZE ||
+	    count <= 0 || count > MAXCHUNKSIZE ||
+	    block + count > MAXCHUNKSIZE) {
+		FrisLog("WARNING: Bad request from %s - "
+			"chunk:%d block:%d size:%d; ignored",
+			inet_ntoa(ipaddr), chunk, block, count);
+		return;
+	}
 
 	EVENT(1, EV_REQMSG, ipaddr, chunk, block, count, 0);
-	if (block + count > MAXCHUNKSIZE)
-		FrisFatal("Bad request from %s - chunk:%d block:%d size:%d", 
-			  inet_ntoa(ipaddr), chunk, block, count);
 
 	BlockMapInit(&tmp, block, count);
 	ClientEnqueueMap(chunk, &tmp, count, 0);
@@ -592,8 +595,10 @@ ClientPartialRequest(Packet_t *p)
 
 	count = BlockMapIsAlloc(&p->msg.prequest.blockmap, 0, MAXCHUNKSIZE);
 
-	if (count == 0)
-		FrisLog("WARNING: ClientPartialRequest with zero count");
+	if (count == 0) {
+		FrisLog("WARNING: ClientPartialRequest with zero count; ignored");
+		return;
+	}
 
 	EVENT(1, EV_PREQMSG, ipaddr, chunk, count, p->msg.prequest.retries, 0);
 	ClientEnqueueMap(chunk, &p->msg.prequest.blockmap, count,
