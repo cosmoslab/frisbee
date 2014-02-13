@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -54,6 +54,7 @@ extern int debug;
 struct emulab_configstate {
 	int image_maxsize;	/* sitevar:images/create/maxsize (in GB) */
 	int image_maxwait;	/* sitevar:images/create/maxwait (in min) */
+	int image_maxrate_dyn;	/* sitevar:images/frisbee/maxrate_dynamic */
 	int image_maxrate_std;	/* sitevar:images/frisbee/maxrate_std (in MB/s) */
 	int image_maxrate_usr;	/* sitevar:images/frisbee/maxrate_usr (in MB/s) */
 };
@@ -98,6 +99,7 @@ static int INELABINELAB  = 0;
 
 static uint64_t	put_maxsize = 10000000000ULL;	/* zero means no limit */
 static uint32_t put_maxwait = 2000;		/* zero means no limit */
+static uint32_t get_maxrate_dyn = 0;		/* non-zero means use dynamic */
 static uint32_t get_maxrate_std = 72000000;	/* zero means no limit */
 static uint32_t get_maxrate_usr = 54000000;	/* zero means no limit */
 
@@ -185,6 +187,15 @@ emulab_read(void)
 	FrisLog("  image_put_maxwait = %d min",
 		(int)(put_maxwait/60));
 
+	val = emulab_getsitevar("images/frisbee/maxrate_dyn");
+	if (val) {
+		ival = atoi(val);
+		get_maxrate_dyn = ival ? 1 : 0;
+		free(val);
+	}
+	FrisLog("  image_get_maxrate_dyn = %s",
+		get_maxrate_dyn ? "true" : "false");
+
 	val = emulab_getsitevar("images/frisbee/maxrate_std");
 	if (val) {
 		ival = atoi(val);
@@ -193,8 +204,11 @@ emulab_read(void)
 			get_maxrate_std = (uint32_t)ival;
 		free(val);
 	}
-	FrisLog("  image_get_maxrate_std = %d MB/sec",
-		(int)(get_maxrate_std/1000000));
+	if (get_maxrate_dyn)
+		FrisLog("  image_get_maxrate_std = N/A");
+	else
+		FrisLog("  image_get_maxrate_std = %d MB/sec",
+			(int)(get_maxrate_std/1000000));
 
 	val = emulab_getsitevar("images/frisbee/maxrate_usr");
 	if (val) {
@@ -204,8 +218,11 @@ emulab_read(void)
 			get_maxrate_usr = (uint32_t)ival;
 		free(val);
 	}
-	FrisLog("  image_get_maxrate_usr = %d MB/sec",
-		(int)(get_maxrate_usr/1000000));
+	if (get_maxrate_dyn)
+		FrisLog("  image_get_maxrate_usr = N/A");
+	else
+		FrisLog("  image_get_maxrate_usr = %d MB/sec",
+			(int)(get_maxrate_usr/1000000));
 
 	return 0;
 }
@@ -217,6 +234,7 @@ emulab_save(void)
 
 	cs->image_maxsize = put_maxsize;
 	cs->image_maxwait = put_maxwait;
+	cs->image_maxrate_dyn = get_maxrate_dyn;
 	cs->image_maxrate_std = get_maxrate_std;
 	cs->image_maxrate_usr = get_maxrate_usr;
 
@@ -234,12 +252,21 @@ emulab_restore(void *state)
 	put_maxwait = cs->image_maxwait;
 	FrisLog("  image_put_maxwait = %d min",
 		(int)(put_maxwait/60));
+	get_maxrate_dyn = cs->image_maxrate_dyn;
+	FrisLog("  image_get_maxrate_dyn = %s",
+		get_maxrate_dyn ? "true" : "false");
 	get_maxrate_std = cs->image_maxrate_std;
-	FrisLog("  image_get_maxrate_std = %d MB/sec",
-		(int)(get_maxrate_std/1000000));
+	if (get_maxrate_dyn)
+		FrisLog("  image_get_maxrate_std = N/A");
+	else
+		FrisLog("  image_get_maxrate_std = %d MB/sec",
+			(int)(get_maxrate_std/1000000));
 	get_maxrate_usr = cs->image_maxrate_usr;
-	FrisLog("  image_get_maxrate_usr = %d MB/sec",
-		(int)(get_maxrate_usr/1000000));
+	if (get_maxrate_dyn)
+		FrisLog("  image_get_maxrate_usr = N/A");
+	else
+		FrisLog("  image_get_maxrate_usr = %d MB/sec",
+			(int)(get_maxrate_usr/1000000));
 
 	return 0;
 }
@@ -306,8 +333,12 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 	else
 		ii->get_timeout = 60;
 
-	/* get_options */
-	snprintf(str, sizeof str, " -W %u",
+	/*
+	 * get_options: for dynamic rate adjustment, we use the std/usr
+	 * bandwidth value as the maximum bandwidth.
+	 */
+	snprintf(str, sizeof str, " %s-W %u",
+		 get_maxrate_dyn ? "-D " : "",
 		 isindir(STDIMAGEDIR, ii->path) ?
 		 get_maxrate_std : get_maxrate_usr);
 #if 0

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -52,6 +52,8 @@ static char *DEFAULT_MCNUMPORT	= "0";
 static char *indexfile;
 char *imagedir = NULL;
 static char *rimagedir;
+static uint32_t maxrate = 100000000;
+static int dynrate = 0;
 
 /* Multicast address/port base info */
 static int mc_a, mc_b, mc_c, mc_port_lo, mc_port_num;
@@ -69,7 +71,13 @@ null_deinit(void)
 static int
 null_read(void)
 {
-	/* "Reading" the config file is a no-op. */
+	/* "Reading" the config file is a no-op. Just echo settings. */
+	FrisLog("  dynamic bandwidth = %s", dynrate ? "true" : "false");
+	if (dynrate)
+		FrisLog("  max bandwidth = N/A");
+	else
+		FrisLog("  max bandwidth = %d MB/sec",
+			(int)(maxrate/1000000));
 	return 0;
 }
 
@@ -85,6 +93,13 @@ null_save(void)
 static int
 null_restore(void *state)
 {
+	FrisLog("  dynamic bandwidth = %s", dynrate ? "true" : "false");
+	if (dynrate)
+		FrisLog("  max bandwidth = N/A");
+	else
+		FrisLog("  max bandwidth = %d MB/sec",
+			(int)(maxrate/1000000));
+
 	return 0;
 }
 
@@ -133,8 +148,9 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 	ai->imageinfo[ix].get_timeout = 180;
 
 	/* get_options */
-	strcpy(str, "");
-	strcat(str, " -W 100000000 -K 15");
+	snprintf(str, sizeof str, " %s-W %u",
+		 dynrate ? "-D " : "", maxrate);
+	strcat(str, " -K 15");
 	ai->imageinfo[ix].get_options = mystrdup(str);
 
 	/* and whack the put_* fields */
@@ -651,6 +667,7 @@ null_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	return 0;
 }
 
+#if 0
 static void
 dump_host_authinfo(FILE *fd, char *node, char *cmd,
 		   struct config_host_authinfo *ai)
@@ -673,6 +690,7 @@ dump_host_authinfo(FILE *fd, char *node, char *cmd,
 
 	fprintf(fd, "\n");
 }
+#endif
 
 static void
 null_dump(FILE *fd)
@@ -705,17 +723,31 @@ null_init(char *opts)
 	called++;
 
 	/*
-	 * XXX the only option we recognize right now is
-	 * mcaddr=A.B.C.D
+	 * Options:
+	 *   mcaddr=A.B.C.D      MC base address
+	 *   bandwidth=NNNNNNNN  Max bandwidth of a server
+	 *   dynamicbw=(1|0)	 Use dynamic bandwidth control
 	 */
 	if (opts && opts[0]) {
-		char *cp = index(opts, '=');
-		if (cp) {
-			*cp = 0;
-			if (strcmp(opts, "mcaddr") == 0)
-				DEFAULT_MCADDR = cp + 1;
-			*cp = '=';
+		char *opt;
+
+		opts = mystrdup(opts);
+		while ((opt = strsep(&opts, ",")) != NULL) {
+			char *cp = index(opt, '=');
+			if (cp) {
+				*cp = 0;
+				if (strcmp(opt, "mcaddr") == 0)
+					DEFAULT_MCADDR = cp + 1;
+				else if (strcmp(opt, "bandwidth") == 0)
+					maxrate = (uint32_t)
+						strtol(cp+1, NULL, 10);
+				else if (strcmp(opt, "dynamicbw") == 0)
+					dynrate =
+						(strtol(cp+1, NULL, 10) != 0) ?
+						1 : 0;
+			}
 		}
+		free(opts);
 	}
 
 	if (imagedir == NULL)
