@@ -232,6 +232,7 @@ typedef struct {
 			uint32_t lostblocks;
 			uint32_t rerequests;
 			uint32_t partialdrops;
+			uint32_t fullrerequests;
 		} __attribute__((__packed__)) v1;
 		uint32_t limit[256];
 	} u;
@@ -314,7 +315,7 @@ typedef struct {
 			int32_t		blockcount;
 			int32_t		chunksize;
 			int32_t		blocksize;
-			uint64_t		bytecount;
+			uint64_t	bytecount;
 		} join2;
 
 		/*

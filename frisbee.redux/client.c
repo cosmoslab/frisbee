@@ -885,9 +885,13 @@ ClientRecvThread(void *arg)
 			 * We may have missed the request for this chunk/block
 			 * so treat the arrival of a block as an indication
 			 * that someone requested it.
+			 *
+			 * XXX note the hacky final argument which tells
+			 * RequestStamp that we actually received the block
+			 * and didn't just see a request.
 			 */
 			(void) RequestStamp(p->msg.block.chunk,
-					    p->msg.block.block, 1, 0);
+					    p->msg.block.block, 1, (void *)1);
 			break;
 
 		case PKTSUBTYPE_REQUEST:
@@ -1217,6 +1221,7 @@ static int
 RequestStamp(int chunk, int block, int count, void *arg)
 {
 	int stampme = 0;
+	int gotblock = (arg != 0) ? 1 : 0;
 
 	/*
 	 * If not doing delays, don't bother with the stamp
@@ -1243,7 +1248,7 @@ RequestStamp(int chunk, int block, int count, void *arg)
 	 * processing this chunk, then the chunk data will be of use to
 	 * us so we update the stamp.
 	 */
-	else if (! Chunks[chunk].seen)
+	else if (!Chunks[chunk].seen)
 		stampme = 1;
 	/*
 	 * Otherwise, this is a partial chunk request for which we have
@@ -1271,8 +1276,14 @@ RequestStamp(int chunk, int block, int count, void *arg)
 			/*
 			 * Any block that was formerly of dubious value now
 			 * has real value since someone has requested more.
+			 *
+			 * XXX unless we were called because we received the
+			 * block rather than just seeing a request. In that
+			 * case, we might have just marked the chunk as
+			 * dubious in GotBlock so we should not undo it!
 			 */
-			if (ChunkBuffer[i].state == CHUNK_DUBIOUS) {
+			if (!gotblock &&
+			    ChunkBuffer[i].state == CHUNK_DUBIOUS) {
 				CLEVENT(1, EV_CLIDUBPROMO, chunk, block, 0, 0);
 				ChunkBuffer[i].state = CHUNK_FILLING;
 			}
@@ -1469,8 +1480,8 @@ GotBlock(Packet_t *p)
 		ChunkBuffer[i].state      = state;
 		ChunkBuffer[i].thischunk  = chunk;
 		ChunkBuffer[i].blockcount = ChunkSize(chunk);
-		bzero(&ChunkBuffer[i].blockmap,
-		      sizeof(ChunkBuffer[i].blockmap));
+		memset(&ChunkBuffer[i].blockmap, 0,
+		       sizeof(ChunkBuffer[i].blockmap));
 		inprogress++;
 		CLEVENT(1, EV_CLISCHUNK, chunk, block, inprogress,
 			goodblocksrecv+1);
@@ -1595,8 +1606,12 @@ RequestMissing(int chunk, BlockMap_t *map, int count)
 		FrisLog("Request 0 blocks from chunk %d", chunk);
 	Stats.u.v1.lostblocks += count;
 	Stats.u.v1.requests++;
-	if (Chunks[chunk].ours)
+	Stats.u.v1.prequests++;
+	if (Chunks[chunk].ours) {
 		Stats.u.v1.rerequests++;
+		if (count == csize)
+			Stats.u.v1.fullrerequests++;
+	}
 #endif
 	CLEVENT(1, EV_CLIPREQ, chunk, count, 0, 0);
 
@@ -1605,7 +1620,7 @@ RequestMissing(int chunk, BlockMap_t *map, int count)
 	 * unless we were requesting something we are missing
 	 * we can just unconditionally stamp the chunk.
 	 */
-	RequestStamp(chunk, 0, csize, (void *)1);
+	RequestStamp(chunk, 0, csize, 0);
 	Chunks[chunk].ours = 1;
 }
 
@@ -1616,6 +1631,23 @@ static void
 RequestRange(int chunk, int block, int count)
 {
 	Packet_t	packet, *p = &packet;
+
+	/*
+	 * If this is a re-request, use RequestMissing instead so that
+	 * the server will know that this is a retry.
+	 */
+	if (Chunks[chunk].ours) {
+		BlockMap_t tmap;
+
+		if (block == 0 && count == ChunkSize(chunk))
+			memset(&tmap, 0, sizeof(tmap));
+		else {
+			memset(&tmap, ~0, sizeof(tmap));
+			BlockMapClear(&tmap, block, count);
+		}
+		RequestMissing(chunk, &tmap, count);
+		return;
+	}
 
 	if (debug)
 		FrisLog("Requesting chunk:%d block:%d count:%d",
@@ -1631,7 +1663,7 @@ RequestRange(int chunk, int block, int count)
 	CLEVENT(1, EV_CLIREQ, chunk, block, count, 0);
 	DOSTAT(requests++);
 
-	RequestStamp(chunk, block, count, (void *)1);
+	RequestStamp(chunk, block, count, 0);
 	Chunks[chunk].ours = 1;
 }
 
@@ -1682,7 +1714,6 @@ RequestChunk(int timedout)
 		 * Request all the missing blocks.
 		 * If the block was of dubious value, it is no longer.
 		 */
-		DOSTAT(prequests++);
 		RequestMissing(ChunkBuffer[i].thischunk,
 			       &ChunkBuffer[i].blockmap,
 			       ChunkBuffer[i].blockcount);

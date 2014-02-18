@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -622,6 +622,8 @@ ClientStatsDump(unsigned int id, ClientStats_t *stats)
 			stats->u.v1.prequests, stats->u.v1.lostblocks);
 		FrisLog("  re-requests:             %d",
 			stats->u.v1.rerequests);
+		FrisLog("  full chunk re-requests:  %d",
+			stats->u.v1.fullrerequests);
 		FrisLog("  partially-filled drops:  %d",
 			stats->u.v1.partialdrops);
 		break;
