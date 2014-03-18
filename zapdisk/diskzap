@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (c) 2000-2012 University of Utah and the Flux Group.
+# Copyright (c) 2000-2014 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -47,6 +47,7 @@ fi
 #     We should get the info from Emulab central.
 #
 
+islinux=0
 if [ $# -eq 0 ]; then
     if [ `uname` = FreeBSD ]; then
 	set -- `dmesg | egrep '(ad|da|ar|aacd|amrd|mfid|mfisyspd)[0-9]: [0-9]+MB' | \
@@ -54,12 +55,17 @@ if [ $# -eq 0 ]; then
     else
 	# Linux
 	set -- `/bin/ls -d /sys/block/sd* | sed 's#.*/##'`
+	islinux=1
     fi
 fi
 status=0
 for disk in $*; do
     echo -n "Zapping bootblocks for $disk..."
-    if [ -r "/dev/$disk" ]; then
+
+    # XXX hack: check for RO dongle
+    if [ $islinux -ne 0 ] && grep -q 1 /sys/block/$disk/ro; then
+	echo "read-only, SKIPPED!"
+    elif [ -r "/dev/$disk" ]; then
         $BINDIR/zapdisk $args /dev/$disk
 	if [ $? -ne 0 ]; then
 	    echo "FAILED!"
