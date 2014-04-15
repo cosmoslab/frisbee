@@ -42,6 +42,7 @@
 #include <signal.h>
 #include <stdarg.h>
 #include <pthread.h>
+#include <errno.h>
 #include <assert.h>
 #include "decls.h"
 #include "utils.h"
@@ -86,6 +87,7 @@ int		busywait = 0;
 char		*proxyfor = NULL;
 static struct timeval stamp;
 static struct in_addr serverip;
+int		servertimo = 0;
 #ifdef MASTER_SERVER
 static int	xfermethods = MS_METHOD_MULTICAST;
 #endif
@@ -154,6 +156,8 @@ int		TotalChunkCount;	/* Total number of chunks in file */
 static pthread_mutex_t	chunkbuf_mutex;
 static pthread_cond_t	chunkbuf_cond;
 #endif
+static pthread_t child_pid;
+static long child_error;
 
 #ifdef NEVENTS
 int blocksrecv, goodblocksrecv;
@@ -189,6 +193,7 @@ char *usagestr =
  " -i mcastif      Specify a multicast interface in dotted notation.\n"
  " -s slice        Output to DOS slice (DOS numbering 1-4)\n"
  "                 NOTE: Must specify a raw disk device for output filename.\n"
+ " -T seconds      Server inactivity timeout (seconds, default is zero for none).\n"
  " -F file-ID      Specify the ID of the file (image) to download.\n"
  "                 Here -S specifies the 'master' server which will\n"
  "                 return unicast/multicast info to use for image download.\n"
@@ -250,7 +255,7 @@ main(int argc, char **argv)
 	char	*sig_keyfile = 0, *enc_keyfile = 0, *uuidstr = 0;
 	int	islocalproxy = 0;
 
-	while ((ch = getopt(argc, argv, "dqhp:m:s:i:tbznT:r:E:D:C:W:S:M:R:I:ONc:e:u:K:B:F:Q:P:X:fk:")) != -1)
+	while ((ch = getopt(argc, argv, "dqhp:m:s:i:tbznU:r:E:D:C:W:S:T:M:R:I:ONc:e:u:K:B:F:Q:P:X:fk:")) != -1)
 		switch(ch) {
 		case 'd':
 			debug++;
@@ -301,7 +306,9 @@ main(int argc, char **argv)
 				exit(1);
 			}
 			break;
-
+		case 'T':
+			servertimo = atoi(optarg);
+			break;
 #ifdef MASTER_SERVER
 		case 'B':
 			busywait = atoi(optarg);
@@ -348,7 +355,7 @@ main(int argc, char **argv)
 			tracing++;
 			break;
 
-		case 'T':
+		case 'U':
 			strncpy(traceprefix, optarg, sizeof(traceprefix));
 			break;
 
@@ -696,6 +703,10 @@ main(int argc, char **argv)
 			DiskStatusCallback = WriterStatusCallback;
 	}
 
+	if (servertimo)
+		FrisLog("Quit if no messages from server after %d seconds",
+			servertimo);
+
 	/*
 	 * Set the MC keepalive counter (but only if we are multicasting!)
 	 */
@@ -744,7 +755,7 @@ void *
 ClientRecvThread(void *arg)
 {
 	Packet_t	packet, *p = &packet;
-	int		IdleCounter, BackOff, KACounter;
+	int		IdleCounter, BackOff, KACounter, STCounter;
 	static int	gotone;
 
 	if (debug)
@@ -782,6 +793,12 @@ ClientRecvThread(void *arg)
 	 */
 	BackOff = 0;
 
+	/*
+	 * Server timeout counter. If we do not see any message from the
+	 * server for this many ticks, we assume the server has died and quit.
+	 */
+	STCounter = servertimo * TIMEOUT_HZ;
+
 	while (1) {
 #ifdef NEVENTS
 		static int needstamp = 1;
@@ -805,6 +822,20 @@ ClientRecvThread(void *arg)
 		 */
 		if (PacketReceive(p) != 0) {
 			pthread_testcancel();
+
+			/*
+			 * First see if we should exit
+			 */
+			if (servertimo && --STCounter <= 0) {
+				FrisLog("\n*** No messages from server "
+					"after %d seconds, exiting",
+					servertimo);
+				child_error = ETIMEDOUT;
+#ifdef CONDVARS_WORK
+				pthread_cond_signal(&chunkbuf_cond);
+#endif
+				pthread_exit((void *)child_error);
+			}
 
 			/*
 			 * See if we should send a keep alive
@@ -842,6 +873,8 @@ ClientRecvThread(void *arg)
 			continue;
 		}
 		pthread_testcancel();
+		if (servertimo)
+			STCounter = servertimo * TIMEOUT_HZ;
 		if (keepalive)
 			KACounter = keepalive * TIMEOUT_HZ;
 		gotone = 1;
@@ -941,8 +974,6 @@ ClientRecvThread(void *arg)
 	}
 }
 
-static pthread_t child_pid;
-
 #ifndef linux
 /*
  * XXX mighty hack!
@@ -961,8 +992,6 @@ static pthread_t child_pid;
  * Since I don't understand this fully, I am making it a FreeBSD-only
  * thing for now.
  */
-static long	 child_error;
-
 void
 myexit(void)
 {
@@ -1065,10 +1094,7 @@ ChunkerStartup(void)
 		 * If nothing to do, then get out of the way for a while.
 		 */
 		if (i == maxchunkbufs) {
-#ifndef linux
 			/*
-			 * XXX mighty hack (see above).
-			 *
 			 * Might be nothing to do because network receiver
 			 * thread died.  That indicates a problem.
 			 *
@@ -1083,7 +1109,6 @@ ChunkerStartup(void)
 				pthread_join(child_pid, &ignored);
 				_exit(child_error);
 			}
-#endif
 
 #ifdef DOEVENTS
 			Event_t event;
