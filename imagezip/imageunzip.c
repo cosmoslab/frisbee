@@ -1740,7 +1740,8 @@ inflate_subblock(const char *chunkbufp)
 void
 writezeros(off_t offset, off_t zcount)
 {
-	size_t	zcc, wcc;
+	size_t	zcc;
+	ssize_t wcc;
 	off_t ozcount;
 	char *zbuf;
 
