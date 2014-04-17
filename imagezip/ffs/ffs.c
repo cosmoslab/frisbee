@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -106,7 +106,7 @@ read_bsdslice(int slice, int bsdtype, u_int32_t start, u_int32_t size,
 	 */
 	if (dlabel.label.d_magic  != DISKMAGIC ||
 	    dlabel.label.d_magic2 != DISKMAGIC) {
-#if 0 /* not needed, a fake disklabel is created by the kernel */
+#ifdef linux /* not needed in BSD, a fake disklabel is created by the kernel */
 		/*
 		 * If we were forced with the bsdfs option,
 		 * assume this is a single partition disk like a
@@ -122,7 +122,7 @@ read_bsdslice(int slice, int bsdtype, u_int32_t start, u_int32_t size,
 			return read_bsdpartition(infd, &dlabel.label, 0);
 		}
 #endif
-		warnx("Wrong magic number is BSD disklabel");
+		warnx("Wrong magic number in BSD disklabel");
  		return 1;
 	}
 
