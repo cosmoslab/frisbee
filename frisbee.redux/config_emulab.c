@@ -1800,28 +1800,28 @@ emulab_init(char *opts)
 		return NULL;
 	}
 
-	if ((path = realpath(SHAREROOT_DIR, pathbuf)) == NULL) {
+	if ((path = myrealpath(SHAREROOT_DIR, pathbuf)) == NULL) {
 		FrisError("emulab_init: could not resolve '%s'",
 			  SHAREROOT_DIR);
 		return NULL;
 	}
 	SHAREDIR = mystrdup(path);
 
-	if ((path = realpath(PROJROOT_DIR, pathbuf)) == NULL) {
+	if ((path = myrealpath(PROJROOT_DIR, pathbuf)) == NULL) {
 		FrisError("emulab_init: could not resolve '%s'",
 			  PROJROOT_DIR);
 		return NULL;
 	}
 	PROJDIR = mystrdup(path);
 
-	if ((path = realpath(GROUPSROOT_DIR, pathbuf)) == NULL) {
+	if ((path = myrealpath(GROUPSROOT_DIR, pathbuf)) == NULL) {
 		FrisError("emulab_init: could not resolve '%s'",
 			  GROUPSROOT_DIR);
 		return NULL;
 	}
 	GROUPSDIR = mystrdup(path);
 
-	if ((path = realpath(USERSROOT_DIR, pathbuf)) == NULL) {
+	if ((path = myrealpath(USERSROOT_DIR, pathbuf)) == NULL) {
 		FrisError("emulab_init: could not resolve '%s'",
 			  USERSROOT_DIR);
 		return NULL;
@@ -1829,7 +1829,7 @@ emulab_init(char *opts)
 	USERSDIR = mystrdup(path);
 
 	if (strlen(SCRATCHROOT_DIR) > 0) {
-		if ((path = realpath(SCRATCHROOT_DIR, pathbuf)) == NULL) {
+		if ((path = myrealpath(SCRATCHROOT_DIR, pathbuf)) == NULL) {
 			FrisError("emulab_init: could not resolve '%s'",
 				  SCRATCHROOT_DIR);
 			return NULL;
