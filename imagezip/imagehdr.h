@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -31,7 +31,7 @@
  * is 1,768,515,945!
  *
  *	V2 introduced the first and last sector fields as well
- *	as basic relocations.
+ *	as basic relocations. Also dropped maintenance of blocktotal.
  *
  *	V3 introduced LILO relocations for Linux partition images.
  *	Since an older imageunzip would still work, but potentially
@@ -58,8 +58,8 @@
 struct blockhdr_V1 {
 	uint32_t	magic;		/* magic/version */
 	uint32_t	size;		/* Size of compressed part */
-	int32_t		blockindex;	/* netdisk: which block we are */
-	int32_t		blocktotal;	/* netdisk: total number of blocks */
+	int32_t		blockindex;	/* which block we are */
+	int32_t		blocktotal;	/* V1: total number of blocks */
 	int32_t		regionsize;	/* sizeof header + regions */
 	int32_t		regioncount;	/* number of regions */
 };
@@ -75,8 +75,8 @@ struct blockhdr_V1 {
 struct blockhdr_V2 {
 	uint32_t	magic;		/* magic/version */
 	uint32_t	size;		/* Size of compressed part */
-	int32_t		blockindex;	/* netdisk: which block we are */
-	int32_t		blocktotal;	/* netdisk: total number of blocks */
+	int32_t		blockindex;	/* which block we are */
+	int32_t		blocktotal;	/* V1: total number of blocks */
 	int32_t		regionsize;	/* sizeof header + regions */
 	int32_t		regioncount;	/* number of regions */
 	/* V2 follows */
@@ -112,8 +112,8 @@ struct blockhdr_V2 {
 struct blockhdr_V4 {
 	uint32_t	magic;		/* magic/version */
 	uint32_t	size;		/* Size of compressed part */
-	int32_t		blockindex;	/* netdisk: which block we are */
-	int32_t		blocktotal;	/* netdisk: total number of blocks */
+	int32_t		blockindex;	/* which block we are */
+	int32_t		blocktotal;	/* V1: total number of blocks */
 	int32_t		regionsize;	/* sizeof header + regions */
 	int32_t		regioncount;	/* number of regions */
 	/* V2 follows */

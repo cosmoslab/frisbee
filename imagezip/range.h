@@ -21,34 +21,15 @@
  * }}}
  */
 
-#define HASH_VERSION_1	0x20031107
-#define HASH_VERSION_2	0x20140618
-#define HASH_VERSION	HASH_VERSION_2
-
-#define HASH_MAGIC	".ndzsig"
-#define HASHBLK_SIZE	(64*1024)
-#define HASH_MAXSIZE	20
-
-#define HASH_CHUNKNO(c)		((c) & ~(1 << 31))
-#define HASH_CHUNKDOESSPAN(c)	(((c) & (1 << 31)) ? 1 : 0)
-#define HASH_CHUNKSETSPAN(c)	((c) | (1 << 31))
-
-struct hashregion {
-	struct region region;
-	uint32_t chunkno;
-	unsigned char hash[HASH_MAXSIZE];
+/*
+ * A list of data ranges.
+ */
+struct range {
+	uint32_t	start;		/* In sectors */
+	uint32_t	size;		/* In sectors */
+	void		*data;
+	struct range	*next;
 };
 
-struct hashinfo {
-	uint8_t	 magic[8];
-	uint32_t version;
-	uint32_t hashtype;
-	uint32_t nregions;
-	uint32_t blksize;	/* V2: make hash blocksize explicit */
-	uint8_t	 pad[8];
-	struct hashregion regions[0];
-};
-
-#define HASH_TYPE_MD5	1
-#define HASH_TYPE_SHA1	2
-#define HASH_TYPE_RAW	3
+/* XXX in imagezip.c right now, should move to range.c */
+void freeranges(struct range *head);

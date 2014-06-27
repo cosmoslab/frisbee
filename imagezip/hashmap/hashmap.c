@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2005-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -33,16 +33,17 @@
 #include <assert.h>
 #include <sys/uio.h>
 #include <unistd.h>
-#ifdef HASHSTATS
+#include <sys/stat.h>
 #include <sys/time.h>
-#endif
 
 #include "sliceinfo.h"
 #include "global.h"
 #include "imagehdr.h"
+#include "range.h"
 #include "hashmap.h"
 #include "imagehash.h"
 
+//#define DEBUG
 //#define FOLLOW
 #define HASH_FREE
 
@@ -70,10 +71,8 @@ struct hashstats {
 	uint32_t fixup;		 /* uncompared due to fixup overlap */
 } hashstats;
 
-struct timeval time_orig_read, time_curr_read, time_hash,
-	time_hash_and_cmp;
+struct timeval time_orig_read, time_curr_read, time_hash, time_hash_and_cmp;
 #endif
-extern void	freeranges(struct range *);
 
 /*
  * hash_free determines what we do when we have overlapping free blocks
@@ -87,7 +86,12 @@ int hash_free = 0;
 
 static char *hashfile;
 static unsigned char *hashdata;
-static unsigned int hashdatasize;
+static unsigned int hashblksize;
+static struct hashinfo *nhinfo;
+static unsigned int hashlen;
+static unsigned char *(*hashfunc)(const unsigned char *, size_t,
+				  unsigned char *);
+static int imagefd;
 
 /*
  * time the operation, updating the global_v (of type 'struct timeval')
@@ -108,13 +112,17 @@ static unsigned int hashdatasize;
 
 #ifdef DEBUG
 static char *
-spewhash(unsigned char *h)
+spewhash(unsigned char *h, int hlen)
 {
-	static char hbuf[33];
-	uint32_t *foo = (uint32_t *)h;
+	static char hbuf[HASH_MAXSIZE*2+1];
+	static const char hex[] = "0123456789abcdef";
+	int i;
 
-	snprintf(hbuf, sizeof hbuf, "%08x%08x%08x%08x",
-		 foo[0], foo[1], foo[2], foo[3]);
+	for (i = 0; i < hlen; i++) {
+		hbuf[i*2] = hex[h[i] >> 4];
+		hbuf[i*2+1] = hex[h[i] & 0xf];
+	}
+	hbuf[i*2] = '\0';
 	return hbuf;
 }
 
@@ -126,168 +134,99 @@ dumphash(struct hashinfo *hinfo)
 
 	for (i = 0; i < hinfo->nregions; i++) {
 		reg = &hinfo->regions[i];
-		printf("[%u-%u]: chunk %d, hash %s\n", reg->region.start,
-			       reg->region.start + reg->region.size - 1,
-				       reg->chunkno, spewhash(reg->hash));
+		printf("[%u-%u]: hash %s\n", reg->region.start,
+		       reg->region.start + reg->region.size - 1,
+		       spewhash(reg->hash, hashlen));
 		total += reg->region.size;
 	}
 	printf("TOTAL = %u\n", total);
 }
 #endif
 
-//#define READ_CACHE
-
 /*
- * Read from infd, hash the contents and compare with the hash from sig file.
- * Optionally (READ_CACHE), read-ahead and cache the blocks
+ * Read a range of the disk and compute the hash value.
  */
 static int
-hash_and_cmp(int infd,
-	     unsigned char *(*hashfunc)(const unsigned char *, size_t,
-					unsigned char *),
-	     int hashlen, struct hashregion *hashreg, int num_reg)
+hash_range(uint32_t start, uint32_t size, unsigned char *hash)
 {
 	unsigned char		*bp;
 	size_t			count, byte_size;
 	ssize_t			cc;
 	off_t			byte_start, retval;
-	unsigned char 		hash[HASH_MAXSIZE];
-	struct region		hreg = hashreg->region;
-	int			iretval;
 
-	//printf("hash_and_cmp: in -- start = %u, size = %x, num_reg = %d.\n",
-	//				hreg.start, hreg.size, num_reg);
-#ifdef READ_CACHE
-	static struct range	cache = { 0, 0, NULL, NULL };
-	static char		*odata = NULL;
+	assert(imagefd >= 0);
+	assert(hashfunc != NULL);
+	assert(hashlen != 0);
+
 	/*
-	 * We read the blocks here. try to optimize here by reading 
-	 * as many contguous blocks as possible (by looking thru the
-	 * hashregions) and store the cached data's range.
-	 * all subsequent calls that can be served from this cache are served.
-	 * when the first request outside this data comes, we purge the cache
-	 * (since request comes sequentially), and fetch the next bunch of
-	 * consecutive blocks....
+	 * Read from the disk
 	 */
-	if (hreg.start + hreg.size <= cache.start + cache.size) {
-		/*
-		 * serve the request from the cache
-		 */
-		buf = cache.data + sectobytes((hreg.start - cache.start));
+	byte_size = sectobytes(size);
+	byte_start = sectobytes(start);
+	assert(size <= hashblksize);
 
-		//printf("hash_and_cmp: fetching from cache start = %d...\n",
-		//		sectobytes((hreg.start - cache.start)));
-	} else {
-		int i;
-		/*
-		 * bad luck ! gotta hit the disk...
-		 */
-		//printf("hash_and_cmp: NOT in cache...\n");
-
-		/*
-		 * find the contiguous blocks
-		 */
-		cache.start = hreg.start;
-		cache.size = hreg.size;
-		for (i = 0; i < num_reg - 1; i++) {
-			/*
-			 * since there are NO overlaps in hashed blocks
-			 * just check end points..
-			 */
-			if (hashreg[i].region.start + hashreg[i].region.size
-						!= hashreg[i+1].region.start) {
-				break;
-			}
-
-			/*
-			 * voila ! contiguous...
-			 */
-			cache.size += hashreg[i+1].region.size;
-		}
-	
-		byte_size = sectobytes(cache.size);
-		byte_start = sectobytes(cache.start);
-
-		if (cache.data) {
-			free(cache.data);
-		}
-		cache.data = (unsigned char *) malloc(byte_size);
-		if (!cache.data) {
-			fprintf(stderr, "hash_and_cmp: unable to malloc !\n:");
-			goto error;
-		}
-		bzero(cache.data, byte_size);
-
-		//printf("hash_and_cmp: gonna fetch start = %d, size = %d\n",
-		//				cache.start, cache.size);
-
-		/*
-		 * go fetch the blocks.
-		 */
-		retval = lseek(infd, byte_start, SEEK_SET);
-	//	printf("BUG_DBG: hash_and_cmp(): retval = %ld,"
-	//		" byte_start = %ld\n", retval, byte_start);
-		if (retval < 0) {
-			fprintf(stderr, "hash_and_cmp: lseek error !\n:");
-			goto free_error;
-		}
-
-		count = byte_size;
-		bp = cache.data;
-		while (count) {
-			TIMEOP(cc = read(infd, bp, count), time_curr_read);
-			if (cc < 0) {
-				perror("hash_and_cmp: read error -- ");
-				goto free_error;
-			}
-			count -= cc;
-			//printf("looping...%d %d\n", cc, count);
-			bp += cc;
-		}
-		buf = cache.data;
-
-	}
-#else
-	/*
-	 * Read from the disk !
-	 */
-	byte_size = sectobytes(hreg.size);
-	byte_start = sectobytes(hreg.start);
-	assert(hreg.size <= hashdatasize);
-
-	retval = lseek(infd, byte_start, SEEK_SET);
+	retval = lseek(imagefd, byte_start, SEEK_SET);
 	if (retval < 0) {
-		perror("hash_and_cmp: lseek error");
+		perror("hash_range: lseek error");
 		return -1;
 	}
 
 	count = byte_size;
 	bp = hashdata;
 	while (count > 0) {
-		TIMEOP(cc = read(infd, bp, count), time_curr_read);
+		TIMEOP(cc = read(imagefd, bp, count), time_curr_read);
 		if (cc < 0) {
-			perror("hash_and_cmp: read error");
+			perror("hash_range: read error");
 			return -1;
 		}
 		if (cc == 0) {
-			fprintf(stderr, "hash_and_cmp: unexpected EOF\n");
+			fprintf(stderr, "hash_range: unexpected EOF\n");
 			return -1;
 		}
 		count -= cc;
 		bp += cc;
 	}
+
+	/* XXX apply fixups */
+	if (hasfixup(start, size)) {
+#ifdef FOLLOW
+		fprintf(stderr, "  h: [%u-%u] applying fixups\n",
+			start, start + size - 1);
 #endif
+		applyfixups(byte_start, byte_size, hashdata);
+	}
 
 	/*
-	 * now caculate the hash and compare it.
+	 * Now caculate the hash, storing in the provided buffer.
 	 */
-	TIMEOP(
-	    (void)(*hashfunc)(hashdata, byte_size, hash),
-	time_hash);
+	TIMEOP((void)(*hashfunc)(hashdata, byte_size, hash), time_hash);
 
+	return 0;
+}
+
+/*
+ * Read from imagefd, hash the contents and compare with the sig file hash.
+ * Returns 0 if identical, 1 if not. Also returns computed hash in 'hash'.
+ */
+static int
+hash_and_cmp(struct hashregion *hashreg, unsigned char *hash)
+{
+	struct region		hreg = hashreg->region;
+	int			iretval;
+
+	assert(imagefd >= 0);
+	assert(hashfunc != NULL);
+	assert(hashlen != 0);
+
+	if (hash_range(hreg.start, hreg.size, hash))
+		return -1;
+
+	/*
+	 * Compare the hashes
+	 */
 #if 0
-	fprintf(stderr, "disk: %s\n", spewhash(hash));
-	fprintf(stderr, "sig:  %s\n", spewhash(hashreg->hash));
+	fprintf(stderr, "disk: %s\n", spewhash(hash, hashlen));
+	fprintf(stderr, "sig:  %s\n", spewhash(hashreg->hash, hashlen));
 #endif
 
 	iretval = (memcmp(hashreg->hash, hash, hashlen) != 0);
@@ -302,16 +241,6 @@ hash_and_cmp(int infd,
 #endif
 
 	return iretval;
-
-#ifdef READ_CACHE
-free_error:
-	free(cache.data);
-	cache.data = NULL;
-error:
-	cache.start = 0;
-	cache.size = 0;
-#endif
-	return -1;
 }
 
 /*
@@ -371,7 +300,7 @@ readhashinfo(char *hfile, struct hashinfo **hinfop, uint32_t ssect)
 		return -1;
 	}
 	if (strcmp((char *)hi.magic, HASH_MAGIC) != 0 ||
-	    hi.version != HASH_VERSION) {
+	    !(hi.version == HASH_VERSION_1 || hi.version == HASH_VERSION_2)) {
 		fprintf(stderr, "%s: not a valid signature file\n", hfile);
 		return -1;
 	}
@@ -388,10 +317,14 @@ readhashinfo(char *hfile, struct hashinfo **hinfop, uint32_t ssect)
 		return -1;
 	}
 
+	hashblksize = (hi.version == HASH_VERSION_1) ?
+		bytestosec(HASHBLK_SIZE) : hi.blksize;
+
+	/* Compensate for partition offset */
 	for (i = 0; i < hinfo->nregions; i++) {
 		struct hashregion *hreg = &hinfo->regions[i];
-		if (hreg->region.size > hashdatasize)
-			hashdatasize = hreg->region.size;
+		assert(hreg->region.size <= hashblksize);
+
 		hreg->region.start += ssect;
 #ifdef HASHSTATS
 		hashstats.orig_allocated += hreg->region.size;
@@ -400,8 +333,7 @@ readhashinfo(char *hfile, struct hashinfo **hinfop, uint32_t ssect)
 	close(fd);
 
 	hashfile = hfile;
-	hashdatasize = sectobytes(hashdatasize);
-	hashdata = malloc(hashdatasize);
+	hashdata = malloc(sectobytes(hashblksize));
 	if (hashdata == NULL) {
 		fprintf(stderr, "%s: not enough memory for data buffer\n",
 			hfile);
@@ -416,41 +348,290 @@ readhashinfo(char *hfile, struct hashinfo **hinfop, uint32_t ssect)
 	return 0;
 }
 
+int hashmap_blocksize(void)
+{
+	assert(hashblksize != 0);
+	return sectobytes(hashblksize);
+}
+
+/*
+ * Write out hash (signature) info associated with the named image.
+ * Signature file will be <name>.sig.
+ */
+int hashmap_write_hashfile(char *name, uint32_t ssect)
+{
+	int ofd, i, cc, count;
+	char *hfile;
+	struct stat sb;
+	struct timeval tm[2];
+
+	if (nhinfo == NULL) {
+		fprintf(stderr, "No hashinfo to write!?\n");
+		return -1;
+	}
+
+	/* Compensate for partition offset */
+	for (i = 0; i < nhinfo->nregions; i++) {
+		struct hashregion *hreg = &nhinfo->regions[i];
+		assert(hreg->region.size <= nhinfo->blksize);
+		assert(hreg->region.start >= ssect);
+
+		hreg->region.start -= ssect;
+	}
+
+	hfile = malloc(strlen(name) + 5);
+	if (hfile == NULL) {
+		fprintf(stderr, "%s: out of memory\n", name);
+		return -1;
+	}
+	strcpy(hfile, name);
+	strcpy(hfile + strlen(hfile), ".sig");
+
+	ofd = open(hfile, O_RDWR|O_CREAT|O_TRUNC, 0666);
+	if (ofd < 0) {
+		perror(hfile);
+		free(hfile);
+		hfile = malloc(strlen("/tmp/000000.sig") + 1);
+		if (hfile) {
+			sprintf(hfile, "/tmp/%06d.sig", getpid());
+			fprintf(stderr, "Saving to %s instead...\n", hfile);
+			ofd = open(hfile, O_RDWR|O_CREAT|O_TRUNC, 0666);
+			if (ofd < 0) {
+				perror(hfile);
+				free(hfile);
+				return -1;
+			}
+		} else
+			return -1;
+	}
+
+	count = sizeof(*nhinfo) + nhinfo->nregions*sizeof(struct hashregion);
+	cc = write(ofd, nhinfo, count);
+	close(ofd);
+	if (cc != count) {
+		if (cc < 0)
+			perror(hfile);
+		else
+			fprintf(stderr,
+				"%s: incomplete write (%d)\n", hfile, cc);
+		free(hfile);
+		return -1;
+	}
+
+	/*
+	 * Set the modtime of the hash file to match that of the image.
+	 * This is a crude (but fast!) method for matching images with
+	 * signatures.
+	 */
+	cc = stat(name, &sb);
+	if (cc >= 0) {
+#ifdef linux
+		tm[0].tv_sec = sb.st_atime;
+		tm[0].tv_usec = 0;
+		tm[1].tv_sec = sb.st_mtime;
+		tm[1].tv_usec = 0;
+#else
+		TIMESPEC_TO_TIMEVAL(&tm[0], &sb.st_atimespec);
+		TIMESPEC_TO_TIMEVAL(&tm[1], &sb.st_mtimespec);
+#endif
+		cc = utimes(hfile, tm);
+	}
+	if (cc < 0)
+		fprintf(stderr, "%s: WARNING: could not set mtime (%s)\n",
+			hfile, strerror(errno));
+
+	free(hfile);
+	return 0;
+}
+
+/*
+ * We realloc the region array in big chunks so we don't thrash so much.
+ * This is the number of ~32 byte regions per memory chunk
+ */
+#define REGPERBLK	8192	/* ~256KB -- must be power of 2 */
+
+static int
+addhash(struct hashinfo **hinfop, uint32_t start, uint32_t size,
+	unsigned char *hash)
+{
+	struct hashinfo *hinfo = *hinfop;
+	int nreg;
+
+	if (hinfo == 0) {
+		nreg = 0;
+		hinfo = calloc(1, sizeof(*hinfo));
+	} else {
+		nreg = hinfo->nregions;
+	}
+	if ((nreg % REGPERBLK) == 0) {
+		hinfo = realloc(hinfo, sizeof(*hinfo) +
+				(nreg+REGPERBLK) * sizeof(struct hashregion));
+		if (hinfo == 0)
+			return -1;
+		*hinfop = hinfo;
+	}
+
+	hinfo->regions[nreg].chunkno = 0;
+	hinfo->regions[nreg].region.start = start;
+	hinfo->regions[nreg].region.size = size;
+	memcpy(hinfo->regions[nreg].hash, hash, HASH_MAXSIZE);
+	hinfo->nregions++;
+#ifdef FOLLOW
+	fprintf(stderr, "    A: [%u-%u] %s\n",
+		start, start + size - 1, spewhash(hash, hashlen));
+#endif
+
+	return 0;
+}
+
+/*
+ * Create hash map entries for the indicated range of data.
+ * Compute the hash of each range if not given.
+ */
+static int
+add_to_hashmap(struct hashinfo **hinfop, uint32_t rstart, uint32_t rsize,
+	       unsigned char *rhash)
+{
+	uint32_t offset, hsize;
+	unsigned char hashbuf[HASH_MAXSIZE], *hash;
+
+	assert(hinfop != NULL);
+
+	offset = rstart % hashblksize;
+	while (rsize > 0) {
+		if (offset) {
+			hsize = hashblksize - offset;
+			if (hsize > rsize)
+				hsize = rsize;
+			offset = 0;
+		} else if (rsize > hashblksize)
+			hsize = hashblksize;
+		else
+			hsize = rsize;
+
+		/*
+		 * If no hash was given, we have to compute it
+		 */
+		if ((hash = rhash) == NULL) {
+			if (hash_range(rstart, hsize, hashbuf)) {
+				fprintf(stderr, "Error hashing image data\n");
+				return -1;
+			}
+			hash = hashbuf;
+		}
+
+		if (addhash(hinfop, rstart, hsize, hash) != 0) {
+			fprintf(stderr, "Out of memory for new hash map\n");
+			return -1;
+		}
+
+		rstart += hsize;
+		rsize -= hsize;
+	}
+
+	return 0;
+}
+
+/* Make sure we don't clobber anything in the original range chain */
+#define COPYRANGE(r) ({	   \
+	struct range *tmp; \
+	if (r) { tmprange = *(r); tmp = &tmprange; } \
+	else { tmp = NULL; } \
+	tmp; \
+})
+
+/*
+ * Fill in the chunk number for all hash ranges that start between
+ * [ssect - lsect). For any hash range that starts but does not end
+ * in the range, mark it special.
+ */
+void
+hashmap_update_chunk(uint32_t ssect, uint32_t lsect, int chunkno)
+{
+	int i;
+	assert(chunkno >= 0);
+
+	if (nhinfo == NULL)
+		return;
+
+	lsect--;
+	for (i = 0; i < nhinfo->nregions; i++) {
+		struct hashregion *hreg = &nhinfo->regions[i];
+		uint32_t hrssect = hreg->region.start;
+		uint32_t hrlsect = hrssect + hreg->region.size - 1;
+
+		/* hash range all before, skip */
+		if (hrlsect < ssect)
+			continue;
+
+		/* hash range all after, we are done */
+		if (hrssect > lsect)
+			break;
+
+		/* overlap at the beginning, we should have marked it */
+		if (hrssect < ssect) {
+			assert(HASH_CHUNKDOESSPAN(hreg->chunkno));
+			continue;
+		}
+
+		/* completely contained */
+		if (hrlsect <= lsect)
+			hreg->chunkno = chunkno;
+
+		/* partially contained, mark it */
+		else
+			hreg->chunkno = HASH_CHUNKSETSPAN(chunkno);
+	}
+}
 
 /*
  * Intersect the current allocated disk ranges (curranges) with the
  * hashinfo ranges read from the signature file (hfile).
  * Return the resulting range list.
  */
-struct range *
+int
 hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
-		      uint32_t ssect)
+		      uint32_t ssect, int newhash, struct range **nranges)
 {
 	uint32_t		gapstart, gapsize, lastdrangeend = 0;
-	unsigned int		hashlen;
-	unsigned char		*(*hashfunc)(const unsigned char *,
-					     size_t, unsigned char *);
+	unsigned char 		hash[HASH_MAXSIZE];
 	struct range		dummy_head, *range_tail;
 	struct hashregion	*hreg, *ereg;
 	char			*hashstr;
 	struct hashinfo		*hinfo;
-	struct range		*drange;
+	struct range		*drange, tmprange;
 	int			retval, changed, gapcount;
 	
-	/*
-	 * No allocated ranges, that was easy!
-	 */
-	if (curranges == NULL)
-		return NULL;
+	assert(curranges != NULL);
+
+	imagefd = infd;
 
 	/*
-	 * First we read the hashfile to get hash ranges and values
+	 * First we read the hashfile to get hash ranges and values.
+	 * If hash file is null, then we concoct a hashinfo struct
+	 * for an empty file.
 	 */
-	retval = readhashinfo(hfile, &hinfo, ssect);
-	if (retval < 0) {
-		fprintf(stderr, "readhashinfo: failed !\n"
-			" * * * Aborting * * *\n");
-		exit(1);
+	if (hfile != NULL) {
+		retval = readhashinfo(hfile, &hinfo, ssect);
+		if (retval < 0) {
+			fprintf(stderr, "readhashinfo: failed !\n");
+			return -1;
+		}
+	} else {
+		hinfo = calloc(1, sizeof(*nhinfo));
+		strcpy((char *)hinfo->magic, HASH_MAGIC);
+		hinfo->version = HASH_VERSION_2;
+		hinfo->hashtype = HASH_TYPE_SHA1; 		/* XXX */
+		hinfo->blksize = bytestosec(HASHBLK_SIZE);	/* XXX */
+		hinfo->nregions = 0;
+
+		hashblksize = hinfo->blksize;
+		hashdata = malloc(sectobytes(hashblksize));
+		if (hashdata == NULL) {
+			fprintf(stderr, "%s: not enough memory for data buffer\n",
+				hfile);
+			return -1;
+		}
 	}
 
 	/*
@@ -482,10 +663,25 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	range_tail = &dummy_head;
 
 	/*
+	 * Copy the fixup list since we are going to have to apply fixups
+	 * before computing new hashes and applying fixups is destructive.
+	 */
+	if (newhash) {
+#ifdef DEBUG
+		extern int numfixups;
+#endif
+		savefixups();
+#ifdef DEBUG
+		fprintf(stderr, "Saved %d fixups, first:\n", numfixups);
+		dumpfixups(1, 1);
+#endif
+	}
+
+	/*
 	 * Loop through all hash regions, comparing with the currently
 	 * allocated disk regions.
 	 */
-	drange = curranges;
+	drange = COPYRANGE(curranges);
 	ereg = hinfo->regions + hinfo->nregions;
 	for (hreg = hinfo->regions; hreg < ereg; hreg++) {
 		assert(drange && drange->size > 0);
@@ -499,15 +695,17 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 #endif
 
 		/*
-		 * Any allocated ranges on disk that are before the
-		 * hash range are newly allocated, and must be put in the image.
+		 * Any allocated ranges on disk that are before the hash
+		 * range are newly allocated, and must be put in the image.
 		 */
 		while (drange &&
 		       (drange->start + drange->size) <= hreg->region.start) {
 #ifdef FOLLOW
-			fprintf(stderr, "    D: [%u-%u] pre-hreg skip\n",
+			fprintf(stderr, "    D: [%u-%u] pre-hreg [%u-%u] skip\n",
 				drange->start,
-				drange->start + drange->size - 1);
+				drange->start + drange->size - 1,
+				hreg->region.start,
+				hreg->region.start + hreg->region.size - 1);
 #endif
 #ifdef HASHSTATS
 			hashstats.cur_allocated += drange->size;
@@ -517,8 +715,14 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 					 drange->start, drange->size) < 0)
 				goto error;
 
+			/* Add hash entries for this range. */
+			if (newhash &&
+			    add_to_hashmap(&nhinfo, drange->start,
+					   drange->size, NULL))
+				goto error;
+
 			lastdrangeend = drange->start + drange->size;
-			drange = drange->next;
+			drange = COPYRANGE(drange->next);
 			assert(drange == NULL || drange->size > 0);
 		}
 		if (drange == NULL)
@@ -566,14 +770,22 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 			if (add_to_range(&range_tail,
 					 drange->start, before) < 0)
 				goto error;
-			
+
 #ifdef FOLLOW
-			fprintf(stderr, "  D: [%u-%u]/[%u-%u] drange head split\n",
+			fprintf(stderr,
+				"  D: [%u-%u]/[%u-%u] drange head split\n",
 				drange->start,
 				drange->start + before - 1,
 				drange->start + before,
-				drange->start + drange->size);
+				drange->start + drange->size - 1);
 #endif
+
+			/* Add hash entries for this range. */
+			if (newhash &&
+			    add_to_hashmap(&nhinfo, drange->start, before,
+					   NULL))
+				goto error;
+
 			/*
 			 * Update drange with new start and size to account
 			 * for the stuff we've taken off.  We continue
@@ -610,14 +822,10 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 		     drange->size >= hreg->region.size)) {
 
 			/*
-			 * XXX if there is a fixup, all bets are off
-			 * (e.g., they might compare equal now, but not
-			 * after the fixup).  Just force inclusion of all
-			 * data.
-			 *
-			 * XXX we could do this on a drange by drange basis
-			 * below, but I deem it not worth the trouble since
-			 * all this code will be changing anyway.
+			 * If there is a fixup, we have to include the
+			 * underlying range in the new image. Even if the
+			 * range matched after the fixup was applied, there
+			 * would have to be something to apply the fixup to!
 			 */
 			if (hasfixup(hreg->region.start, hreg->region.size)) {
 				changed = 3;
@@ -627,11 +835,9 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 					hreg->region.start + hreg->region.size-1);
 #endif
 			} else {
-				
+
 				TIMEOP(
-				       changed = hash_and_cmp(infd, hashfunc,
-							      hashlen, hreg,
-							      ereg - hreg),
+				       changed = hash_and_cmp(hreg, hash),
 				       time_hash_and_cmp);
 				if (changed < 0)
 					goto error;
@@ -642,6 +848,15 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 					hreg->region.start + hreg->region.size-1,
 					changed ? "differs" : "matches");
 #endif
+				/*
+				 * We have a hash value corresponding to
+				 * the new contents of the old hrange.
+				 * Add that hrange with the new hash.
+				 */
+				if (newhash &&
+				    add_to_hashmap(&nhinfo, hreg->region.start,
+						   hreg->region.size, hash))
+					goto error;
 			}
 		} else {
 			/*
@@ -707,9 +922,8 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 			assert(curend <= hregend);
 
 #ifdef FOLLOW
-			fprintf(stderr, "    D: [%u-%u] drange covered\n",
-				curstart,
-				curend - 1);
+			fprintf(stderr, "    D: [%u-%u] drange covered, changed=%d\n",
+				curstart, curend - 1, changed);
 #endif
 
 #ifdef HASHSTATS
@@ -736,6 +950,16 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 						 curend - curstart) < 0)
 					goto error;
 
+				/*
+				 * If changed is 0 or 1, we have already
+				 * added the entry with the correct hash,
+				 * otherwise add hash entries.
+				 */
+				if (changed > 1 && newhash &&
+				    add_to_hashmap(&nhinfo, curstart,
+						   curend - curstart,
+						   NULL))
+					goto error;
 			}
 
 			/*
@@ -744,7 +968,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 			 */
 			if (curstart == drange->start) {
 				lastdrangeend = curend;
-				drange = drange->next;
+				drange = COPYRANGE(drange->next);
 				assert(drange == NULL || drange->size > 0);
 			}
 		}
@@ -799,7 +1023,6 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 		assert(drange->start >= hreg->region.start + hreg->region.size);
 	}
 	assert(drange == NULL || hreg == ereg);
-	assert(lastdrangeend > 0);
 
 	/*
 	 * Remaining hash entries are ignored since they are deallocated
@@ -855,21 +1078,76 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 		if (add_to_range(&range_tail, drange->start, drange->size) < 0)
 			goto error;
 
-		drange = drange->next;
+#ifdef FOLLOW
+		fprintf(stderr, "  D: [%u-%u] post-hregs skip\n",
+			drange->start,
+			drange->start + drange->size - 1);
+#endif
+
+		/* Add hash entries for this range. */
+		if (newhash &&
+		    add_to_hashmap(&nhinfo, drange->start, drange->size, NULL))
+			goto error;
+
+		drange = COPYRANGE(drange->next);
 		assert(drange == NULL || drange->size > 0);
 	}
+	*nranges = dummy_head.next;
 
-	return dummy_head.next;
+	/*
+	 * If creating a new hashfile, copy over header info from
+	 * the old one. Even if there are no ranges in the current
+	 * image, we create a valid (null) hashfile.
+	 */
+	if (newhash) {
+		if (*nranges == NULL) {
+			assert(nhinfo == NULL);
+			nhinfo = calloc(1, sizeof(*nhinfo));
+		}
+		assert(nhinfo != NULL);
+		strcpy((char *)nhinfo->magic, HASH_MAGIC);
+		nhinfo->version = HASH_VERSION_2;
+		nhinfo->hashtype = hinfo->hashtype;
+		nhinfo->blksize = (hinfo->version == HASH_VERSION_1) ?
+			HASHBLK_SIZE : hinfo->blksize;
+	}
+
+	if (newhash) {
+#ifdef DEBUG
+		extern int numfixups;
+		fprintf(stderr, "%d fixups left-over (should be zero!)\n",
+			numfixups);
+#endif
+		restorefixups(1);
+#ifdef DEBUG
+		fprintf(stderr, "Restored %d fixups, first:\n", numfixups);
+		dumpfixups(1, 1);
+#endif
+	}
+	return 0;
 
 error:
+	if (newhash) {
+#ifdef DEBUG
+		extern int numfixups;
+		fprintf(stderr, "%d fixups left-over\n", numfixups);
+#endif
+		restorefixups(0);
+#ifdef DEBUG
+		fprintf(stderr, "Restored %d fixups, first:\n", numfixups);
+		dumpfixups(1, 1);
+#endif
+	}
+	if (nhinfo)
+		free(nhinfo);
 	freeranges(dummy_head.next);
-	return NULL;
+	return -1;
 }
 
-#include <sys/stat.h>
+#define NZ(v) ((v)?(v):1)
 
 void
-report_hash_stats(int pnum)
+hashmap_dump_stats(int pnum)
 {
 #ifdef HASHSTATS
 	uint32_t b1, b2;
@@ -878,25 +1156,29 @@ report_hash_stats(int pnum)
 
 	fprintf(stderr,"\nHASH STATS:\n\n");
 
-	fprintf(stderr, "Signature file:         %s ", hashfile);
-	sb.st_mtime = 0;
-	if (lstat(hashfile, &sb) >= 0 && S_ISLNK(sb.st_mode)) {
-		char nbuf[128];
-		int i;
+	fprintf(stderr, "Signature file:         %s ",
+		hashfile ? hashfile : "<none>");
+	if (hashfile) {
+		sb.st_mtime = 0;
+		if (lstat(hashfile, &sb) >= 0 && S_ISLNK(sb.st_mode)) {
+			char nbuf[128];
+			int i;
 
-		i = readlink(hashfile, nbuf, sizeof(nbuf));
-		if (i > 0) {
-			nbuf[i] = 0;
-			fprintf(stderr, "-> %s ", nbuf);
+			i = readlink(hashfile, nbuf, sizeof(nbuf));
+			if (i > 0) {
+				nbuf[i] = 0;
+				fprintf(stderr, "-> %s ", nbuf);
+			}
+			stat(hashfile, &sb);
 		}
-		stat(hashfile, &sb);
+		fprintf(stderr, "(%u)\n", (unsigned)sb.st_mtime);
 	}
-	fprintf(stderr, "(%u)\n", (unsigned)sb.st_mtime);
 	fprintf(stderr, "Partition:              %d\n", pnum);
 
-	fprintf(stderr, "Max hash block size:    %u sectors\n\n",
-		bytestosec(hashdatasize));
-	fprintf(stderr, "Hash incomplete ranges: %d\n", hash_free);
+	fprintf(stderr, "Max hash block size:    %u sectors\n",
+		hashblksize);
+	fprintf(stderr, "Hash incomplete ranges: %s\n\n",
+		hash_free ? "yes" : "no");
 
 	t = time_curr_read.tv_sec + (double)time_curr_read.tv_usec / 1000000.0;
 	fprintf(stderr, "Disk read time:         %7.3f sec\n", t);
@@ -908,19 +1190,21 @@ report_hash_stats(int pnum)
 		(double)time_hash_and_cmp.tv_usec / 1000000.0;
 	fprintf(stderr, "Read+hash time:         %7.3f sec\n\n", t);
 
-	b1 = hashstats.hash_compares;
-	b2 = hashstats.hash_identical;
-	fprintf(stderr, "Hash blocks compared:   %10u\n",
-		b1);
-	fprintf(stderr, "  Identical:            %10u (%.1f%%)\n",
-		b2, ((double)b2 / b1) * 100.0);
+	if (hashstats.orig_allocated) {
+		b1 = hashstats.hash_compares;
+		b2 = hashstats.hash_identical;
+		fprintf(stderr, "Hash blocks compared:   %10u\n",
+			b1);
+		fprintf(stderr, "  Identical:            %10u (%.1f%%)\n",
+			b2, ((double)b2 / NZ(b1)) * 100.0);
 
-	b1 = hashstats.hash_scompares;
-	b2 = hashstats.hash_sidentical;
-	fprintf(stderr, "Total sectors compared: %10u\n",
-		b1);
-	fprintf(stderr, "  Identical:            %10u (%.1f%%)\n\n",
-		b2, ((double)b2 / b1) * 100.0);
+		b1 = hashstats.hash_scompares;
+		b2 = hashstats.hash_sidentical;
+		fprintf(stderr, "Total sectors compared: %10u\n",
+			b1);
+		fprintf(stderr, "  Identical:            %10u (%.1f%%)\n\n",
+			b2, ((double)b2 / NZ(b1)) * 100.0);
+	}
 
 	b1 = hashstats.orig_allocated;
 	fprintf(stderr, "Original sectors:       %10u\n", b1);
@@ -928,34 +1212,36 @@ report_hash_stats(int pnum)
 	b1 = hashstats.cur_allocated;
 	fprintf(stderr, "Current sectors:        %10u\n", b1);
 
-	b1 = hashstats.shared;
-	fprintf(stderr, "Common sectors:         %10u\n", b1);
+	if (hashstats.orig_allocated) {
+		b1 = hashstats.shared;
+		fprintf(stderr, "Common sectors:         %10u\n", b1);
 
-	b1 = hashstats.orig_allocated;
-	b2 = hashstats.orig_only + hashstats.gapsects;		
-	fprintf(stderr, "Deleted from original:  %10u (%.1f%%)\n",
-		b2, ((double)b2 / b1) * 100.0);
+		b1 = hashstats.orig_allocated;
+		b2 = hashstats.orig_only + hashstats.gapsects;		
+		fprintf(stderr, "Deleted from original:  %10u (%.1f%%)\n",
+			b2, ((double)b2 / b1) * 100.0);
 
-	b2 = hashstats.cur_only;
-	fprintf(stderr, "Added to original:      %10u (%.1f%%)\n",
-		b2, ((double)b2 / b1) * 100.0);
+		b2 = hashstats.cur_only;
+		fprintf(stderr, "Added to original:      %10u (%.1f%%)\n",
+			b2, ((double)b2 / b1) * 100.0);
 
-	b2 = (hashstats.shared - hashstats.unchanged);
-	fprintf(stderr, "Modified from original: %10u (%.1f%%)\n\n",
-		b2, ((double)b2 / b1) * 100.0);
+		b2 = (hashstats.shared - hashstats.unchanged);
+		fprintf(stderr, "Modified from original: %10u (%.1f%%)\n\n",
+			b2, ((double)b2 / b1) * 100.0);
 
-	fprintf(stderr, "Hash blocks covering free sectors:   %u\n",
-		hashstats.gaps);
-	fprintf(stderr, "  Total free sectors covered:        %u\n",
-		hashstats.gapsects);
-	fprintf(stderr, "  Hash blocks compared identical:    %u\n",
-		hashstats.unchangedgaps);
-	fprintf(stderr, "  Free sectors compared identical:   %u\n",
-		hashstats.gapunchanged);
-	fprintf(stderr, "  Allocated sectors assumed changed: %u\n",
-		hashstats.nocompare);
-	fprintf(stderr, "    Assumed changed due to fixups:   %u\n",
-		hashstats.fixup);
+		fprintf(stderr, "Hash blocks covering free sectors:   %u\n",
+			hashstats.gaps);
+		fprintf(stderr, "  Total free sectors covered:        %u\n",
+			hashstats.gapsects);
+		fprintf(stderr, "  Hash blocks compared identical:    %u\n",
+			hashstats.unchangedgaps);
+		fprintf(stderr, "  Free sectors compared identical:   %u\n",
+			hashstats.gapunchanged);
+		fprintf(stderr, "  Allocated sectors assumed changed: %u\n",
+			hashstats.nocompare);
+		fprintf(stderr, "    Assumed changed due to fixups:   %u\n",
+			hashstats.fixup);
+	}
 
 	fprintf(stderr,"\nEND HASH STATS\n");
 #endif

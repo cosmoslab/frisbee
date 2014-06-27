@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -40,7 +40,11 @@ extern void addfixup(off_t offset, off_t poffset, off_t size, void *data,
 extern void addfixupfunc(void (*func)(void *, off_t, void *), off_t offset,
 			 off_t poffset, off_t size, void *data, int dsize,
 			 int reloctype);
+extern void applyfixups(off_t offset, off_t size, void *data);
 extern int hasfixup(uint32_t soffset, uint32_t ssize);
+extern void savefixups(void);
+extern void restorefixups(int isempty);
+extern void dumpfixups(int verbose, int count);
 
 extern SLICEMAP_PROCESS_PROTO(read_bsdslice);
 extern SLICEMAP_PROCESS_PROTO(read_linuxslice);

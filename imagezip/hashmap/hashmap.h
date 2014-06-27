@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2004 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -21,20 +21,9 @@
  * }}}
  */
 
-/* XXX from global.h */
-extern int secsize;
-#define sectobytes(s)	((off_t)(s) * secsize)
-#define bytestosec(b)	(uint32_t)((b) / secsize)
-
-/* XXX from imagezip.c */
-struct range {
-        uint32_t        start;          /* In sectors */
-        uint32_t        size;           /* In sectors */
-        void            *data;
-        struct range    *next;
-};
-
-void free_ranges(struct range **);
-
-#define MAX(x, y)	(((x) > (y)) ? (x) : (y))
-#define MIN(x, y)	(((x) > (y)) ? (y) : (x))
+int	hashmap_blocksize(void);
+void	hashmap_update_chunk(uint32_t, uint32_t, int);
+int	hashmap_compute_delta(struct range *, char *, int, u_int32_t, int,
+			      struct range **);
+int	hashmap_write_hashfile(char *, u_int32_t);
+void	hashmap_dump_stats(int pnum);

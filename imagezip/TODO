@@ -25,7 +25,7 @@ Things to do for image*:
 
 6. Image hashing.
    [ DONE -- as a separate program, imagehash.  It would be more efficient
-     to have imagezip create the signature as it does. ]
+     to have imagezip create the signature as it goes. ]
    Create a "signature" file for an image using a collision-resistant hash
    like MD5 or SHA-1.  See TODO.hash for more.
 
@@ -155,7 +155,7 @@ Things to do for image*:
        the image.
 
    So the most important operation is insert, and it isn't necessary to
-   maintain a sorted listed.  However, it might prove to be practical to
+   maintain a sorted list.  However, it might prove to be practical to
    keep it sorted if merge operations can be efficiently performed.  An
    alternative approach, to avoid the invert operation, would be to start
    with a single allocated range (blocks 0 - sizeof_disk) and every time
@@ -189,6 +189,7 @@ Things to do for image*:
    but that was still implemented with singly-linked lists.
 
 12. Better handling of "insignificant" free ranges.
+   [ DONE: via the fixup method mentioned and a new -Z option. ]
    The -F option in imagezip let's you say that free ranges below a
    certain size should be "forgotten", effectively making that range
    allocated. This promotes longer sequential writes at the expense of
@@ -237,3 +238,13 @@ Things to do for image*:
    Hmm...though it appears that FreeBSD doesn't export an "erase" command
    to user-mode, only to filesystems. Linux does, at least "hdparm" supports
    "--trim-sector-ranges" which uses it to erase sections of a disk.
+
+15. Better filling of chunks.
+   Look at public-domain fitblk.c as a way to better fill the 1MB chunks
+   rather than our ad-hoc "give it smaller and smaller pieces the closer
+   we get to 1MB". Ours is more time efficient (single pass), but fitbit
+   will probably do a better job of compressing data into chunks (but
+   make three compression passes!) Note that our input granularity is
+   sectors (or possibly 64K hash-block sized pieces) rather than bytes so
+   it makes the input part a little more complicated.
+

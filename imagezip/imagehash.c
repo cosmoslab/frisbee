@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -69,7 +69,7 @@ static int doall = 1;
 static int detail = 0;
 static int create = 0;
 static int report = 0;
-static int fixedoffset = 0;
+static int withchunkno = 1;
 static int regfile = 0;
 static int nothreads = 0;
 static int hashtype = HASH_TYPE_SHA1;
@@ -77,7 +77,7 @@ static int hashlen = 20;
 static long hashblksize = HASHBLK_SIZE;
 static int hashblksizeinsec;
 static unsigned long long ndatabytes;
-static unsigned long nchunks, nregions, nhregions;
+static unsigned long nchunks, nregions, nhregions, nsplithashes;
 static char *imagename;
 static char *fileid = NULL;
 static char *sigfile = NULL;
@@ -88,7 +88,7 @@ static void usage(void);
 static int gethashinfo(char *name, struct hashinfo **hinfo);
 static int readhashinfo(char *name, struct hashinfo **hinfop);
 static int checkhash(char *name, struct hashinfo *hinfo);
-static void dumphash(char *name, struct hashinfo *hinfo);
+static void dumphash(char *name, struct hashinfo *hinfo, int withchunk);
 static int createhash(char *name, struct hashinfo **hinfop);
 static int hashimage(char *name, struct hashinfo **hinfop);
 static int hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop);
@@ -121,11 +121,13 @@ main(int argc, char **argv)
 	extern char build_info[];
 	struct hashinfo *hashinfo = 0;
 
-	while ((ch = getopt(argc, argv, "cb:dvhno:rD:NVRfF:")) != -1)
+	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:")) != -1)
 		switch(ch) {
 		case 'b':
 			hashblksize = atol(optarg);
-			if (hashblksize < 512 || hashblksize > (32*1024*1024)) {
+			if (hashblksize < 512 ||
+			    hashblksize > (32*1024*1024) ||
+			    hashblksize != sectobytes(bytestosec(hashblksize))) {
 				fprintf(stderr, "Invalid hash block size\n");
 				usage();
 			}
@@ -135,11 +137,12 @@ main(int argc, char **argv)
 		case 'F':
 			fileid = strdup(optarg);
 			break;
-		case 'f':
-			fixedoffset = 1;
+		case 'C':
+			withchunkno = 0;
 			break;
 		case 'R':
 			report++;
+			break;
 		case 'c':
 			create++;
 			break;
@@ -191,8 +194,24 @@ main(int argc, char **argv)
 			exit(0);
 	}
 
-	if ((create && argc < 1) || (!create && argc < 2))
+	/* XXX part of hack special case to dump a sigfile */
+	if (report && !create && sigfile == NULL)
+		create++;
+
+	if ((create && argc < 1) || (!create && sigfile == NULL && argc < 2))
 		usage();
+
+	hashblksizeinsec = bytestosec(hashblksize);
+
+	/* XXX hack special case to dump a sigfile */
+	if (!create && sigfile != NULL) {
+		if (readhashinfo("", &hashinfo) != 0)
+			exit(2);
+		detail = 2;
+		dumphash("", hashinfo, withchunkno);
+		exit(0);
+	}
+
 	imagename = argv[0];
 
 	/*
@@ -220,8 +239,6 @@ main(int argc, char **argv)
 	signal(SIGINFO, dump_stats);
 #endif
 
-	hashblksizeinsec = bytestosec(hashblksize);
-
 	/*
 	 * Raw image comparison
 	 */
@@ -239,7 +256,7 @@ main(int argc, char **argv)
 		} else {
 			if (createhash(argv[0], &hashinfo))
 				exit(2);
-			dumphash(argv[0], hashinfo);
+			dumphash(argv[0], hashinfo, withchunkno);
 		}
 		exit(0);
 	}
@@ -249,7 +266,7 @@ main(int argc, char **argv)
 	 */
 	if (gethashinfo(argv[0], &hashinfo))
 		exit(2);
-	dumphash(argv[0], hashinfo);
+	dumphash(argv[0], hashinfo, withchunkno);
 	if (checkhash(argv[1], hashinfo))
 		exit(1);
 	exit(0);
@@ -266,6 +283,8 @@ usage(void)
 		"    create a signature file for the specified image\n"
 		"imagehash -R [-dr] [-b blksize] <image-filename>\n"
 		"    output an ASCII report to stdout rather than creating a signature file\n"
+		"imagehash -R -o sigfile\n"
+		"    output an ASCII report of the indicated signature file\n"
 		"imagehash -v\n"
 		"    print version info and exit\n"
 		"\n"
@@ -344,7 +363,7 @@ readhashinfo(char *name, struct hashinfo **hinfop)
 		return -1;
 	}
 	if (strcmp((char *)hi.magic, HASH_MAGIC) != 0 ||
-	    hi.version != HASH_VERSION) {
+	    !(hi.version == HASH_VERSION_1 || hi.version == HASH_VERSION_2)) {
 		fprintf(stderr, "%s: not a valid signature file\n", hname);
 		goto bad;
 	}
@@ -374,6 +393,17 @@ readhashinfo(char *name, struct hashinfo **hinfop)
 		break;
 	}
 	nhregions = hinfo->nregions;
+	if (hinfo->version > HASH_VERSION_1) {
+		if (hinfo->blksize != hashblksizeinsec) {
+			fprintf(stderr,
+				"WARNING: changing hash blocksize %d -> %d sectors\n",
+				hashblksizeinsec, hinfo->blksize);
+			hashblksizeinsec = hinfo->blksize;
+			hashblksize = sectobytes(hashblksizeinsec);
+			if (maxreadbufmem < hashblksize)
+				maxreadbufmem = hashblksize;
+		}
+	}
 	return 0;
 }
 
@@ -390,6 +420,7 @@ addhash(struct hashinfo **hinfop, int chunkno, uint32_t start, uint32_t size,
 	struct hashinfo *hinfo = *hinfop;
 	int nreg;
 
+	assert(chunkno >= 0);
 	if (report) {
 		printf("%s\t%u\t%u",
 		       spewhash(hash, hashlen), start, size);
@@ -424,20 +455,40 @@ addhash(struct hashinfo **hinfop, int chunkno, uint32_t start, uint32_t size,
 }
 
 static void
-dumphash(char *name, struct hashinfo *hinfo)
+dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 {
 	uint32_t i;
 	struct hashregion *reg;
+	int haschunkrange = 0;
+
+	if (hinfo->version > HASH_VERSION_1)
+		haschunkrange = 1;
 
 	if (detail > 1) {
 		for (i = 0; i < hinfo->nregions; i++) {
 			reg = &hinfo->regions[i];
-			printf("[%u-%u]: chunk %d, hash %s\n",
+			printf("[%u-%u] (%d): ",
 			       reg->region.start,
 			       reg->region.start + reg->region.size-1,
-			       reg->chunkno, spewhash(reg->hash, hashlen));
+			       reg->region.size);
+			if (withchunk) {
+				/* upper bit indicates chunkrange */
+				if (HASH_CHUNKDOESSPAN(reg->chunkno)) {
+					int chunkno =
+						HASH_CHUNKNO(reg->chunkno);
+					printf("chunk %d-%d, ",
+					       chunkno, chunkno + 1);
+					nsplithashes++;
+				} else
+					printf("chunk %d, ",
+					       (int)reg->chunkno);
+			} else if (HASH_CHUNKDOESSPAN(reg->chunkno))
+				nsplithashes++;
+			printf("hash %s\n", spewhash(reg->hash, hashlen));
 		}
 	}
+	if (nsplithashes)
+		printf("%lu hashes split across chunks\n", nsplithashes);
 }
 
 static char *
@@ -491,8 +542,9 @@ createhash(char *name, struct hashinfo **hinfop)
 	 */
 	hinfo = *hinfop;
 	strcpy((char *)hinfo->magic, HASH_MAGIC);
-	hinfo->version = HASH_VERSION;
+	hinfo->version = HASH_VERSION_2;
 	hinfo->hashtype = hashtype;
+	hinfo->blksize = hashblksizeinsec;
 	count = sizeof(*hinfo) + hinfo->nregions*sizeof(struct hashregion);
 	cc = write(ofd, hinfo, count);
 	close(ofd);
@@ -579,9 +631,9 @@ checkhash(char *name, struct hashinfo *hinfo)
 	fprintf(stderr, "Checking disk contents using %s\n", hashstr);
 
 	for (i = 0, reg = hinfo->regions; i < hinfo->nregions; i++, reg++) {
-		if (chunkno != reg->chunkno) {
+		if (chunkno != HASH_CHUNKNO(reg->chunkno)) {
 			nchunks++;
-			chunkno = reg->chunkno;
+			chunkno = HASH_CHUNKNO(reg->chunkno);
 		}
 		size = sectobytes(reg->region.size);
 		rbuf = getblock(reg);
@@ -976,8 +1028,16 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 		rstart = regp->start;
 		rsize = regp->size;
 		ndatabytes += sectobytes(rsize);
-		if (fixedoffset)
-			startoff = rstart % hashblksizeinsec;
+
+		/*
+		 * Keep hash blocks aligned with real disk offsets.
+		 * This might result in fragments at the start and
+		 * end of the allocated range if it doesn't line up
+		 * with a hash block boundary and/or is not a multiple
+		 * of the hash block size.
+		 */
+		startoff = rstart % hashblksizeinsec;
+
 		while (rsize > 0) {
 			if (startoff) {
 				hsize = hashblksizeinsec - startoff;

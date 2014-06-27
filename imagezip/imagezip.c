@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -59,6 +59,20 @@
 #include "sliceinfo.h"
 #include "global.h"
 #include "checksum.h"
+#include "range.h"
+#ifdef WITH_HASH
+#include "hashmap/hashmap.h"
+#endif
+
+/*
+ * Attempt to split chunks so that hash blocks don't span chunk boundaries.
+ *
+ * XXX nice thought, but it doesn't do a very good job (saves less than 50%)
+ * of the crossings at the expense of wasting about 4% more space). Unless
+ * we come up with a less hacky way to fill chunks (e.g. PD fitblk.c) where
+ * we can avoid it entirely, don't even try.
+ */
+#undef WITH_HASH_CHUNKSPLIT
 
 /* XXX this is a hack right now */
 #define USE_HACKSORT 0
@@ -98,6 +112,8 @@ static unsigned char imageid[UUID_LENGTH];
 
 #ifdef WITH_HASH
 char	*hashfile;
+int	newhashfile;
+int	deltapct = -1;
 #endif
 
 #ifdef WITH_CRYPTO
@@ -125,17 +141,8 @@ extern unsigned long getdisksize(int fd);
 unsigned long inputminsec	= 0;
 unsigned long inputmaxsec	= 0;	/* 0 means the entire input image */
 
-/*
- * A list of data ranges.
- */
-struct range {
-	uint32_t	start;		/* In sectors */
-	uint32_t	size;		/* In sectors */
-	void		*data;
-	struct range	*next;
-};
 struct range	*ranges, *skips, *fixups;
-int		numranges, numskips;
+int		numranges, numskips, numfixups;
 struct blockreloc	*relocs;
 int			numregions, numrelocs;
 
@@ -145,11 +152,11 @@ static void	sortrange(struct range **head, int domerge,
 int	mergeskips(int verbose);
 int	mergeranges(struct range *head);
 void	makeranges(void);
-void	freeranges(struct range *);
 void	dumpranges(int verbose);
-void	dumpfixups(int verbose);
+uint32_t sectinranges(struct range *range);
 void	addvalid(uint32_t start, uint32_t size);
 void	addreloc(off_t offset, off_t size, int reloctype);
+void	removereloc(off_t offset, off_t size, int reloctype);
 static int cmpfixups(struct range *r1, struct range *r2);
 static int read_doslabel(int infd, int lsect, int pstart,
 			 struct doslabel *label);
@@ -159,11 +166,6 @@ int	read_image(u_int32_t start, int pstart, u_int32_t extstart);
 int	read_raw(void);
 int	compress_image(void);
 void	usage(void);
-
-#ifdef WITH_HASH
-struct range *hashmap_compute_delta(struct range *, char *, int, u_int32_t);
-void	report_hash_stats(int pnum);
-#endif
 
 static SLICEMAP_PROCESS_PROTO(read_slice);
 
@@ -442,7 +444,7 @@ main(int argc, char *argv[])
 	memset(imageid, '\0', UUID_LENGTH);
 
 	gettimeofday(&sstamp, 0);
-	while ((ch = getopt(argc, argv, "vlbnNdihrs:c:z:ofI:13F:DR:S:XxH:Me:k:u:a:Z")) != -1)
+	while ((ch = getopt(argc, argv, "vlbnNdihrs:c:z:ofI:13F:DR:S:XxH:UP:Me:k:u:a:Z")) != -1)
 		switch(ch) {
 		case 'v':
 			version++;
@@ -519,14 +521,26 @@ main(int argc, char *argv[])
 		case 'X':
 			forcereads++;
 			break;
-		case 'H':
 #ifdef WITH_HASH
+		case 'H':
 			hashfile = optarg;
-#else
-			fprintf(stderr, "'H' option not supported\n");
-			usage();
-#endif
 			break;
+		case 'U':
+			newhashfile = 1;
+			break;
+		case 'P':
+			deltapct = atoi(optarg);
+			if (deltapct < 0)
+				usage();
+			break;
+#else
+		case 'H':
+		case 'U':
+		case 'P':
+			fprintf(stderr, "'%c' option not supported\n", ch);
+			usage();
+			break;
+#endif
 		case 'M':
 			metaoptimize++;
 			break;
@@ -645,8 +659,16 @@ main(int argc, char *argv[])
 		fprintf(stderr, "Must specify an output filename!\n\n");
 		usage();
 	}
-	else
+	else {
 		outfilename = argv[1];
+#ifdef WITH_HASH
+		if (strcmp(outfilename, "-") == 0 && newhashfile) {
+			fprintf(stderr,
+				"Cannot create hashfile with outfile==stdout\n");
+			usage();
+		}
+#endif
+	}
 
 	if (!slicemode && !filemode && dorelocs)
 		dorelocs = 0;
@@ -771,38 +793,62 @@ main(int argc, char *argv[])
 		dumpranges(debug > 1);
 	sortrange(&fixups, 0, cmpfixups);
 	if (debug > 1)
-		dumpfixups(debug > 2);
+		dumpfixups(debug > 2, 0);
 	fflush(stderr);
 
 #ifdef WITH_HASH
 	/*
 	 * If we are creating a "delta" image from a hash signature,
-	 * we read in the signature info and reconcile that with the
-	 * known allocated range that we have just computed.  The result
-	 * is a new list of ranges that are currently allocated and that
-	 * have changed from the signature version.
+	 * (hashfile != NULL) we read in the signature info and reconcile
+	 * that with the known allocated range that we have just computed.
+	 * The result is a new list of ranges that are currently allocated
+	 * and that have changed from the signature version.
+	 *
+	 * If we are creating a new signature file (newhashfile != 0)
+	 * then we also collect hashinfo along the way, writing out the
+	 * newfile when done.
 	 */
-	if (hashfile != NULL) {
-		struct range *nranges;
+	if (hashfile || newhashfile) {
+		struct range *nranges = NULL;
 
 		/*
 		 * next compare allocated 'ranges' and 'hinfo' to find out the
 		 * changed blocks -- computing the hashes for some 'ranges'
 		 * in the process
 		 */
-		nranges = hashmap_compute_delta(ranges, hashfile, infd,
-						inputminsec);
-		if (nranges == NULL)
-			fprintf(stderr, "NO differences !!!!\n");
+		if (hashmap_compute_delta(ranges, hashfile, infd, inputminsec,
+					  newhashfile, &nranges)) {
+			fprintf(stderr, "Errors while computing delta!\n");
+			exit(1);
+		}
+
+		/*
+		 * See if we should just create a full image.
+		 */
+		if (hashfile && deltapct >= 0) {
+			uint32_t oldsect = sectinranges(ranges);
+			uint32_t newsect = sectinranges(nranges);
+			if (oldsect == 0 ||
+			    ((double)newsect / oldsect) * 100 > deltapct) {
+				fprintf(stderr,
+					"Delta size (%u sect) more than %d%% "
+					"the size of a full image (%u sect),\n"
+					"creating a full image instead.\n",
+					newsect, deltapct, oldsect);
+				freeranges(nranges);
+				goto done;
+			}
+		}
 
 		freeranges(ranges);
 		ranges = nranges;
-
 		if (debug) {
 			fprintf(stderr, "\nAfter delta computation: ");
 			dumpranges(debug > 1);
+			dumpfixups(debug > 2, 0);
 		}
-		report_hash_stats(slice);
+	done:
+		hashmap_dump_stats(slice);
 	}
 #endif
 
@@ -845,6 +891,15 @@ main(int argc, char *argv[])
 
 		if (outcanseek)
 			close(outfd);
+
+#ifdef WITH_HASH
+		/*
+		 * Write out new signature file.
+		 */
+		if (newhashfile &&
+		    hashmap_write_hashfile(outfilename, inputminsec))
+			fprintf(stderr, "Could not write new hashfile!\n");
+#endif
 	}
 	close(infd);
 
@@ -1142,6 +1197,10 @@ char *usagestr =
  " -D             Do `dangerous' writes (don't check for async errors)\n"
  " -1             Output a version one image file\n"
  " -H hashfile    Use the specified imagehash-generated signature to produce a delta image\n"
+ " -U             Update or create the signature file to reflect the new image\n"
+ " -P pct         With -H, if the resulting delta would be <pct> percent or\n"
+ "                greater of the (uncompressed) size of a full image, create\n"
+ "                a full image instead\n"
  "\n"
  " Debugging options (not to be used by mere mortals!)\n"
  " -d             Turn on debugging.  Multiple -d options increase output\n"
@@ -1536,6 +1595,19 @@ freeranges(struct range *head)
 	}
 }
 
+uint32_t
+sectinranges(struct range *range)
+{
+	unsigned int total = 0;
+
+	while (range) {
+		total += range->size;
+		range = range->next;
+	}
+
+	return total;
+}
+
 void
 dumpranges(int verbose)
 {
@@ -1571,9 +1643,9 @@ struct fixup {
 	off_t size;
 	int reloctype;
 	void *data;	/* current value of data ptr */
+	off_t dsize;
 	void (*func)(void *, off_t, void *);
 };
-static int nfixups;
 
 static void
 addfixupentry(off_t offset, off_t poffset, off_t size, void *data, off_t dsize,
@@ -1622,11 +1694,12 @@ addfixupentry(off_t offset, off_t poffset, off_t size, void *data, off_t dsize,
 	fixup->data	 = fdata;
 	if (fdata)
 		memcpy(fixup->data, data, (size_t)dsize);
+	fixup->dsize	 = dsize;
 	fixup->func	 = func;
 
 	entry->next  = fixups;
 	fixups       = entry;
-	nfixups++;
+	numfixups++;
 }
 
 /*
@@ -1711,6 +1784,66 @@ hasfixup(uint32_t soffset, uint32_t ssize)
 }
 
 /*
+ * Copy the fixup list. Keeps around the original for later restoration.
+ *
+ * Since applying fixups is destructive (to the fixup list) and we
+ * need to apply fixups when hashing an image, we need a mechanism
+ * for allowing fixups to be applied twice.
+ *
+ * XXX we always set reloctype to RELOC_NONE, as we don't want to add
+ * relocs multiple times. Hope this is the only non-idempotent behavior...
+ */
+static struct range *Ofixups;
+static int Onumfixups;
+
+void
+savefixups(void)
+{
+	struct range *range;
+	struct fixup *fp;
+
+	Ofixups = fixups;
+	Onumfixups = numfixups;
+	fixups = NULL;
+	numfixups = 0;
+
+	range = Ofixups;
+	while (range) {
+		assert(range->data != NULL);
+		fp = range->data;
+
+		addfixupentry(fp->offset, fp->poffset, fp->size,
+			      fp->data, fp->dsize, RELOC_NONE, fp->func);
+		range = range->next;
+	}
+	assert(numfixups == Onumfixups);
+
+	/* sort--addfixupentry adds to the end, so the list is reversed */
+	sortrange(&fixups, 0, cmpfixups);
+}
+
+void
+restorefixups(int isempty)
+{
+	if (isempty) {
+		assert(fixups == NULL);
+		assert(numfixups == 0);
+	} else {
+		struct range *next;
+		while (fixups) {
+			next = fixups->next;
+			free(fixups->data);
+			free(fixups);
+			numfixups--;
+			fixups = next;
+		}
+		assert(numfixups == 0);
+	}
+	fixups = Ofixups;
+	numfixups = Onumfixups;
+}
+
+/*
  * Look for fixups which overlap the range [offset - offset+size-1].
  * If an overlap is found, we overwrite the data for that range with
  * that given in the fixup or call the associated function.
@@ -1724,7 +1857,7 @@ applyfixups(off_t offset, off_t size, void *data)
 
 #ifdef FOLLOW
 	fprintf(stderr, "D: [%u-%u], %d fixups\n",
-		bytestosec(offset), bytestosec(offset+size)-1, nfixups);
+		bytestosec(offset), bytestosec(offset+size)-1, numfixups);
 #endif
 	prev = &fixups;
 	while ((entry = *prev) != NULL) {
@@ -1821,35 +1954,38 @@ applyfixups(off_t offset, off_t size, void *data)
 			*prev = entry->next;
 			free(entry->data);
 			free(entry);
-			nfixups--;
+			numfixups--;
 			if (debug > 2)
 				fprintf(stderr, " %d fixups left\n",
-					nfixups);
+					numfixups);
 		}
 	}
 }
 
 void
-dumpfixups(int verbose)
+dumpfixups(int verbose, int count)
 {
 	struct range *range;
 	struct fixup *fp;
 	int nfixups = 0;
 
 	if (verbose)
-		fprintf(stderr, "\nFixups (start/size) in sectors and bytes:\n");
+		fprintf(stderr,
+			"\nFixups start/size in sectors (bytes):\n");
 	range = fixups;
 	while (range) {
 		assert(range->data != NULL);
 		fp = range->data;
 
 		if (verbose) {
-			fprintf(stderr, "  %12d    %9d (%12llu/%9llu)\n",
+			fprintf(stderr, "  %12d/%9d (%12llu/%9llu)\n",
 				range->start, range->size,
 				(unsigned long long)fp->offset,
 				(unsigned long long)fp->size);
 		}
 		nfixups++;
+		if (count && count == nfixups)
+			break;
 		range = range->next;
 	}
 	fprintf(stderr, "Total Number of Fixups: %d\n", nfixups);
@@ -2088,7 +2224,7 @@ compress_image(void)
 		blkhdr->regionsize  = DEFAULTREGIONSIZE;
 		blkhdr->regioncount = (curregion - regions);
 		if (compat != COMPRESSED_V1) {
-			blkhdr->firstsect   = cursect;
+			blkhdr->firstsect = cursect;
 			if (size == rangesize) {
 				/*
 				 * Finished subblock at the end of a range.
@@ -2165,6 +2301,18 @@ compress_image(void)
 			checksum_chunk(output_buffer,
 				       blkhdr->size + blkhdr->regionsize);
 			checksum_finish(blkhdr);
+		}
+#endif
+
+#ifdef WITH_HASH
+		/*
+		 * Update chunk numbers in new signature file.
+		 */
+		if (newhashfile) {
+			assert(compat != COMPRESSED_V1);
+			hashmap_update_chunk(blkhdr->firstsect + inputminsec,
+					     blkhdr->lastsect + inputminsec,
+					     blkhdr->blockindex);
 		}
 #endif
 
@@ -2296,6 +2444,18 @@ compress_image(void)
 		}
 #endif
 
+#ifdef WITH_HASH
+		/*
+		 * Update chunk numbers in new signature file.
+		 */
+		if (newhashfile) {
+			assert(compat != COMPRESSED_V1);
+			hashmap_update_chunk(blkhdr->firstsect + inputminsec,
+					     blkhdr->lastsect + inputminsec,
+					     blkhdr->blockindex);
+		}
+#endif
+
 		/*
 		 * Write out the finished chunk to disk, and
 		 * start over from the beginning of the buffer.
@@ -2400,10 +2560,16 @@ compress_status(int sig)
  * Compress a chunk. The next bit of input stream is read in and compressed
  * into the output file.
  */
-#define BSIZE		(128 * 1024)
-static char		inbuf[BSIZE];
-static			int subblockleft = CHUNKMAX;
+#define INBSIZE		(128 * 1024)	/* size of device input buffer */
+#define SBTHRESHOLD	(8 * 1024)	/* remaining space threshold */
+
+static char		inbuf[INBSIZE];
+static int		subblockleft = CHUNKMAX;
+static int		subblockthresh = -1;
 static z_stream		d_stream;	/* Compression stream */
+#ifdef WITH_HASH_CHUNKSPLIT
+static int		hashblksize;
+#endif
 
 #define CHECK_ZLIB_ERR(err, msg) { \
     if (err != Z_OK) { \
@@ -2417,6 +2583,36 @@ compress_chunk(off_t off, off_t size, int *full, uint32_t *subblksize)
 {
 	int		cc, count, err, tileof, finish, outsize;
 	off_t		total = 0;
+
+	/*
+	 * One-time calculation
+	 */
+	if (subblockthresh < 0) {
+		subblockthresh = SBTHRESHOLD;
+#ifdef WITH_HASH_CHUNKSPLIT
+		/*
+		 * It is desirable to keep blocks of hashed data all
+		 * within a single chunk, but it is not essential.
+		 * In particular, we are not going to waste a significant
+		 * fraction of each chunk just to preserve this property.
+		 * Note also, that this is a heuristic anyway based on
+		 * how much space we need we will need for the compressed
+		 * version of any particular hash block.
+		 *
+		 * So I somewhat arbitrarily picked "no more than 5%
+		 * wasted space" which translates to about 51K per 1MB
+		 * chunk--call it 50K. This should work most of the time
+		 * assuming about a 1.28x compression ratio with 64K hash
+		 * blocks. How is that for arbitrary?
+		 */
+		if (newhashfile) {
+			subblockthresh = (50 * 1024);
+			hashblksize = hashmap_blocksize();
+			if (subblockthresh > hashblksize)
+				subblockthresh = hashblksize;
+		}
+#endif
+	}
 
 	/*
 	 * Whenever subblockleft equals CHUNKMAX, it means that a new
@@ -2439,16 +2635,15 @@ compress_chunk(off_t off, off_t size, int *full, uint32_t *subblksize)
 	 */
 	if (!size) {
 		tileof  = 1;
-		size	= BSIZE + 1;
+		size	= INBSIZE + 1;
 	} else
 		tileof  = 0;
 
 	while (size > 0) {
-		if (size > BSIZE)
-			count = BSIZE;
+		if (size > INBSIZE)
+			count = INBSIZE;
 		else
 			count = (int) size;
-
 		/*
 		 * As we get near the end of the subblock, reduce the amount
 		 * of input to make sure we can fit without producing a
@@ -2466,6 +2661,24 @@ compress_chunk(off_t off, off_t size, int *full, uint32_t *subblksize)
 			 */
 			count = count & ~(secsize - 1);
 		}
+
+#ifdef WITH_HASH_CHUNKSPLIT
+		/*
+		 * When we are computing a new signature file, try to align
+		 * our read/compress blocks on hash-block size boundaries.
+		 * This will hopefully minimize the odds of us needing to
+		 * split a hash block across chunks.
+		 */
+		if (newhashfile) {
+			off_t curoff, endoff;
+
+			curoff = off+total - sectobytes(inputminsec);
+			assert(curoff >= 0);
+			endoff = (curoff + count) & ~(hashblksize - 1);
+			if (endoff > curoff)
+				count = endoff - curoff;
+		}
+#endif
 
 		cc = devread(infd, inbuf, count);
 		if (cc < 0) {
@@ -2562,7 +2775,7 @@ compress_chunk(off_t off, off_t size, int *full, uint32_t *subblksize)
 		subblockleft -= count;
 		assert(subblockleft >= 0);
 
-		if (subblockleft < 0x2000) {
+		if (subblockleft < subblockthresh) {
 			finish = 1;
 			*full  = 1;
 			break;
