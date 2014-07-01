@@ -1308,36 +1308,49 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		if (imageid != NULL) {
 			/* Interested in a specific image */
 			if (can_access(imageidx, ei, 1)) {
-				res = mydb_query("SELECT pid,gid,imagename,"
-						 " path,imageid"
-						 " FROM images WHERE"
-						 " pid='%s'"
-						 " AND imagename='%s'",
+				res = mydb_query("SELECT i.pid,i.gid,"
+						 " i.imagename,v.path,i.imageid"
+						 " FROM images as i "
+						 " LEFT JOIN image_versions "
+						 "  as v on "
+						 "    v.imageid=i.imageid and "
+						 "    v.version=i.version "
+						 " WHERE i.pid='%s'"
+						 " AND i.imagename='%s'",
 						 5, wantpid, wantname);
 			} else {
 				/*
 				 * Pid of expt must be same as pid of image
 				 * and gid the same or image "shared".
 				 */
-				res = mydb_query("SELECT pid,gid,imagename,"
-						 "path,imageid"
-						 " FROM images WHERE"
-						 " pid='%s' AND imagename='%s'"
-						 " AND pid='%s'"
-						 " AND (gid='%s' OR"
-						 "    (gid=pid AND shared=1))",
+				res = mydb_query("SELECT i.pid,i.gid,"
+						 " i.imagename,v.path,i.imageid"
+						 " FROM images as i "
+						 " LEFT JOIN image_versions "
+						 "  as v on "
+						 "    v.imageid=i.imageid and "
+						 "    v.version=i.version "
+						 " WHERE i.pid='%s' "
+						 " AND i.imagename='%s'"
+						 " AND i.pid='%s'"
+						 " AND (i.gid='%s' OR"
+						 "    (i.gid=i.pid AND "
+						 "     v.shared=1))",
 						 5, wantpid, wantname,
 						 ei->pid, ei->gid);
 			}
 		} else {
 			/* Find all images that this pid/gid can PUT */
-			res = mydb_query("SELECT pid,gid,imagename,"
-					 "path,imageid"
-					 " FROM images"
-					 " WHERE pid='%s'"
-					 " AND (gid='%s' OR"
-					 "     (gid=pid AND shared=1))"
-					 " ORDER BY pid,gid,imagename",
+			res = mydb_query("SELECT i.pid,i.gid,i.imagename,"
+					 "v.path,i.imageid"
+					 " FROM images as i"
+					 " LEFT JOIN image_versions as v on "
+					 "    v.imageid=i.imageid and "
+					 "    v.version=i.version "
+					 " WHERE i.pid='%s'"
+					 " AND (i.gid='%s' OR"
+					 "     (i.gid=i.pid AND v.shared=1))"
+					 " ORDER BY i.pid,i.gid,i.imagename",
 					 5, ei->pid, ei->gid);
 		}
 		assert(res != NULL);
@@ -1436,34 +1449,48 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		if (imageid != NULL) {
 			/* Interested in a specific image */
 			if (can_access(imageidx, ei, 0)) {
-				res = mydb_query("SELECT pid,gid,imagename,"
-						 "path,imageid"
-						 " FROM images WHERE"
-						 " pid='%s'"
-						 " AND imagename='%s'",
+				res = mydb_query("SELECT i.pid,i.gid,"
+						 "i.imagename,v.path,i.imageid"
+						 " FROM images as i "
+						 " LEFT JOIN image_versions "
+						 "  as v on "
+						 "    v.imageid=i.imageid and "
+						 "    v.version=i.version "
+						 "WHERE i.pid='%s'"
+						 " AND i.imagename='%s'",
 						 5, wantpid, wantname);
 			} else {
-				res = mydb_query("SELECT pid,gid,imagename,"
-						 "path,imageid"
-						 " FROM images WHERE"
-						 " pid='%s' AND imagename='%s'"
-						 " AND (global=1"
-						 "     OR (pid='%s'"
-						 "        AND (gid='%s'"
-						 "            OR shared=1)))"
+				res = mydb_query("SELECT i.pid,i.gid,"
+						 "i.imagename,v.path,i.imageid"
+						 " FROM images as i"
+						 " LEFT JOIN image_versions "
+						 "  as v on "
+						 "    v.imageid=i.imageid and "
+						 "    v.version=i.version "
+						 " WHERE i.pid='%s' "
+						 " AND i.imagename='%s'"
+						 " AND (v.global=1"
+						 "     OR (i.pid='%s'"
+						 "        AND (i.gid='%s'"
+						 "            OR v.shared=1)))"
 						 " ORDER BY pid,gid,imagename",
 						 5, wantpid, wantname,
 						 ei->pid, ei->gid);
 			}
 		} else {
 			/* Find all images that this pid/gid can GET */
-			res = mydb_query("SELECT pid,gid,imagename,"
-					 "path,imageid"
-					 " FROM images WHERE"
-					 "  (global=1"
-					 "  OR (pid='%s'"
-					 "     AND (gid='%s' OR shared=1)))"
-					 " ORDER BY pid,gid,imagename",
+			res = mydb_query("SELECT i.pid,i.gid,i.imagename,"
+					 "v.path,i.imageid"
+					 " FROM images as i"
+					 " LEFT JOIN image_versions "
+					 "  as v on "
+					 "    v.imageid=i.imageid and "
+					 "    v.version=i.version "
+					 " WHERE"
+					 "  (v.global=1"
+					 "  OR (i.pid='%s'"
+					 "     AND (i.gid='%s' OR v.shared=1)))"
+					 " ORDER BY i.pid,i.gid,i.imagename",
 					 5, ei->pid, ei->gid);
 		}
 		assert(res != NULL);
@@ -1610,10 +1637,14 @@ dump_image_aliases(FILE *fd)
 	char		*lastpid;
 
 	/* First the global image alias */
-	res = mydb_query("SELECT pid,imagename"
-			 " FROM images"
-			 " WHERE global=1"
-			 " ORDER BY pid,imagename", 2);
+	res = mydb_query("SELECT i.pid,i.imagename"
+			 " FROM images as i"
+			 " LEFT JOIN image_versions "
+			 "  as v on "
+			 "    v.imageid=i.imageid and "
+			 "    v.version=i.version "
+			 " WHERE v.global=1"
+			 " ORDER BY i.pid,i.imagename", 2);
 	assert(res != NULL);
 
 	nrows = mysql_num_rows(res);
@@ -1662,10 +1693,14 @@ dump_image_aliases(FILE *fd)
 			free(lastpid);
 			lastpid = mystrdup(row[0]);
 
-			res2 = mydb_query("SELECT imagename"
-					  " FROM images"
-					  " WHERE pid='%s' AND shared=1"
-					  " ORDER BY imagename",
+			res2 = mydb_query("SELECT i.imagename"
+					  " FROM images as i"
+					  " LEFT JOIN image_versions "
+					  "  as v on "
+					  "    v.imageid=i.imageid and "
+					  "    v.version=i.version "
+					  " WHERE i.pid='%s' AND v.shared=1"
+					  " ORDER BY i.imagename",
 					  1, lastpid);
 			assert(res2 != NULL);
 
