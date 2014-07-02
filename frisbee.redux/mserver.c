@@ -1168,16 +1168,18 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	/*
 	 * They gave us an mtime and it is "bad", return an error.
 	 * XXX somewhat arbitrary: cannot set a time in the future.
+	 * XXX cut them some slack on the future time thing, up to 10s okay.
 	 */
 	if (mtime) {
 		struct timeval now;
 
 		gettimeofday(&now, NULL);
-		if (mtime > now.tv_sec) {
+		if (mtime > (now.tv_sec + 10)) {
 			rv = MS_ERROR_BADMTIME;
 			FrisWarning("%s: client %s %s failed: "
-				    "attempt to set mtime in the future",
-				    imageid, clientip, op);
+				    "attempt to set mtime in the future "
+				    "(%u > %u)\n",
+				    imageid, clientip, op, mtime, now.tv_sec);
 			msg->body.putreply.error = rv;
 			goto reply;
 		}
