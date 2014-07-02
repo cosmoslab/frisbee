@@ -23,11 +23,15 @@ Things to do for image*:
 5. Imageunzip could be triple-threaded like frisbee, i.e., split the
    file reading and decompression that are currently one in imageunzip.
 
-6. Image hashing.
+6. Image hashing and "delta" images.
    [ DONE -- as a separate program, imagehash.  It would be more efficient
      to have imagezip create the signature as it goes. ]
+   [ DONE -- imagezip now can create the signature "as it goes". But it
+     makes an extra read of the disk data to do it. This could be further
+     optimized to compute the hash as it reads/compresses the data. ]
    Create a "signature" file for an image using a collision-resistant hash
-   like MD5 or SHA-1.  See TODO.hash for more.
+   like MD5 or SHA-1.  This signature could be used to create incremental
+   (delta) images based on a full image. See TODO.hash for more.
 
 7. Add an option to exclude (skip) disk blocks outside of any DOS partition.
    By default, we want to include these blocks in the image since some
@@ -248,3 +252,7 @@ Things to do for image*:
    sectors (or possibly 64K hash-block sized pieces) rather than bytes so
    it makes the input part a little more complicated.
 
+16. Better tools for delta images.
+   There are lots of opportunities for "off-line" manipulation of delta
+   images; e.g., creating full images from deltas or vice-versa.
+   See TODO.tools.
