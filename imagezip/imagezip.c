@@ -2549,7 +2549,7 @@ compress_status(int sig)
 	if (sig == 0) {
 		fprintf(stderr, "Image size: %llu bytes\n",
 			(unsigned long long)datawritten);
-		bps = (bytescompressed * 1000) / ms;
+		bps = ms ? (bytescompressed * 1000) / ms : 0;
 		fprintf(stderr, "%.3fMB/second compressed\n",
 			(double)bps / (1024*1024));
 	}
