@@ -92,6 +92,7 @@ static unsigned int hashlen;
 static unsigned char *(*hashfunc)(const unsigned char *, size_t,
 				  unsigned char *);
 static int imagefd;
+static uint32_t poffset = ~0;
 
 /*
  * time the operation, updating the global_v (of type 'struct timeval')
@@ -280,10 +281,12 @@ add_to_range(struct range **tailp, uint32_t start, uint32_t size)
  * for IO.
  */
 static int
-readhashinfo(char *hfile, struct hashinfo **hinfop, uint32_t ssect)
+readhashinfo(char *hfile, struct hashinfo **hinfop)
 {
 	struct hashinfo		hi, *hinfo;
 	int			fd, nregbytes, cc, i;
+
+	assert(poffset != ~0);
 
 	fd = open(hfile, O_RDONLY);
 	if (fd < 0) {
@@ -325,7 +328,7 @@ readhashinfo(char *hfile, struct hashinfo **hinfop, uint32_t ssect)
 		struct hashregion *hreg = &hinfo->regions[i];
 		assert(hreg->region.size <= hashblksize);
 
-		hreg->region.start += ssect;
+		hreg->region.start += poffset;
 #ifdef HASHSTATS
 		hashstats.orig_allocated += hreg->region.size;
 #endif
@@ -359,10 +362,12 @@ int hashmap_blocksize(void)
  * Signature file will be given either the explicit 'fname' or will
  * be derived from 'iname' if 'fname' is ''.
  */
-int hashmap_write_hashfile(char *fname, char *iname, uint32_t ssect)
+int hashmap_write_hashfile(char *fname, char *iname)
 {
 	int ofd, i, cc, count;
 	char *hfile;
+
+	assert(poffset != ~0);
 
 	if (nhinfo == NULL) {
 		fprintf(stderr, "No hashinfo to write!?\n");
@@ -373,9 +378,9 @@ int hashmap_write_hashfile(char *fname, char *iname, uint32_t ssect)
 	for (i = 0; i < nhinfo->nregions; i++) {
 		struct hashregion *hreg = &nhinfo->regions[i];
 		assert(hreg->region.size <= nhinfo->blksize);
-		assert(hreg->region.start >= ssect);
+		assert(hreg->region.start >= poffset);
 
-		hreg->region.start -= ssect;
+		hreg->region.start -= poffset;
 	}
 
 	/*
@@ -516,7 +521,14 @@ add_to_hashmap(struct hashinfo **hinfop, uint32_t rstart, uint32_t rsize,
 
 	assert(hinfop != NULL);
 
-	offset = rstart % hashblksize;
+	/*
+	 * Internally, ranges are absolute disk sector sizes.
+	 * However, we want to compute hash boundaries relative to
+	 * the image (partition) base.
+	 */
+	assert(poffset != ~0);
+	offset = (rstart - poffset) % hashblksize;
+
 	while (rsize > 0) {
 		if (offset) {
 			hsize = hashblksize - offset;
@@ -625,6 +637,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	assert(curranges != NULL);
 
 	imagefd = infd;
+	poffset = ssect;
 
 	/*
 	 * First we read the hashfile to get hash ranges and values.
@@ -632,7 +645,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	 * for an empty file.
 	 */
 	if (hfile != NULL) {
-		retval = readhashinfo(hfile, &hinfo, ssect);
+		retval = readhashinfo(hfile, &hinfo);
 		if (retval < 0) {
 			fprintf(stderr, "readhashinfo: failed !\n");
 			return -1;

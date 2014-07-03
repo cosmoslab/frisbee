@@ -889,7 +889,7 @@ main(int argc, char *argv[])
 		 * Write out new signature file.
 		 */
 		if (newhashfile &&
-		    hashmap_write_hashfile(newhashfile, outfilename, inputminsec))
+		    hashmap_write_hashfile(newhashfile, outfilename))
 			fprintf(stderr, "Could not write new hashfile!\n");
 #endif
 	}
