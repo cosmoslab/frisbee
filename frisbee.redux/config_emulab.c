@@ -54,6 +54,7 @@ extern int debug;
 struct emulab_configstate {
 	int image_maxsize;	/* sitevar:images/create/maxsize (in GB) */
 	int image_maxwait;	/* sitevar:images/create/maxwait (in min) */
+	int image_maxiwait;	/* sitevar:images/create/idlewait (in min) */
 	int image_maxrate_dyn;	/* sitevar:images/frisbee/maxrate_dynamic */
 	int image_maxrate_std;	/* sitevar:images/frisbee/maxrate_std (in MB/s) */
 	int image_maxrate_usr;	/* sitevar:images/frisbee/maxrate_usr (in MB/s) */
@@ -99,6 +100,7 @@ static int INELABINELAB  = 0;
 
 static uint64_t	put_maxsize = 10000000000ULL;	/* zero means no limit */
 static uint32_t put_maxwait = 2000;		/* zero means no limit */
+static uint32_t put_maxiwait = 120;		/* zero means no limit */
 static uint32_t get_maxrate_dyn = 0;		/* non-zero means use dynamic */
 static uint32_t get_maxrate_std = 72000000;	/* zero means no limit */
 static uint32_t get_maxrate_usr = 54000000;	/* zero means no limit */
@@ -187,6 +189,17 @@ emulab_read(void)
 	FrisLog("  image_put_maxwait = %d min",
 		(int)(put_maxwait/60));
 
+	val = emulab_getsitevar("images/create/idlewait");
+	if (val) {
+		ival = atoi(val);
+		/* in minutes, allow up to about 10TB @ 10MB/sec */
+		if (ival >= 0 && ival < 20000)
+			put_maxiwait = (uint32_t)ival * 60;
+		free(val);
+	}
+	FrisLog("  image_put_maxiwait = %d min",
+		(int)(put_maxiwait/60));
+
 	val = emulab_getsitevar("images/frisbee/maxrate_dyn");
 	if (val) {
 		ival = atoi(val);
@@ -234,6 +247,7 @@ emulab_save(void)
 
 	cs->image_maxsize = put_maxsize;
 	cs->image_maxwait = put_maxwait;
+	cs->image_maxiwait = put_maxiwait;
 	cs->image_maxrate_dyn = get_maxrate_dyn;
 	cs->image_maxrate_std = get_maxrate_std;
 	cs->image_maxrate_usr = get_maxrate_usr;
@@ -252,6 +266,9 @@ emulab_restore(void *state)
 	put_maxwait = cs->image_maxwait;
 	FrisLog("  image_put_maxwait = %d min",
 		(int)(put_maxwait/60));
+	put_maxiwait = cs->image_maxiwait;
+	FrisLog("  image_put_maxiwait = %d min",
+		(int)(put_maxiwait/60));
 	get_maxrate_dyn = cs->image_maxrate_dyn;
 	FrisLog("  image_get_maxrate_dyn = %s",
 		get_maxrate_dyn ? "true" : "false");
@@ -354,13 +371,14 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 	/* and whack the put_* fields */
 	ii->put_maxsize = 0;
 	ii->put_timeout = 0;
+	ii->put_itimeout = 0;
 	ii->put_options = NULL;
 	ii->put_oldversion = NULL;
 }
 
 /*
  * Set the PUT maxsize/options for a particular node/image.
- * XXX right now these are completely pulled out of our posterior.
+ * XXX right now these mostly come from the DB.
  */
 static void
 set_put_values(struct config_host_authinfo *ai, int ix)
@@ -372,6 +390,7 @@ set_put_values(struct config_host_authinfo *ai, int ix)
 
 	/* put_timeout */
 	ii->put_timeout = put_maxwait;
+	ii->put_itimeout = put_maxiwait;
 
 	/* put_oldversion */
 	/*

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -23,6 +23,8 @@
 
 /*
  * Upload functions used by both the upload client and server.
+ *
+ * TODO: should be able to specify connection and IO timeouts.
  */
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -33,13 +35,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <sys/time.h>
 #include "decls.h"
 #include "utils.h"
 #include "uploadio.h"
 
-static int SOCK_Read(int sockfd, void *buf, int num);
-static int SOCK_Write(int sockfd, const void *buf, int num);
+static int SOCK_Read(int sockfd, void *buf, int num, conn *conn);
+static int SOCK_Write(int sockfd, const void *buf, int num, conn *conn);
 #ifdef USE_SSL
 static int SSL_Read(SSL *ssl, void *buf, int num);
 static int SSL_Write(SSL *ssl, const void *buf, int num);
@@ -50,7 +53,7 @@ static int SSL_Write(SSL *ssl, const void *buf, int num);
  * Return a conn object for the new socket.
  */
 conn *
-conn_accept_tcp(int sock, struct in_addr *client)
+conn_accept_tcp(int sock, struct in_addr *client, int conntimo, int iotimo)
 {
 	conn *newconn;
 	int nsock;
@@ -64,6 +67,21 @@ conn_accept_tcp(int sock, struct in_addr *client)
 	}
 
  again:
+	if (conntimo) {
+		struct timeval tv;
+		fd_set fds;
+
+		FD_ZERO(&fds);
+		FD_SET(sock, &fds);
+		tv.tv_sec = conntimo;
+		tv.tv_usec = 0;
+		if (select(sock+1, &fds, NULL, NULL, &tv) != 1) {
+			FrisLog("Accept timeout");
+			free(newconn);
+			return NULL;
+		}
+	}
+
 	len = sizeof(sin);
 	nsock = accept(sock, (struct sockaddr *)&sin, &len);
 	if (nsock < 0) {
@@ -81,14 +99,32 @@ conn_accept_tcp(int sock, struct in_addr *client)
 	} else
 		client->s_addr = sin.sin_addr.s_addr;
 
+	if (iotimo > 0) {
+		struct timeval tv;
+
+		tv.tv_sec = iotimo;
+		tv.tv_usec = 0;
+		if (setsockopt(nsock, SOL_SOCKET, SO_RCVTIMEO,
+			       &tv, sizeof tv) ||
+		    setsockopt(nsock, SOL_SOCKET, SO_SNDTIMEO,
+			       &tv, sizeof tv)) {
+			FrisPwarning("%s: accept setsockopt",
+				     inet_ntoa(sin.sin_addr));
+			close(nsock);
+			free(newconn);
+			return NULL;
+		}
+	}
+
 	newconn->ctype = CONN_SOCKET;
+	newconn->flags = 0;
 	newconn->desc.sockfd = nsock;
 
 	return newconn;
 }
 
 conn *
-conn_open(in_addr_t addr, in_port_t port, int usessl)
+conn_open(in_addr_t addr, in_port_t port, int usessl, int conntimo, int iotimo)
 {
 	conn *newconn = malloc(sizeof *newconn);
 
@@ -99,7 +135,7 @@ conn_open(in_addr_t addr, in_port_t port, int usessl)
 
 	if (!usessl) {
 		struct sockaddr_in servaddr;
-		int sock;
+		int sock, flags = 0;
 	
 		servaddr.sin_family = AF_INET;
 		servaddr.sin_addr.s_addr = htonl(addr);
@@ -112,16 +148,89 @@ conn_open(in_addr_t addr, in_port_t port, int usessl)
 			free(newconn);
 			return NULL;
 		}
+		if (conntimo > 0) {
+			flags = fcntl(sock, F_GETFL, 0);
+			if (fcntl(sock, F_SETFL, flags|O_NONBLOCK)) {
+				FrisPwarning("%s:%d connect fcntl",
+					     inet_ntoa(servaddr.sin_addr),
+					     port);
+				close(sock);
+				free(newconn);
+				return NULL;
+			}
+		}
 		if (connect(sock, (struct sockaddr *)&servaddr,
 			    sizeof(servaddr)) < 0) {
-			FrisPwarning("%s:%d connect",
-				     inet_ntoa(servaddr.sin_addr), port);
+			struct timeval tv;
+			fd_set rfds, wfds;
+			int err = errno;
+			socklen_t len;
+
+			if (conntimo == 0 || err != EINPROGRESS) {
+				FrisPwarning("%s:%d connect",
+					     inet_ntoa(servaddr.sin_addr),
+					     port);
+				close(sock);
+				free(newconn);
+				return NULL;
+			}
+
+			FD_ZERO(&rfds);
+			FD_SET(sock, &rfds);
+			wfds = rfds;
+			tv.tv_sec = conntimo;
+			tv.tv_usec = 0;
+			if (select(sock+1, &rfds, &wfds, NULL, &tv) < 1) {
+				FrisLog("%s:%d connect timeout",
+					inet_ntoa(servaddr.sin_addr), port);
+
+				close(sock);
+				free(newconn);
+				return NULL;
+			}
+			err = 0;
+			len = sizeof err;
+			if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &len) ||
+			    err != 0) {
+				errno = err;
+				FrisPwarning("%s:%d connect getsockopt",
+					     inet_ntoa(servaddr.sin_addr),
+					     port);
+				close(sock);
+				free(newconn);
+				return NULL;
+			}
+
+		}
+		if (conntimo > 0 && fcntl(sock, F_SETFL, flags)) {
+			FrisPwarning("%s:%d connect fcntl",
+				     inet_ntoa(servaddr.sin_addr),
+				     port);
 			close(sock);
 			free(newconn);
 			return NULL;
 		}
 
+		if (iotimo > 0) {
+			struct timeval tv;
+
+			tv.tv_sec = iotimo;
+			tv.tv_usec = 0;
+			if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
+				       &tv, sizeof tv) ||
+			    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
+				       &tv, sizeof tv)) {
+				FrisPwarning("%s:%d connect setsockopt",
+					     inet_ntoa(servaddr.sin_addr),
+					     port);
+				close(sock);
+				free(newconn);
+				return NULL;
+			}
+		}
+
 		newconn->ctype = CONN_SOCKET;
+		newconn->flags = 0;
 		newconn->desc.sockfd = sock;
 	}
 #ifdef USE_SSL
@@ -131,6 +240,10 @@ conn_open(in_addr_t addr, in_port_t port, int usessl)
 		char bioname[64];
 		long err;
 
+		if (conntimo > 0 || iotimo > 0) {
+			FrisLog("Timeouts not implemented with SSL connections.");
+			return NULL;
+		}
 		in.s_addr = htonl(addr);
 		snprintf(bioname, sizeof bioname, "%s:%d",
 			 inet_ntoa(in), htons(port));
@@ -167,6 +280,7 @@ conn_open(in_addr_t addr, in_port_t port, int usessl)
 
 		/* XXX do this before check so we can use conn_close */
 		newconn->ctype = CONN_SSL;
+		newconn->flags = 0;
 		newconn->desc.sslstate.ssl = ssl;
 		newconn->desc.sslstate.ctx = ctx;
 
@@ -218,31 +332,47 @@ conn_close(conn *conn)
 int
 conn_read(conn *conn, void *buf, int num)
 {
+	if (conn->flags & CONN_ATEOF)
+		return 0;
+	if (conn->flags & CONN_TIMEDOUT) {
+		errno = ETIMEDOUT;
+		return -1;
+	}
+
 	if (conn->ctype == CONN_SOCKET)
-		return SOCK_Read(conn->desc.sockfd, buf, num);
+		return SOCK_Read(conn->desc.sockfd, buf, num, conn);
 #ifdef USE_SSL
 	if (conn->ctype == CONN_SSL)
 		return SSL_Read(conn->desc.ssl, buf, num);
 #endif
 
+	errno = EINVAL;
 	return -1;
 }
 
 int
 conn_write(conn *conn, const void *buf, int num)
 {
+	if (conn->flags & CONN_ATEOF)
+		return 0;
+	if (conn->flags & CONN_TIMEDOUT) {
+		errno = ETIMEDOUT;
+		return -1;
+	}
+
 	if (conn->ctype == CONN_SOCKET)
-		return SOCK_Write(conn->desc.sockfd, buf, num);
+		return SOCK_Write(conn->desc.sockfd, buf, num, conn);
 #ifdef USE_SSL
 	if (conn->ctype == CONN_SSL)
 		return SSL_Write(conn->desc.ssl, buf, num);
 #endif
 
+	errno = EINVAL;
 	return -1;
 }
 
 static int
-SOCK_Read(int sockfd, void *buf, int num)
+SOCK_Read(int sockfd, void *buf, int num, conn *conn)
 {
 	int  nleft;
 	int  nread;
@@ -259,11 +389,15 @@ SOCK_Read(int sockfd, void *buf, int num)
 		if ((nread = read(sockfd, ptr, nio)) < 0) {
 			if (errno == EINTR)
 				nread = 0; /* and call read() again */
-			else
+			else if (errno == EWOULDBLOCK) {
+				conn->flags |= CONN_TIMEDOUT;
+				break;
+			} else
 				return -1;
-		} else if (nread == 0)
+		} else if (nread == 0) {
+			conn->flags |= CONN_ATEOF;
 			break; /* EOF */
-		
+		}
 		nleft -= nread;
 		ptr += nread;
 	}
@@ -271,7 +405,7 @@ SOCK_Read(int sockfd, void *buf, int num)
 }
 
 static int
-SOCK_Write(int sockfd, const void *buf, int num)
+SOCK_Write(int sockfd, const void *buf, int num, conn *conn)
 {
 	int  nleft;
 	int  nwritten;
@@ -285,16 +419,22 @@ SOCK_Write(int sockfd, const void *buf, int num)
 			nio = MAX_TCP_BYTES;
 		else
 			nio = nleft;
-		if ((nwritten = write(sockfd, ptr, nio)) <= 0) {
+		if ((nwritten = write(sockfd, ptr, nio)) < 0) {
 			if (errno == EINTR)
 				nwritten = 0; /* and call write() again */
-			else
+			else if (errno == EWOULDBLOCK) {
+				conn->flags |= CONN_TIMEDOUT;
+				break;
+			} else
 				return -1; /* error */
+		} else if (nwritten == 0) {
+			conn->flags |= CONN_ATEOF;
+			break;
 		}
 		nleft -= nwritten;
 		ptr += nwritten;
 	}
-	return num;
+	return (num - nleft);
 }
 
 #ifdef USE_SSL

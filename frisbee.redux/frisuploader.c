@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -47,6 +47,7 @@ static char *path;
 static uint64_t maxsize = 0;
 static int bufsize = (64 * 1024);;
 static int timeout = 0;
+static int idletimeout = 0;
 static int sock = -1;
 
 /* Globals */
@@ -71,6 +72,9 @@ main(int argc, char **argv)
 
 	FrisLog("%s: listening on port %d for image data from %s (max of %llu bytes)",
 		path, portnum, inet_ntoa(clientip), maxsize);
+	if (idletimeout || timeout)
+		FrisLog("%s: using idletimeout=%ds, timeout=%ds\n",
+			path, idletimeout, timeout);
 
 	rv = recv_file();
 	close(sock);
@@ -82,7 +86,7 @@ static void
 parse_args(int argc, char **argv)
 {
 	int ch;
-	while ((ch = getopt(argc, argv, "m:p:i:b:T:s:")) != -1) {
+	while ((ch = getopt(argc, argv, "m:p:i:b:I:T:s:")) != -1) {
 		switch (ch) {
 		case 'm':
 			if (!inet_aton(optarg, &clientip)) {
@@ -109,6 +113,14 @@ parse_args(int argc, char **argv)
 				exit(1);
 			}
 			break;
+		case 'I':
+			idletimeout = atoi(optarg);
+			if (idletimeout < 0 || idletimeout > (24 * 60 * 60)) {
+				fprintf(stderr, "Invalid idle timeout %d\n",
+					idletimeout);
+				exit(1);
+			}
+			break;
 		case 'T':
 			timeout = atoi(optarg);
 			if (timeout < 0 || timeout > (24 * 60 * 60)) {
@@ -129,6 +141,17 @@ parse_args(int argc, char **argv)
 
 	if (clientip.s_addr == 0 || portnum == 0 || argc < 1)
 		usage();
+	/*
+	 * If both timeouts are set, make sure they play nice
+	 */
+	if (idletimeout > 0 && timeout > 0) {
+		/* idletimeout should be <= timeout */
+		if (idletimeout > timeout)
+			idletimeout = timeout;
+		/* if the are equal, no need for the idletimeout */
+		if (idletimeout == timeout)
+			idletimeout = 0;
+	}
 
 	path = argv[0];
 }
@@ -146,6 +169,7 @@ usage(void)
 	"  -p <port>    TCP port number on which to listen for client.\n"
 
 	"  -i <iface>   Interface on which to listen (specified by local IP).\n"
+	"  -I <timo>    Max time (in seconds) to allow connect to be idle (no traffic from client).\n"
 	"  -T <timo>    Max time (in seconds) to wait for upload to complete.\n"
     	"  -s <size>    Maximum amount of data (in bytes) to upload.\n"
     	"\n\n";
@@ -157,7 +181,7 @@ usage(void)
 static sigjmp_buf toenv;
 
 static void
-send_timeout(int sig)
+recv_timeout(int sig)
 {
 	siglongjmp(toenv, 1);
 }
@@ -177,6 +201,14 @@ recv_file()
 	int rv = 1;
 	char *stat;
 
+	gettimeofday(&st, NULL);	/* XXX for early errors */
+
+	/*
+	 * If we have an overall timeout (timeout > 0) then just set the
+	 * alarm to that and we will longjmp if we hit it.
+	 *
+	 * Idletimeout are handled by the connection.
+	 */
 	if (timeout > 0) {
 		struct itimerval it;
 
@@ -186,13 +218,11 @@ recv_file()
 		}
 		it.it_value.tv_sec = timeout;
 		it.it_value.tv_usec = 0;
-		it.it_interval = it.it_value;
-
-		signal(SIGALRM, send_timeout);
+		it.it_interval.tv_sec = it.it_interval.tv_usec = 0;
+		signal(SIGALRM, recv_timeout);
 		setitimer(ITIMER_REAL, &it, NULL);
 	}
 
-	gettimeofday(&st, NULL);	/* XXX for early errors */
 	wbuf = malloc(bufsize);
 	if (wbuf == NULL) {
 		FrisError("Could not allocate %d byte buffer, try using -b",
@@ -209,7 +239,7 @@ recv_file()
 		goto done;
 	}
 
-	conn = conn_accept_tcp(sock, &clientip);
+	conn = conn_accept_tcp(sock, &clientip, idletimeout, idletimeout);
 	if (conn == NULL) {
 		FrisError("Error accepting from %s", inet_ntoa(clientip));
 		goto done;
@@ -226,7 +256,10 @@ recv_file()
 			cc = remaining;
 		ncc = conn_read(conn, wbuf, cc);
 		if (ncc < 0) {
-			FrisPwarning("socket read");
+			if (conn_timeout(conn))
+				rv = 2;
+			else
+				FrisPwarning("socket read");
 			goto done;
 		}
 		if (ncc == 0)
@@ -252,8 +285,7 @@ recv_file()
 	if (timeout) {
 		struct itimerval it;
 
-		it.it_value.tv_sec = 0;
-		it.it_value.tv_usec = 0;
+		it.it_value.tv_sec = it.it_value.tv_usec = 0;
 		setitimer(ITIMER_REAL, &it, NULL);
 
 	}

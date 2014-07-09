@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -26,6 +26,7 @@
  * frisbee master server.
  */
 #include <sys/types.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -54,9 +55,11 @@ static uint64_t filesize;
 static uint32_t mtime;
 static int bufsize = (64 * 1024);;
 static int timeout = -1;
+static int idletimeout = 0;
 static int usessl = 0;
 static int verify = 1;
 static in_addr_t proxyip = 0;
+static int dots = 0;
 
 /* Globals */
 int debug = 0;
@@ -90,6 +93,64 @@ main(int argc, char **argv)
 		mtime = 0;
 		if (timeout == -1)
 			timeout = 0;
+		/*
+		 * Even more special:
+		 *
+		 * If we are piping in from an imagezip, it can take
+		 * considerable time to start cranking out the image,
+		 * in particular if we are checking/computing a signature.
+		 * So don't start the server timeout ticking until we have
+		 * some data to send.
+		 *
+		 * But first we do make an immediate query of the image to
+		 * ensure it is accessible and attempt to prevent the writer
+		 * of the pipe from doing a whole lotta work and then finding
+		 * out it was all for naught. Note however that for this to
+		 * work, we have to actively inform (i.e., signal) the other
+		 * process. Just exiting is not enough since the writer won't
+		 * notice that we have exited until it tries to write the
+		 * pipe; i.e., until it has done all that work we were trying
+		 * to have it avoid!
+		 *
+		 * So we make the query, sending a SIGPIPE to our process
+		 * group if there is an error. We then select on the pipe
+		 * and wait til it has something to offer. Only then will
+		 * we continue and make the official PUT request and start
+		 * the server timeout ticking.
+		 */
+		if (imageid && !askonly) {
+			fd_set set;
+
+			if (!put_request(imageid, ntohl(msip.s_addr), msport,
+					 proxyip, filesize, mtime, 0, 1, timo,
+					 &reply))
+				FrisFatal("Could not get upload info for '%s'",
+					  imageid);
+			if (reply.error) {
+#if 0	/* XXX bad idea as this will kill any wrapper script too */
+				/*
+				 * Try SIGPIPE-ing our process group to
+				 * see if we can actively kill off the
+				 * writer (who otherwise won't notice we
+				 * have exited until it goes to write the
+				 * pipe. This may fail if we are not running
+				 * as root and the writer is running as
+				 * another uid.
+				 */
+				signal(SIGPIPE, SIG_IGN);
+				kill(0, SIGPIPE);
+#endif
+				FrisFatal("%s: server returned error: %s",
+					  imageid, GetMSError(reply.error));
+			}
+
+			fprintf(stderr, "Upload from stdin, "
+				"waiting for data availability...\n");
+			FD_ZERO(&set);
+			FD_SET(STDIN_FILENO, &set);
+			(void) select(1, &set, NULL, NULL, NULL);
+			fprintf(stderr, "...data ready, continuing.\n");
+		}
 	}
 	/* otherwise make sure file exists and see how big it is */
 	else {
@@ -102,7 +163,7 @@ main(int argc, char **argv)
 		filesize = sb.st_size;
 		mtime = (uint32_t)sb.st_mtime;
 
-		/* timeout is a function of file size */
+		/* overall timeout is a function of file size */
 		if (timeout == -1) {
 			timeout = (int)(filesize / MIN_UPLOAD_RATE);
 			/* file is stupid-huge, no timeout */
@@ -113,6 +174,12 @@ main(int argc, char **argv)
 				timeout = 10;
 		}
 	}
+
+	/*
+	 * No need for connection timeout if it is >= overall timeout.
+	 */
+	if (idletimeout >= timeout)
+		idletimeout = 0;
 
 	if (imageid) {
 		if (!put_request(imageid, ntohl(msip.s_addr), msport, proxyip,
@@ -161,9 +228,12 @@ main(int argc, char **argv)
 		
 	FrisLog("%s: upload to %s:%d from %s",
 		imageid, inet_ntoa(serverip), portnum, uploadpath);
+	if (idletimeout || timeout)
+		FrisLog("%s: using idletimeout=%ds, timeout=%ds\n",
+			imageid, idletimeout, timeout);
 
 	rv = send_file();
-
+	
 	if (rv == 0 && verify) {
 		uint64_t isize = 0;
 		uint32_t mt = 0;
@@ -241,7 +311,7 @@ static void
 parse_args(int argc, char **argv)
 {
 	int ch;
-	while ((ch = getopt(argc, argv, "S:p:F:Q:sb:T:NP:")) != -1) {
+	while ((ch = getopt(argc, argv, "S:p:F:Q:sb:I:T:NP:o")) != -1) {
 		switch (ch) {
 		case 'S':
 			mshost = optarg;
@@ -261,6 +331,14 @@ parse_args(int argc, char **argv)
 			if (bufsize < 0 || bufsize > MAX_BUFSIZE) {
 				fprintf(stderr, "Invalid buffer size %d\n",
 					bufsize);
+				exit(1);
+			}
+			break;
+		case 'I':
+			idletimeout = atoi(optarg);
+			if (idletimeout < 0 || idletimeout > (24 * 60 * 60)) {
+				fprintf(stderr, "Invalid idle timeout %d\n",
+					idletimeout);
 				exit(1);
 			}
 			break;
@@ -291,6 +369,9 @@ parse_args(int argc, char **argv)
 			proxyip = ntohl(in.s_addr);
 			break;
 		}
+		case 'o':
+			dots++;
+			break;
 		default:
 			break;
 		}
@@ -342,12 +423,55 @@ usage(void)
 	exit(1);
 }
 
-static sigjmp_buf toenv;
+static struct timeval sstamp;
 
 static void
-send_timeout(int sig)
+dodots(ssize_t cc)
 {
-	siglongjmp(toenv, 1);
+	static uint64_t total;
+	static int lastmb, dotcol;
+	struct timeval estamp;
+	int count, newmb;
+
+	if (cc < 0) {
+		while (dotcol++ <= 66)
+			fputc(' ', stderr);
+
+		gettimeofday(&estamp, 0);
+		estamp.tv_sec -= sstamp.tv_sec;
+		fprintf(stderr, "%4ld %6u\n",
+			(long)estamp.tv_sec, (unsigned)(total / 1000000));
+	}
+
+	total += cc;
+	newmb = (total + cc) / 1000000;
+	if ((count = newmb - lastmb) <= 0)
+		return;
+	lastmb = newmb;
+
+	while (count-- > 0) {
+		fputc('.', stderr);
+		if (dotcol++ > 65) {
+			gettimeofday(&estamp, 0);
+			estamp.tv_sec -= sstamp.tv_sec;
+			fprintf(stderr, "%4ld %6u\n",
+				(long)estamp.tv_sec,
+				(unsigned)(total / 1000000));
+			dotcol = 0;
+		}
+	}
+
+}
+
+static sigjmp_buf toenv, bpenv;
+
+static void
+send_signal(int sig)
+{
+	if (sig == SIGALRM)
+		siglongjmp(toenv, 1);
+	if (sig == SIGPIPE)
+		siglongjmp(bpenv, 1);
 }
 
 /*
@@ -361,22 +485,25 @@ send_file(void)
 	char * volatile rbuf = NULL;
 	volatile int fd = -1;
 	volatile uint64_t remaining = filesize;
-	struct timeval st, et;
+	struct timeval et;
 	int rv = 1;
 	char *stat;
+
+	gettimeofday(&sstamp, NULL);
 
 	if (timeout > 0) {
 		struct itimerval it;
 
 		if (sigsetjmp(toenv, 1)) {
+			signal(SIGALRM, SIG_DFL);
 			rv = 2;
 			goto done;
 		}
 		it.it_value.tv_sec = timeout;
 		it.it_value.tv_usec = 0;
-		it.it_interval = it.it_value;
+		it.it_interval.tv_sec = it.it_interval.tv_usec = 0;
 
-		signal(SIGALRM, send_timeout);
+		signal(SIGALRM, send_signal);
 		setitimer(ITIMER_REAL, &it, NULL);
 	}
 
@@ -396,14 +523,24 @@ send_file(void)
 		goto done;
 	}
 
-	conn = conn_open(ntohl(serverip.s_addr), portnum, usessl);
+	/*
+	 * Catch broken pipe so we can report gracefully
+	 */
+	signal(SIGPIPE, send_signal);
+	if (sigsetjmp(bpenv, 1)) {
+		signal(SIGPIPE, SIG_DFL);
+		rv = 3;
+		goto done;
+	}
+
+	conn = conn_open(ntohl(serverip.s_addr), portnum, usessl,
+			 idletimeout, idletimeout);
 	if (conn == NULL) {
 		FrisError("Could not open connection with server %s:%d",
 			  inet_ntoa(serverip), portnum);
 		goto done;
 	}
 
-	gettimeofday(&st, NULL);
 	while (filesize == 0 || remaining > 0) {
 		ssize_t cc, ncc;
 
@@ -421,12 +558,23 @@ send_file(void)
 
 		cc = conn_write(conn, rbuf, ncc);
 		if (cc < 0) {
-			FrisPwarning("socket write");
+			if (conn_timeout(conn))
+				rv = 2;
+			else
+				FrisPwarning("socket write");
 			goto done;
 		}
 		remaining -= cc;
+		if (dots)
+			dodots(cc);
 		if (cc != ncc) {
-			FrisError("short write on socket (%d != %d)", cc, ncc);
+			if (conn_timeout(conn))
+				FrisError("short write on socket (%d != %d) "
+					  "due to write timeout",
+					  cc, ncc);
+			else
+				FrisError("short write on socket (%d != %d)",
+					  cc, ncc);
 			goto done;
 		}
 	}
@@ -435,15 +583,17 @@ send_file(void)
 
  done:
 	gettimeofday(&et, NULL);
-
 	if (timeout) {
 		struct itimerval it;
 
-		it.it_value.tv_sec = 0;
-		it.it_value.tv_usec = 0;
+		it.it_value.tv_sec = it.it_value.tv_usec = 0;
 		setitimer(ITIMER_REAL, &it, NULL);
-
+		signal(SIGALRM, SIG_DFL);
 	}
+	signal(SIGPIPE, SIG_DFL);
+
+	if (dots)
+		dodots(-1);
 	if (conn != NULL)
 		conn_close(conn);
 	if (fd >= 0)
@@ -451,10 +601,27 @@ send_file(void)
 	if (rbuf != NULL)
 		free(rbuf);
 
-	timersub(&et, &st, &et);
+	timersub(&et, &sstamp, &et);
+
+	switch (rv) {
+	case 0:
+		stat = "completed";
+		break;
+	case 1:
+		stat = "terminated";
+		break;
+	case 2:
+		stat = "timed-out";
+		break;
+	case 3:
+		stat = "failed (server disconnected)";
+		break;
+	default:
+		stat = "UNKNOWN";
+		break;
+	}
 
 	/* Note that remaining will be negative if filesize==0 */
-	stat = rv == 0 ? "completed" : (rv == 1 ? "terminated" : "timed-out");
 	if (filesize && remaining)
 		FrisLog("%s: upload %s after %llu (of %llu) bytes "
 			"in %d.%03d seconds",
@@ -531,8 +698,9 @@ put_request(char *imageid, in_addr_t sip, in_port_t sport, in_addr_t hostip,
 	}
 	if (mtime)
 		msg.body.putrequest.mtime = htonl(mtime);
+	/* XXX have the server wait longer than us so we timeout first */
 	if (timeout)
-		msg.body.putrequest.timeout = htonl(timeout);
+		msg.body.putrequest.timeout = htonl(timeout+2);
 
 	len = sizeof msg.hdr + sizeof msg.body.putrequest;
 	if (!MsgSend(msock, &msg, len, reqtimo)) {
