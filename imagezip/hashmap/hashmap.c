@@ -50,7 +50,7 @@
 /*
  * globals for fetching the HASHSTATS related information
  */
-#if HASHSTATS
+#ifdef HASHSTATS
 struct hashstats {
 	uint32_t cur_allocated;	 /* allocated sectors in original */
 	uint32_t orig_allocated; /* allocated sectors in current */
