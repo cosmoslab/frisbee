@@ -377,7 +377,7 @@ main(int argc, char **argv)
 
 		case 'C':
 			mem = atoi(optarg);
-			if (mem < 1)
+			if (mem < 0)
 				mem = 1;
 			else if (mem > MAXCHUNKBUFS)
 				mem = MAXCHUNKBUFS;
@@ -386,7 +386,7 @@ main(int argc, char **argv)
 
 		case 'W':
 			mem = atoi(optarg);
-			if (mem < 1)
+			if (mem < 0)
 				mem = 1;
 			else if (mem > MAXWRITEBUFMEM)
 				mem = MAXWRITEBUFMEM;
@@ -406,7 +406,8 @@ main(int argc, char **argv)
 			maxreadahead = atoi(optarg);
 			if (maxinprogress < maxreadahead * 4) {
 				maxinprogress = maxreadahead * 4;
-				if (maxinprogress > maxchunkbufs)
+				if (maxchunkbufs > 0 &&
+				    maxinprogress > maxchunkbufs)
 					maxinprogress = maxchunkbufs;
 			}
 			break;
@@ -1931,23 +1932,28 @@ PlayFrisbee(void)
 		maxchunkbufs = TotalChunkCount;
 
 	/*
-	 * If we have partitioned up the memory and have allocated
-	 * more chunkbufs than chunks in the file, reallocate the
-	 * excess to disk buffering.  If the user has explicitly
-	 * partitioned the memory, we leave everything as is.
+	 * There is no point in having more chunkbufs than there are
+	 * chunks in the file. If we have partitioned up the memory,
+	 * reallocate the excess to disk buffering. Otherwise, we just
+	 * adjust the chunkbuf count.
 	 */
-	if (maxmem != 0 && maxchunkbufs > TotalChunkCount) {
-		int excessmb;
-
-		excessmb = (int)((((unsigned long long)
+	if (maxchunkbufs > TotalChunkCount) {
+		if (maxmem != 0) {
+			int excessmb = (int)
+				((((unsigned long long)
 				   (maxchunkbufs - TotalChunkCount) *
 				   sizeof(ChunkBuffer_t)) / (1024 * 1024)));
-		maxchunkbufs = TotalChunkCount;
-		if (excessmb > 0) {
-			maxwritebufmem += excessmb;
-			ImageUnzipSetMemory((unsigned long long)
-					    maxwritebufmem*1024*1024);
+			if (excessmb > 0) {
+				maxwritebufmem += excessmb;
+				ImageUnzipSetMemory((unsigned long long)
+						    maxwritebufmem*1024*1024);
+			}
 		}
+		maxchunkbufs = TotalChunkCount;
+		if (maxinprogress > maxchunkbufs)
+			maxinprogress = maxchunkbufs;
+		if (maxreadahead > maxchunkbufs)
+			maxreadahead = maxchunkbufs;
 	}
  
 	FrisLog("Joined the team after %d sec. ID is %u. "
