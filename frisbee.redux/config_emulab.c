@@ -1496,7 +1496,8 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 						 "    v.imageid=i.imageid and "
 						 "    v.version='%s' "
 						 "WHERE i.pid='%s'"
-						 " AND i.imagename='%s'",
+						 " AND i.imagename='%s' and "
+						 " AND v.ready=1",
 						 5, wantvers, wantpid, wantname);
 				}
 				else {
@@ -1522,6 +1523,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 						 "    v.version='%s' "
 						 " WHERE i.pid='%s' "
 						 " AND i.imagename='%s' "
+						 " AND v.ready=1 " 
 						 " AND (v.global=1"
 						 "     OR (i.pid='%s'"
 						 "        AND (i.gid='%s'"
