@@ -50,7 +50,7 @@
 /*
  * globals for fetching the HASHSTATS related information
  */
-#if HASHSTATS
+#ifdef HASHSTATS
 struct hashstats {
 	uint32_t cur_allocated;	 /* allocated sectors in original */
 	uint32_t orig_allocated; /* allocated sectors in current */
@@ -92,6 +92,7 @@ static unsigned int hashlen;
 static unsigned char *(*hashfunc)(const unsigned char *, size_t,
 				  unsigned char *);
 static int imagefd;
+static uint32_t poffset = ~0;
 
 /*
  * time the operation, updating the global_v (of type 'struct timeval')
@@ -280,10 +281,12 @@ add_to_range(struct range **tailp, uint32_t start, uint32_t size)
  * for IO.
  */
 static int
-readhashinfo(char *hfile, struct hashinfo **hinfop, uint32_t ssect)
+readhashinfo(char *hfile, struct hashinfo **hinfop)
 {
 	struct hashinfo		hi, *hinfo;
 	int			fd, nregbytes, cc, i;
+
+	assert(poffset != ~0);
 
 	fd = open(hfile, O_RDONLY);
 	if (fd < 0) {
@@ -325,7 +328,7 @@ readhashinfo(char *hfile, struct hashinfo **hinfop, uint32_t ssect)
 		struct hashregion *hreg = &hinfo->regions[i];
 		assert(hreg->region.size <= hashblksize);
 
-		hreg->region.start += ssect;
+		hreg->region.start += poffset;
 #ifdef HASHSTATS
 		hashstats.orig_allocated += hreg->region.size;
 #endif
@@ -356,14 +359,15 @@ int hashmap_blocksize(void)
 
 /*
  * Write out hash (signature) info associated with the named image.
- * Signature file will be <name>.sig.
+ * Signature file will be given either the explicit 'fname' or will
+ * be derived from 'iname' if 'fname' is ''.
  */
-int hashmap_write_hashfile(char *name, uint32_t ssect)
+int hashmap_write_hashfile(char *fname, char *iname)
 {
 	int ofd, i, cc, count;
 	char *hfile;
-	struct stat sb;
-	struct timeval tm[2];
+
+	assert(poffset != ~0);
 
 	if (nhinfo == NULL) {
 		fprintf(stderr, "No hashinfo to write!?\n");
@@ -374,18 +378,31 @@ int hashmap_write_hashfile(char *name, uint32_t ssect)
 	for (i = 0; i < nhinfo->nregions; i++) {
 		struct hashregion *hreg = &nhinfo->regions[i];
 		assert(hreg->region.size <= nhinfo->blksize);
-		assert(hreg->region.start >= ssect);
+		assert(hreg->region.start >= poffset);
 
-		hreg->region.start -= ssect;
+		hreg->region.start -= poffset;
 	}
 
-	hfile = malloc(strlen(name) + 5);
+	/*
+	 * Figure out a derived name if fname == ''.
+	 */
+	if (fname[0] == '\0') {
+		/* Hmm...writing to stdout, call it "/tmp/stdout.sig" */
+		if (strcmp(iname, "-") == 0)
+			hfile = strdup("/tmp/stdout.sig");
+		else {
+			hfile = malloc(strlen(iname) + 5);
+			if (hfile) {
+				strcpy(hfile, iname);
+				strcpy(hfile + strlen(hfile), ".sig");
+			}
+		}
+	} else
+		hfile = strdup(fname);
 	if (hfile == NULL) {
-		fprintf(stderr, "%s: out of memory\n", name);
+		fprintf(stderr, "%s: out of memory\n", iname);
 		return -1;
 	}
-	strcpy(hfile, name);
-	strcpy(hfile + strlen(hfile), ".sig");
 
 	ofd = open(hfile, O_RDWR|O_CREAT|O_TRUNC, 0666);
 	if (ofd < 0) {
@@ -394,7 +411,6 @@ int hashmap_write_hashfile(char *name, uint32_t ssect)
 		hfile = malloc(strlen("/tmp/000000.sig") + 1);
 		if (hfile) {
 			sprintf(hfile, "/tmp/%06d.sig", getpid());
-			fprintf(stderr, "Saving to %s instead...\n", hfile);
 			ofd = open(hfile, O_RDWR|O_CREAT|O_TRUNC, 0666);
 			if (ofd < 0) {
 				perror(hfile);
@@ -413,7 +429,8 @@ int hashmap_write_hashfile(char *name, uint32_t ssect)
 			perror(hfile);
 		else
 			fprintf(stderr,
-				"%s: incomplete write (%d)\n", hfile, cc);
+				"%s: incomplete write (%d) to sigfile %s\n",
+				iname, cc, hfile);
 		free(hfile);
 		return -1;
 	}
@@ -423,23 +440,30 @@ int hashmap_write_hashfile(char *name, uint32_t ssect)
 	 * This is a crude (but fast!) method for matching images with
 	 * signatures.
 	 */
-	cc = stat(name, &sb);
-	if (cc >= 0) {
-#ifdef linux
-		tm[0].tv_sec = sb.st_atime;
-		tm[0].tv_usec = 0;
-		tm[1].tv_sec = sb.st_mtime;
-		tm[1].tv_usec = 0;
-#else
-		TIMESPEC_TO_TIMEVAL(&tm[0], &sb.st_atimespec);
-		TIMESPEC_TO_TIMEVAL(&tm[1], &sb.st_mtimespec);
-#endif
-		cc = utimes(hfile, tm);
-	}
-	if (cc < 0)
-		fprintf(stderr, "%s: WARNING: could not set mtime (%s)\n",
-			hfile, strerror(errno));
+	if (strcmp(iname, "-") != 0) {
+		struct stat sb;
+		struct timeval tm[2];
 
+		cc = stat(iname, &sb);
+		if (cc >= 0) {
+#ifdef linux
+			tm[0].tv_sec = sb.st_atime;
+			tm[0].tv_usec = 0;
+			tm[1].tv_sec = sb.st_mtime;
+			tm[1].tv_usec = 0;
+#else
+			TIMESPEC_TO_TIMEVAL(&tm[0], &sb.st_atimespec);
+			TIMESPEC_TO_TIMEVAL(&tm[1], &sb.st_mtimespec);
+#endif
+			cc = utimes(hfile, tm);
+		}
+		if (cc < 0)
+			fprintf(stderr,
+				"%s: WARNING: could not set mtime (%s)\n",
+				hfile, strerror(errno));
+	}
+
+	fprintf(stderr, "%s: new signature written to %s\n", iname, hfile);
 	free(hfile);
 	return 0;
 }
@@ -497,7 +521,14 @@ add_to_hashmap(struct hashinfo **hinfop, uint32_t rstart, uint32_t rsize,
 
 	assert(hinfop != NULL);
 
-	offset = rstart % hashblksize;
+	/*
+	 * Internally, ranges are absolute disk sector sizes.
+	 * However, we want to compute hash boundaries relative to
+	 * the image (partition) base.
+	 */
+	assert(poffset != ~0);
+	offset = (rstart - poffset) % hashblksize;
+
 	while (rsize > 0) {
 		if (offset) {
 			hsize = hashblksize - offset;
@@ -591,7 +622,8 @@ hashmap_update_chunk(uint32_t ssect, uint32_t lsect, int chunkno)
  */
 int
 hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
-		      uint32_t ssect, int newhash, struct range **nranges)
+		      uint32_t ssect, char *newhashfile,
+		      struct range **nranges)
 {
 	uint32_t		gapstart, gapsize, lastdrangeend = 0;
 	unsigned char 		hash[HASH_MAXSIZE];
@@ -605,6 +637,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	assert(curranges != NULL);
 
 	imagefd = infd;
+	poffset = ssect;
 
 	/*
 	 * First we read the hashfile to get hash ranges and values.
@@ -612,7 +645,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	 * for an empty file.
 	 */
 	if (hfile != NULL) {
-		retval = readhashinfo(hfile, &hinfo, ssect);
+		retval = readhashinfo(hfile, &hinfo);
 		if (retval < 0) {
 			fprintf(stderr, "readhashinfo: failed !\n");
 			return -1;
@@ -666,7 +699,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	 * Copy the fixup list since we are going to have to apply fixups
 	 * before computing new hashes and applying fixups is destructive.
 	 */
-	if (newhash) {
+	if (newhashfile) {
 #ifdef DEBUG
 		extern int numfixups;
 #endif
@@ -716,7 +749,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 				goto error;
 
 			/* Add hash entries for this range. */
-			if (newhash &&
+			if (newhashfile &&
 			    add_to_hashmap(&nhinfo, drange->start,
 					   drange->size, NULL))
 				goto error;
@@ -781,7 +814,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 #endif
 
 			/* Add hash entries for this range. */
-			if (newhash &&
+			if (newhashfile &&
 			    add_to_hashmap(&nhinfo, drange->start, before,
 					   NULL))
 				goto error;
@@ -853,7 +886,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 				 * the new contents of the old hrange.
 				 * Add that hrange with the new hash.
 				 */
-				if (newhash &&
+				if (newhashfile &&
 				    add_to_hashmap(&nhinfo, hreg->region.start,
 						   hreg->region.size, hash))
 					goto error;
@@ -955,7 +988,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 				 * added the entry with the correct hash,
 				 * otherwise add hash entries.
 				 */
-				if (changed > 1 && newhash &&
+				if (changed > 1 && newhashfile &&
 				    add_to_hashmap(&nhinfo, curstart,
 						   curend - curstart,
 						   NULL))
@@ -1085,7 +1118,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 #endif
 
 		/* Add hash entries for this range. */
-		if (newhash &&
+		if (newhashfile &&
 		    add_to_hashmap(&nhinfo, drange->start, drange->size, NULL))
 			goto error;
 
@@ -1099,11 +1132,9 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	 * the old one. Even if there are no ranges in the current
 	 * image, we create a valid (null) hashfile.
 	 */
-	if (newhash) {
-		if (*nranges == NULL) {
-			assert(nhinfo == NULL);
+	if (newhashfile) {
+		if (nhinfo == NULL)
 			nhinfo = calloc(1, sizeof(*nhinfo));
-		}
 		assert(nhinfo != NULL);
 		strcpy((char *)nhinfo->magic, HASH_MAGIC);
 		nhinfo->version = HASH_VERSION_2;
@@ -1112,7 +1143,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 			HASHBLK_SIZE : hinfo->blksize;
 	}
 
-	if (newhash) {
+	if (newhashfile) {
 #ifdef DEBUG
 		extern int numfixups;
 		fprintf(stderr, "%d fixups left-over (should be zero!)\n",
@@ -1127,7 +1158,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	return 0;
 
 error:
-	if (newhash) {
+	if (newhashfile) {
 #ifdef DEBUG
 		extern int numfixups;
 		fprintf(stderr, "%d fixups left-over\n", numfixups);

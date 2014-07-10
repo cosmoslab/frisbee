@@ -112,7 +112,7 @@ static unsigned char imageid[UUID_LENGTH];
 
 #ifdef WITH_HASH
 char	*hashfile;
-int	newhashfile;
+char	*newhashfile;
 int	deltapct = -1;
 #endif
 
@@ -444,7 +444,7 @@ main(int argc, char *argv[])
 	memset(imageid, '\0', UUID_LENGTH);
 
 	gettimeofday(&sstamp, 0);
-	while ((ch = getopt(argc, argv, "vlbnNdihrs:c:z:ofI:13F:DR:S:XxH:UP:Me:k:u:a:Z")) != -1)
+	while ((ch = getopt(argc, argv, "vlbnNdihrs:c:z:ofI:13F:DR:S:XxH:U:P:Me:k:u:a:Z")) != -1)
 		switch(ch) {
 		case 'v':
 			version++;
@@ -526,7 +526,7 @@ main(int argc, char *argv[])
 			hashfile = optarg;
 			break;
 		case 'U':
-			newhashfile = 1;
+			newhashfile = optarg;
 			break;
 		case 'P':
 			deltapct = atoi(optarg);
@@ -659,16 +659,8 @@ main(int argc, char *argv[])
 		fprintf(stderr, "Must specify an output filename!\n\n");
 		usage();
 	}
-	else {
+	else
 		outfilename = argv[1];
-#ifdef WITH_HASH
-		if (strcmp(outfilename, "-") == 0 && newhashfile) {
-			fprintf(stderr,
-				"Cannot create hashfile with outfile==stdout\n");
-			usage();
-		}
-#endif
-	}
 
 	if (!slicemode && !filemode && dorelocs)
 		dorelocs = 0;
@@ -804,7 +796,7 @@ main(int argc, char *argv[])
 	 * The result is a new list of ranges that are currently allocated
 	 * and that have changed from the signature version.
 	 *
-	 * If we are creating a new signature file (newhashfile != 0)
+	 * If we are creating a new signature file (newhashfile != NULL)
 	 * then we also collect hashinfo along the way, writing out the
 	 * newfile when done.
 	 */
@@ -897,7 +889,7 @@ main(int argc, char *argv[])
 		 * Write out new signature file.
 		 */
 		if (newhashfile &&
-		    hashmap_write_hashfile(outfilename, inputminsec))
+		    hashmap_write_hashfile(newhashfile, outfilename))
 			fprintf(stderr, "Could not write new hashfile!\n");
 #endif
 	}
@@ -1197,7 +1189,8 @@ char *usagestr =
  " -D             Do `dangerous' writes (don't check for async errors)\n"
  " -1             Output a version one image file\n"
  " -H hashfile    Use the specified imagehash-generated signature to produce a delta image\n"
- " -U             Update or create the signature file to reflect the new image\n"
+ " -U sigfile     Update or create the signature to reflect the new image.\n"
+ "                Image is written to named sigfile or <outfile>.sig if ''.\n"
  " -P pct         With -H, if the resulting delta would be <pct> percent or\n"
  "                greater of the (uncompressed) size of a full image, create\n"
  "                a full image instead\n"
@@ -2549,7 +2542,7 @@ compress_status(int sig)
 	if (sig == 0) {
 		fprintf(stderr, "Image size: %llu bytes\n",
 			(unsigned long long)datawritten);
-		bps = (bytescompressed * 1000) / ms;
+		bps = ms ? (bytescompressed * 1000) / ms : 0;
 		fprintf(stderr, "%.3fMB/second compressed\n",
 			(double)bps / (1024*1024));
 	}

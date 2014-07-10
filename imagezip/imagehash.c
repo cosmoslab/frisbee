@@ -465,6 +465,20 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 		haschunkrange = 1;
 
 	if (detail > 1) {
+		switch (hinfo->version) {
+		case HASH_VERSION_1:
+			printf("sig version 1, blksize=%d sectors:\n",
+			       bytestosec(HASHBLK_SIZE));
+			break;
+		case HASH_VERSION_2:
+			printf("sig version 2, blksize=%d sectors:\n",
+			       hinfo->blksize);
+			break;
+		default:
+			printf("unknown signature version (%x), "
+			      "expect garbage:\n", hinfo->version);
+			break;
+		}
 		for (i = 0; i < hinfo->nregions; i++) {
 			reg = &hinfo->regions[i];
 			printf("[%u-%u] (%d): ",

@@ -288,6 +288,7 @@ struct uploadextra {
 	char *realname;
 	uint64_t isize;
 	uint32_t mtime;
+	int itimeout;
 };
 
 static struct childinfo *findchild(char *, int, int);
@@ -370,6 +371,7 @@ copy_imageinfo(struct config_imageinfo *ii)
 		goto fail;
 	nii->put_maxsize = ii->put_maxsize;
 	nii->put_timeout = ii->put_timeout;
+	nii->put_itimeout = ii->put_itimeout;
 	/* XXX don't care about extra right now */
 	return nii;
 
@@ -1168,16 +1170,18 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	/*
 	 * They gave us an mtime and it is "bad", return an error.
 	 * XXX somewhat arbitrary: cannot set a time in the future.
+	 * XXX cut them some slack on the future time thing, up to 10s okay.
 	 */
 	if (mtime) {
 		struct timeval now;
 
 		gettimeofday(&now, NULL);
-		if (mtime > now.tv_sec) {
+		if (mtime > (now.tv_sec + 10)) {
 			rv = MS_ERROR_BADMTIME;
 			FrisWarning("%s: client %s %s failed: "
-				    "attempt to set mtime in the future",
-				    imageid, clientip, op);
+				    "attempt to set mtime in the future "
+				    "(%u > %u)\n",
+				    imageid, clientip, op, mtime, now.tv_sec);
 			msg->body.putreply.error = rv;
 			goto reply;
 		}
@@ -1666,15 +1670,23 @@ startchild(struct childinfo *ci)
 
 		switch (ci->ptype) {
 		case PTYPE_SERVER:
+		{
+			int timo = ci->timeout;
+
+			/* XXX compensate for 2s sleep in handle_get */
+			if (timo)
+				timo += 2;
+
 			pname = FRISBEE_SERVER;
 			opts = ci->imageinfo->get_options ?
 				ci->imageinfo->get_options : "";
 			snprintf(argbuf, sizeof argbuf,
 				 "%s -i %s -T %d %s %s -m %s -p %d %s",
-				 pname, ifacestr, ci->timeout, opts,
+				 pname, ifacestr, timo, opts,
 				 ci->method == CONFIG_IMAGE_BCAST ? "-b" : "",
 				 inet_ntoa(in), ci->port, ci->imageinfo->path);
 			break;
+		}
 		case PTYPE_CLIENT:
 			pname = FRISBEE_CLIENT;
 			snprintf(argbuf, sizeof argbuf,
@@ -1687,15 +1699,24 @@ startchild(struct childinfo *ci)
 			break;
 		case PTYPE_UPLOADER:
 		{
+			int timo = ci->timeout;
+			int itimo =
+				((struct uploadextra *)ci->extra)->itimeout;
 			uint64_t isize =
 				((struct uploadextra *)ci->extra)->isize;
+
+			/* XXX compensate for 2s sleep in handle_put */
+			if (timo)
+				timo += 2;
+			if (itimo)
+				itimo += 2;
 
 			pname = FRISBEE_UPLOAD;
 			opts = ci->imageinfo->put_options ?
 				ci->imageinfo->put_options : "";
 			snprintf(argbuf, sizeof argbuf,
-				 "%s -i %s -T %d %s -s %llu -m %s -p %d %s",
-				 pname, ifacestr, ci->timeout, opts,
+				 "%s -i %s -I %d -T %d %s -s %llu -m %s -p %d %s",
+				 pname, ifacestr, itimo, timo, opts,
 				 (unsigned long long)isize,
 				 inet_ntoa(in), ci->port, ci->imageinfo->path);
 			break;
@@ -2007,7 +2028,7 @@ startuploader(struct config_imageinfo *ii, in_addr_t meaddr, in_addr_t youaddr,
 	struct childinfo *ci;
 	struct uploadextra *ue;
 	char *tmpname;
-	int len;
+	int len, itimo = 0;
 
 	assert(findchild(ii->imageid, PTYPE_UPLOADER, MS_METHOD_ANY) == NULL);
 	assert(errorp != NULL);
@@ -2026,6 +2047,12 @@ startuploader(struct config_imageinfo *ii, in_addr_t meaddr, in_addr_t youaddr,
 		isize = ii->put_maxsize;
 	if (timo == 0 || timo > ii->put_timeout)
 		timo = ii->put_timeout;
+
+	/*
+	 * Add per-operation timeout if less than overall timeout.
+	 */
+	if (timo == 0 || ii->put_itimeout < timo)
+		itimo = ii->put_itimeout;
 
 	/*
 	 * Find a port to use. Note that with MS_METHOD_UNICAST,
@@ -2077,6 +2104,7 @@ startuploader(struct config_imageinfo *ii, in_addr_t meaddr, in_addr_t youaddr,
 	memset(ue, 0, sizeof(*ue));
 	ue->isize = isize;
 	ue->mtime = mtime;
+	ue->itimeout = itimo;
 
 	/*
 	 * Arrange to upload the image as <path>.tmp and then

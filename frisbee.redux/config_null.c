@@ -156,6 +156,7 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 	/* and whack the put_* fields */
 	ai->imageinfo[ix].put_maxsize = 0;
 	ai->imageinfo[ix].put_timeout = 0;
+	ai->imageinfo[ix].put_itimeout = 0;
 	ai->imageinfo[ix].put_oldversion = NULL;
 	ai->imageinfo[ix].put_options = NULL;
 }
@@ -172,6 +173,7 @@ set_put_values(struct config_host_authinfo *ai, int ix)
 
 	/* put_timeout */
 	ai->imageinfo[ix].put_timeout = 900;
+	ai->imageinfo[ix].put_itimeout = 120;
 
 	/* put_oldversion */
 	ai->imageinfo[ix].put_oldversion = NULL;

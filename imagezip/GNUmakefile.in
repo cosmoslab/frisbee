@@ -190,7 +190,7 @@ endif
 
 # with HASH
 ifeq ($(WITH_HASH),1)
-CFLAGS		+= -DWITH_HASH -DHASHSTATS
+CFLAGS		+= -DWITH_HASH
 SUBDIRCFLAGS	+= -DHASHSTATS
 SUBDIRS		+= hashmap
 ZIPLIBS		+= hashmap/libhashmap.a

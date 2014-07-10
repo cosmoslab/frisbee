@@ -23,7 +23,7 @@
 
 int	hashmap_blocksize(void);
 void	hashmap_update_chunk(uint32_t, uint32_t, int);
-int	hashmap_compute_delta(struct range *, char *, int, u_int32_t, int,
+int	hashmap_compute_delta(struct range *, char *, int, u_int32_t, char *,
 			      struct range **);
-int	hashmap_write_hashfile(char *, u_int32_t);
+int	hashmap_write_hashfile(char *, char *);
 void	hashmap_dump_stats(int pnum);

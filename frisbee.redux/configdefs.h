@@ -32,6 +32,7 @@ struct config_imageinfo {
 	char *put_options;	/* command line options for PUT server */
 	uint64_t put_maxsize;	/* maximum size for this image */
 	int put_timeout;	/* max time to allow PUT server to run */
+	int put_itimeout;	/* max time to allow per-socket-op to run */
 	char *put_oldversion;	/* where to save the old version */
 	void *extra;		/* config-type specific info */
 };

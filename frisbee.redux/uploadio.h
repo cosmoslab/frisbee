@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -36,12 +36,17 @@
 #define	MAX_BUFSIZE	(1024 * 1024)
 #define	MAX_TCP_BYTES	(64 * 1024)
 
+/* ctypes */
 #define CONN_SOCKET	1
 #define CONN_SSL	2
 
+/* flags */
+#define CONN_ATEOF	1
+#define CONN_TIMEDOUT	2
+
 typedef struct {
 	short ctype;
-	short maxio;
+	short flags;
 	union {
 		int sockfd;
 #ifdef USE_SSL
@@ -53,8 +58,13 @@ typedef struct {
 	} desc;
 } conn;
 
-extern conn *conn_accept_tcp(int sock, struct in_addr *client);
-extern conn *conn_open(in_addr_t addr, in_port_t port, int usessl);
+#define conn_eof(conn)	   (((conn)->flags & CONN_ATEOF) ? 1 : 0)
+#define conn_timeout(conn) (((conn)->flags & CONN_TIMEDOUT) ? 1 : 0)
+
+extern conn *conn_accept_tcp(int sock, struct in_addr *client,
+			     int conntimo, int iotimo);
+extern conn *conn_open(in_addr_t addr, in_port_t port, int usessl,
+		       int conntimo, int iotimo);
 extern int conn_read(conn *conn, void *buf, int num);
 extern int conn_write(conn *conn, const void *buf, int num);
 extern int conn_close(conn *conn);
