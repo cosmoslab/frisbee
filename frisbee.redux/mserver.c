@@ -585,7 +585,7 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	   MasterMsg_t *msg)
 {
 	struct in_addr host;
-	char imageid[MS_MAXIDLEN+1];
+	char imageid[MS_MAXIDLEN+1], *cimageid;
 	char clientip[sizeof("XXX.XXX.XXX.XXX")+1];
 	int len;
 	struct config_host_authinfo *ai;
@@ -612,18 +612,33 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	len = ntohs(msg->body.getrequest.idlen);
 	memcpy(imageid, msg->body.getrequest.imageid, len);
 	imageid[len] = '\0';
+	cimageid = config_canonicalize_imageid(imageid);
+	if (cimageid != NULL && strcmp(cimageid, imageid) == 0) {
+		free(cimageid);
+		cimageid = NULL;
+	}
 	methods = msg->body.getrequest.methods;
 	wantstatus = msg->body.getrequest.status;
 	op = wantstatus ? "GETSTATUS" : "GET";
 
 	strncpy(clientip, inet_ntoa(cip->sin_addr), sizeof clientip);
-	if (host.s_addr != cip->sin_addr.s_addr)
-		FrisLog("%s: %s from %s (for %s), methods: 0x%x",
-			imageid, op, clientip, inet_ntoa(host), methods);
-	else
-		FrisLog("%s: %s from %s, (methods: 0x%x)",
-			imageid, op, clientip, methods);
-
+	if (cimageid == NULL) {
+		if (host.s_addr != cip->sin_addr.s_addr)
+			FrisLog("%s: %s from %s (for %s), methods: 0x%x",
+				imageid, op, clientip, inet_ntoa(host),
+				methods);
+		else
+			FrisLog("%s: %s from %s, (methods: 0x%x)",
+				imageid, op, clientip, methods);
+	} else {
+		if (host.s_addr != cip->sin_addr.s_addr)
+			FrisLog("%s (%s): %s from %s (for %s), methods: 0x%x",
+				imageid, cimageid, op, clientip,
+				inet_ntoa(host), methods);
+		else
+			FrisLog("%s (%s): %s from %s, (methods: 0x%x)",
+				imageid, cimageid, op, clientip, methods);
+	}
 	memset(msg, 0, sizeof *msg);
 	msg->hdr.type = htonl(MS_MSGTYPE_GETREPLY);
 	strncpy((char *)msg->hdr.version, MS_MSGVERS_1,
@@ -637,6 +652,15 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	methods &= onlymethods;
 	if (methods == 0)
 		goto badmethod;
+
+	/*
+	 * Use the canonical name from here on out.
+	 */
+	if (cimageid != NULL) {
+		strcpy(imageid, cimageid);
+		free(cimageid);
+		cimageid = NULL;
+	}
 
 	/*
 	 * In mirrormode, we first validate access with our parent
