@@ -694,6 +694,14 @@ dump_host_authinfo(FILE *fd, char *node, char *cmd,
 }
 #endif
 
+static char *
+null_canonicalize_imageid(char *imageid)
+{
+	if (imageid != NULL)
+		return mystrdup(imageid);
+	return NULL;
+}
+
 static void
 null_dump(FILE *fd)
 {
@@ -707,6 +715,7 @@ struct config null_config = {
 	null_get_host_authinfo,
 	null_free_host_authinfo,
 	null_get_server_address,
+	null_canonicalize_imageid,
 	null_save,
 	null_restore,
 	null_free,

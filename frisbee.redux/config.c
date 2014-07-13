@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -208,6 +208,18 @@ config_get_server_address(struct config_imageinfo *ii, int methods, int first,
 	assert(myconfig != NULL);
 	return myconfig->config_get_server_address(ii, methods, first,
 						   addr, port, method);
+}
+
+/*
+ * Convert a user requested name (imageid) into its canonical form.
+ * Returns the canonical name (which may be the same as passed in) or
+ * NULL on an error. The returned string should be freed by the caller.
+ */
+char *
+config_canonicalize_imageid(char *imageid)
+{
+	assert(myconfig != NULL);
+	return myconfig->config_canonicalize_imageid(imageid);
 }
 
 void

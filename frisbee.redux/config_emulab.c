@@ -1729,6 +1729,27 @@ dump_image_aliases(FILE *fd)
 	free(lastpid);
 }
 
+static char *
+emulab_canonicalize_imageid(char *path)
+{
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+	char *iid = NULL;
+
+	res = mydb_query("SELECT CONCAT(pid,'/',imagename) FROM images"
+			 " WHERE path='%s'", 1, path);
+	if (res != NULL) {
+		if (mysql_num_rows(res) > 0) {
+			row = mysql_fetch_row(res);
+			if (row[0])
+				iid = strdup(row[0]);
+		}
+		mysql_free_result(res);
+	}
+
+	return iid;
+}
+
 static void
 emulab_dump(FILE *fd)
 {
@@ -1785,6 +1806,7 @@ struct config emulab_config = {
 	emulab_get_host_authinfo,
 	emulab_free_host_authinfo,
 	emulab_get_server_address,
+	emulab_canonicalize_imageid,
 	emulab_save,
 	emulab_restore,
 	emulab_free,
