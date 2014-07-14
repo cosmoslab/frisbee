@@ -1450,7 +1450,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			struct config_imageinfo *ci;
 			struct stat sb;
 			char *iid;
-			int iidx;
+			int iidx, len, issig = 0;
 
 			row = mysql_fetch_row(res);
 			/* XXX ignore rows with null or empty info */
@@ -1479,15 +1479,32 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 				continue;
 			}
 
-			iid = mymalloc(strlen(row[0]) + strlen(row[2]) + 2);
+			len = strlen(row[0]) + strlen(row[2]) + 2;
+			if (wantmeta && strcmp(wantmeta, "sig") == 0) {
+				len += 4;
+				issig = 1;
+			}
+			iid = mymalloc(len);
 			strcpy(iid, row[0]);
 			strcat(iid, "/");
 			strcat(iid, row[2]);
+			if (issig) {
+				len = strlen(iid);
+				iid[len++] = IID_SEP_META;
+				strcpy(&iid[len], "sig");
+			}
 			ci = &put->imageinfo[put->numimages];
 			ci->imageid = iid;
 			ci->dir = NULL;
-			ci->path = mystrdup(row[3]);
-			ci->flags = CONFIG_PATH_ISFILE;
+			if (issig) {
+				ci->path = mymalloc(strlen(row[3]) + 4);
+				strcpy(ci->path, row[3]);
+				strcat(ci->path, ".sig");
+				ci->flags = CONFIG_PATH_ISSIGFILE;
+			} else {
+				ci->path = mystrdup(row[3]);
+				ci->flags = CONFIG_PATH_ISFILE;
+			}
 			if (stat(ci->path, &sb) == 0) {
 				ci->flags |= CONFIG_PATH_EXISTS;
 				ci->sig = mymalloc(sizeof(time_t));
@@ -1626,7 +1643,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			struct config_imageinfo *ci;
 			struct stat sb;
 			char *iid;
-			int iidx;
+			int iidx, len, issig = 0;
 
 			row = mysql_fetch_row(res);
 			/* XXX ignore rows with null or empty info */
@@ -1636,15 +1653,32 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			    !row[3] || !row[3][0] ||
 			    !row[4] || !row[4][0])
 				continue;
-			iid = mymalloc(strlen(row[0]) + strlen(row[2]) + 2);
+			len = strlen(row[0]) + strlen(row[2]) + 2;
+			if (wantmeta && strcmp(wantmeta, "sig") == 0) {
+				len += 4;
+				issig = 1;
+			}
+			iid = mymalloc(len);
 			strcpy(iid, row[0]);
 			strcat(iid, "/");
 			strcat(iid, row[2]);
+			if (issig) {
+				len = strlen(iid);
+				iid[len++] = IID_SEP_META;
+				strcpy(&iid[len], "sig");
+			}
 			ci = &get->imageinfo[get->numimages];
 			ci->imageid = iid;
 			ci->dir = NULL;
-			ci->path = mystrdup(row[3]);
-			ci->flags = CONFIG_PATH_ISFILE;
+			if (issig) {
+				ci->path = mymalloc(strlen(row[3]) + 4);
+				strcpy(ci->path, row[3]);
+				strcat(ci->path, ".sig");
+				ci->flags = CONFIG_PATH_ISSIGFILE;
+			} else {
+				ci->path = mystrdup(row[3]);
+				ci->flags = CONFIG_PATH_ISFILE;
+			}
 			if (stat(ci->path, &sb) == 0) {
 				ci->flags |= CONFIG_PATH_EXISTS;
 				ci->sig = mymalloc(sizeof(time_t));
