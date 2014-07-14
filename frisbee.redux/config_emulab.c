@@ -98,6 +98,26 @@ static int INELABINELAB  = ELABINELAB;
 static int INELABINELAB  = 0;
 #endif
 
+/*
+ * An Emulab image ID string looks like:
+ *    [<pid>]<imagename>[<vers>][<meta>]
+ * where:
+ *    <pid> is the project
+ *    <imagename> is the image identifier string
+ *    <vers> is an image version number (not yet implemented)
+ *    <meta> is a string indicating that this is not the actual image,
+ *           rather it is metadata file associated with the image.
+ *           By convention, the string is the filename extension used
+ *           for the metadata file in question. Currently, the only
+ *           metadata string is 'sig' indicating that this is an image
+ *           signature file.
+ * Each of these fields has a separator character distinguishing the
+ * start of the field. These are defined here.
+ */
+#define IID_SEP_NAME '/'
+#define IID_SEP_VERS ':'
+#define IID_SEP_META ','
+
 static uint64_t	put_maxsize = 10000000000ULL;	/* zero means no limit */
 static uint32_t put_maxwait = 2000;		/* zero means no limit */
 static uint32_t put_maxiwait = 120;		/* zero means no limit */
@@ -1037,6 +1057,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	char		*node, *proxy, *role = NULL;
 	int		i, j, nrows;
 	char		*wantpid = NULL, *wantname = NULL, *wantvers = NULL;
+	char		*wantmeta = NULL;
 	struct config_host_authinfo *get = NULL, *put = NULL;
 	struct emulab_ha_extra_info *ei = NULL;
 	int		imageidx = 0, ngids, igids[2];
@@ -1308,7 +1329,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	 */
 	if (imageid != NULL) {
 		wantpid = mystrdup(imageid);
-		wantname = index(wantpid, '/');
+		wantname = index(wantpid, IID_SEP_NAME);
 		if (wantname == NULL) {
 			wantname = wantpid;
 			wantpid = mystrdup("emulab-ops");
@@ -1316,10 +1337,15 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			*wantname = '\0';
 			wantname = mystrdup(wantname+1);
 		}
-		wantvers = index(wantname, ':');
+		wantvers = index(wantname, IID_SEP_VERS);
 		if (wantvers) {
 			*wantvers = '\0';
-			wantvers  = wantvers+1;
+			wantvers  = mystrdup(wantvers+1);
+		}
+		wantmeta = index(wantvers ? wantvers : wantname, IID_SEP_META);
+		if (wantmeta != NULL) {
+			*wantmeta = '\0';
+			wantmeta = mystrdup(wantmeta+1);
 		}
 		imageidx = emulab_imageid(wantpid, wantname);
 		if (imageidx == 0)
@@ -1669,6 +1695,10 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		free(wantpid);
 	if (wantname)
 		free(wantname);
+	if (wantvers)
+		free(wantvers);
+	if (wantmeta)
+		free(wantmeta);
 	if (getp) *getp = get;
 	if (putp) *putp = put;
 	return 0;
@@ -1843,17 +1873,80 @@ emulab_canonicalize_imageid(char *path)
 {
 	MYSQL_RES *res;
 	MYSQL_ROW row;
-	char *iid = NULL;
+	char *iid = NULL, *ipath = NULL;
+	int len = strlen(path), vers;
 
-	res = mydb_query("SELECT CONCAT(pid,'/',imagename) FROM images"
-			 " WHERE path='%s'", 1, path);
-	if (res != NULL) {
-		if (mysql_num_rows(res) > 0) {
-			row = mysql_fetch_row(res);
-			if (row[0])
-				iid = strdup(row[0]);
-		}
+	/*
+	 * XXX right now we only use this to convert pathnames to imageids.
+	 * At some point maybe it will be necessary to convert between
+	 * imageids.
+	 */
+	if (path[0] != '/')
+		return mystrdup(path);
+
+	/*
+	 * XXX see if it might be a sigfile
+	 */
+	if (len > 4 && strcmp(path+len-4, ".sig") == 0) {
+		ipath = mystrdup(path);
+		ipath[len-4] = '\0';
+	}
+
+	/*
+	 * Try to do everything is one swell foop.
+	 * Look up the path in image_versions, returning the version number
+	 * and a string composed of <pid>/<imagename>:<version>. If the
+	 * version number is zero, we remove the ":<version>" part.
+	 */
+	res = mydb_query("SELECT "
+			 "  version,CONCAT(pid,'/',imagename,':',version) "
+			 "FROM image_versions"
+			 "  WHERE deleted IS NULL AND path='%s'",
+			 2, ipath ? ipath : path);
+	if (res == NULL) {
+		if (ipath)
+			free(ipath);
+		return NULL;
+	}
+	if (mysql_num_rows(res) == 0) {
 		mysql_free_result(res);
+		if (ipath)
+			free(ipath);
+		return NULL;
+	}
+
+	/* XXX if rows > 1, we just return info from the first */
+	row = mysql_fetch_row(res);
+	if (row[0] == NULL || row[1] == NULL) {
+		mysql_free_result(res);
+		if (ipath)
+			free(ipath);
+		return NULL;
+	}
+	vers = atoi(row[0]);
+	iid = mystrdup(row[1]);
+	mysql_free_result(res);
+	if (vers == 0) {
+		char *verstr = rindex(iid, ':');
+		*verstr = '\0';
+	}
+ 
+	/*
+	 * Tack on ",sig" to indicate that we want the signature for the
+	 * indicated image.
+	 */
+	if (ipath != NULL) {
+		if (iid != NULL) {
+			char *niid;
+			len = strlen(iid);
+			niid = mymalloc(len + 4);
+			strcpy(niid, iid);
+			niid[len++] = IID_SEP_META;
+			strcpy(&niid[len], "sig");
+			free(iid);
+			iid = niid;
+		}
+		free(ipath);
 	}
 
 	return iid;

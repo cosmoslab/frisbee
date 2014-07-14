@@ -732,7 +732,7 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	}
 	ii = copy_imageinfo(&ai->imageinfo[0]);
 	config_free_host_authinfo(ai);		
-	assert((ii->flags & CONFIG_PATH_ISFILE) != 0);
+	assert((ii->flags & (CONFIG_PATH_ISFILE|CONFIG_PATH_ISSIGFILE)) != 0);
 
 	/*
 	 * If the image is currently being uploaded, return TRYAGAIN.
@@ -1167,7 +1167,7 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	}
 	ii = copy_imageinfo(&ai->imageinfo[0]);
 	config_free_host_authinfo(ai);		
-	assert((ii->flags & CONFIG_PATH_ISFILE) != 0);
+	assert((ii->flags & (CONFIG_PATH_ISFILE|CONFIG_PATH_ISSIGFILE)) != 0);
 
 	/*
 	 * If they gave us a size and it exceeds the maxsize, return an error.

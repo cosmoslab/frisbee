@@ -42,8 +42,9 @@ struct config_imageinfo {
 #define CONFIG_PATH_ISDIR	0x2	/* path is a directory */
 #define CONFIG_PATH_ISGLOB	0x4	/* path is a file glob */
 #define CONFIG_PATH_ISRE	0x8	/* path is a perl RE */
-#define CONFIG_PATH_RESOLVE	0x10	/* path needs resolution at use */
-#define CONFIG_PATH_EXISTS	0x20	/* imaged named by path arg exists */
+#define CONFIG_PATH_ISSIGFILE	0x10	/* path is an image sigfile */
+#define CONFIG_PATH_RESOLVE	0x20	/* path needs resolution at use */
+#define CONFIG_PATH_EXISTS	0x40	/* imaged named by path arg exists */
 #define CONFIG_SIG_ISMTIME	0x1000	/* sig is path mtime */
 #define CONFIG_SIG_ISMD5	0x2000	/* sig is MD5 hash of path */
 #define CONFIG_SIG_ISSHA1	0x4000	/* sig is SHA1 hash of path */
