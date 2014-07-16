@@ -1007,6 +1007,55 @@ can_access(int imageidx, struct emulab_ha_extra_info *ei, int upload)
 }
 
 /*
+ * Parse an Emulab image ID string:
+ *
+ *    [<pid>]<imagename>[<vers>][<meta>]
+ *
+ * into its component parts. Returned components are malloced strings and
+ * need to be freed by the caller.
+ *
+ * Note that right now there are no errors. Even with a malformed string,
+ * we will return 'emulab-ops' as 'pid' and the given string as 'imagename'.
+ */
+static void
+parse_imageid(char *str, char **pidp, char **namep, char **versp, char **metap)
+{
+	char *ipid, *iname, *ivers, *imeta;
+
+	ipid = mystrdup(str);
+	iname = index(ipid, IID_SEP_NAME);
+	if (iname == NULL) {
+		iname = ipid;
+		ipid = mystrdup("emulab-ops");
+	} else {
+		*iname = '\0';
+		iname = mystrdup(iname+1);
+	}
+	ivers = index(iname, IID_SEP_VERS);
+	if (ivers) {
+		char *eptr;
+
+		/* If we can't convert to a number, consider it part of name */
+		if (strtol(ivers+1, &eptr, 10) == 0 && eptr == ivers+1) {
+			ivers = NULL;
+		} else {
+			*ivers = '\0';
+			ivers = mystrdup(ivers+1);
+		}
+	}
+	imeta = index(ivers ? ivers : iname, IID_SEP_META);
+	if (imeta != NULL) {
+		*imeta = '\0';
+		imeta = mystrdup(imeta+1);
+	}
+
+	*pidp = ipid;
+	*namep = iname;
+	*versp = ivers;
+	*metap = imeta;
+}
+
+/*
  * Find all images (imageid==NULL) or a specific image (imageid!=NULL)
  * that a particular node can access for GET/PUT.  At any time, a node is
  * associated with a specific project and group.  These determine the
@@ -1328,25 +1377,8 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	 * pid and imagename from the ID.
 	 */
 	if (imageid != NULL) {
-		wantpid = mystrdup(imageid);
-		wantname = index(wantpid, IID_SEP_NAME);
-		if (wantname == NULL) {
-			wantname = wantpid;
-			wantpid = mystrdup("emulab-ops");
-		} else {
-			*wantname = '\0';
-			wantname = mystrdup(wantname+1);
-		}
-		wantvers = index(wantname, IID_SEP_VERS);
-		if (wantvers) {
-			*wantvers = '\0';
-			wantvers  = mystrdup(wantvers+1);
-		}
-		wantmeta = index(wantvers ? wantvers : wantname, IID_SEP_META);
-		if (wantmeta != NULL) {
-			*wantmeta = '\0';
-			wantmeta = mystrdup(wantmeta+1);
-		}
+		parse_imageid(imageid,
+			      &wantpid, &wantname, &wantvers, &wantmeta);
 		imageidx = emulab_imageid(wantpid, wantname);
 		if (imageidx == 0)
 			goto done;
@@ -1908,19 +1940,75 @@ emulab_canonicalize_imageid(char *path)
 	MYSQL_RES *res;
 	MYSQL_ROW row;
 	char *iid = NULL, *ipath = NULL;
-	int len = strlen(path), vers;
+	int len;
 
 	/*
-	 * XXX right now we only use this to convert pathnames to imageids.
-	 * At some point maybe it will be necessary to convert between
-	 * imageids.
+	 * The only non-path (imageid) conversion we do right now is
+	 * to make sure we have a version number. If no version was specified
+	 * it means "the most recent" version and we look that up here.
 	 */
-	if (path[0] != '/')
-		return mystrdup(path);
+	if (path[0] != '/') {
+		char *ipid, *iname, *ivers, *imeta;
+
+		parse_imageid(path, &ipid, &iname, &ivers, &imeta);
+		assert(ipid != NULL);
+		assert(iname != NULL);
+
+		if (ivers == NULL) {
+			res = mydb_query("SELECT i.version FROM "
+					 "  images AS i, image_versions AS v "
+					 "WHERE i.imageid=v.imageid "
+					 "  AND i.version=v.version "
+					 "  AND i.pid='%s' "
+					 "  AND i.imagename='%s' "
+					 "  AND v.deleted IS NULL",
+					 1, ipid, iname);
+			if (res) {
+				if (mysql_num_rows(res)) {
+					row = mysql_fetch_row(res);
+					if (row[0])
+						ivers = mystrdup(row[0]);
+				}
+				mysql_free_result(res);
+			}
+		}
+
+		/* Cons up our new string */
+		len = strlen(ipid) + strlen(iname) + 2;
+		if (ivers)
+			len += strlen(ivers) + 1;
+		if (imeta)
+			len += strlen(imeta) + 1;
+		iid = mymalloc(len);
+		strcpy(iid, ipid);
+		len = strlen(ipid);
+		free(ipid);
+		iid[len++] = IID_SEP_NAME;
+		strcpy(&iid[len], iname);
+		len += strlen(iname);
+		free(iname);
+		if (ivers) {
+			iid[len++] = IID_SEP_VERS;
+			strcpy(&iid[len], ivers);
+			len += strlen(ivers);
+			free(ivers);
+		}
+		if (imeta) {
+			iid[len++] = IID_SEP_META;
+			strcpy(&iid[len], imeta);
+			len += strlen(imeta);
+			free(imeta);
+		}
+
+		return iid;
+	}
 
 	/*
-	 * XXX see if it might be a sigfile
+	 * We have a path.
+	 * First see if it might be a sigfile and strip off the ".sig"
+	 * so we can lookup the image name.
 	 */
+	len = strlen(path);
 	if (len > 4 && strcmp(path+len-4, ".sig") == 0) {
 		ipath = mystrdup(path);
 		ipath[len-4] = '\0';
@@ -1929,14 +2017,12 @@ emulab_canonicalize_imageid(char *path)
 	/*
 	 * Try to do everything is one swell foop.
 	 * Look up the path in image_versions, returning the version number
-	 * and a string composed of <pid>/<imagename>:<version>. If the
-	 * version number is zero, we remove the ":<version>" part.
+	 * and a string composed of <pid>/<imagename>:<version>.
 	 */
-	res = mydb_query("SELECT "
-			 "  version,CONCAT(pid,'/',imagename,':',version) "
+	res = mydb_query("SELECT CONCAT(pid,'%c',imagename,'%c',version) "
 			 "FROM image_versions"
 			 "  WHERE deleted IS NULL AND path='%s'",
-			 2, ipath ? ipath : path);
+			 1, IID_SEP_NAME, IID_SEP_VERS, ipath ? ipath : path);
 	if (res == NULL) {
 		if (ipath)
 			free(ipath);
@@ -1951,19 +2037,14 @@ emulab_canonicalize_imageid(char *path)
 
 	/* XXX if rows > 1, we just return info from the first */
 	row = mysql_fetch_row(res);
-	if (row[0] == NULL || row[1] == NULL) {
+	if (row[0] == NULL) {
 		mysql_free_result(res);
 		if (ipath)
 			free(ipath);
 		return NULL;
 	}
-	vers = atoi(row[0]);
-	iid = mystrdup(row[1]);
+	iid = mystrdup(row[0]);
 	mysql_free_result(res);
-	if (vers == 0) {
-		char *verstr = rindex(iid, ':');
-		*verstr = '\0';
-	}
  
 	/*
 	 * Tack on ",sig" to indicate that we want the signature for the
