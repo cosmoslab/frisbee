@@ -1086,7 +1086,7 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 {
 	struct in_addr host, in;
 	in_addr_t myaddr;
-	char imageid[MS_MAXIDLEN+1];
+	char imageid[MS_MAXIDLEN+1], *cimageid;
 	char clientip[sizeof("XXX.XXX.XXX.XXX")+1];
 	int len;
 	struct config_host_authinfo *ai;
@@ -1112,6 +1112,11 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	len = ntohs(msg->body.putrequest.idlen);
 	memcpy(imageid, msg->body.putrequest.imageid, len);
 	imageid[len] = '\0';
+	cimageid = config_canonicalize_imageid(imageid);
+	if (cimageid != NULL && strcmp(cimageid, imageid) == 0) {
+		free(cimageid);
+		cimageid = NULL;
+	}
 	wantstatus = msg->body.putrequest.status;
 	op = wantstatus ? "PUTSTATUS" : "PUT";
 	isize = ((uint64_t)ntohl(msg->body.putrequest.hisize) << 32) |
@@ -1120,17 +1125,37 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	timo = ntohl(msg->body.putrequest.timeout);
 
 	strncpy(clientip, inet_ntoa(cip->sin_addr), sizeof clientip);
-	if (host.s_addr != cip->sin_addr.s_addr)
-		FrisLog("%s: %s from %s (for %s), size=%llu",
-			imageid, op, clientip, inet_ntoa(host), isize);
-	else
-		FrisLog("%s: %s from %s, size=%llu",
-			imageid, op, clientip, isize);
+	if (cimageid == NULL) {
+		if (host.s_addr != cip->sin_addr.s_addr)
+			FrisLog("%s: %s from %s (for %s), size=%llu",
+				imageid, op, clientip, inet_ntoa(host), isize);
+		else
+			FrisLog("%s: %s from %s, size=%llu",
+				imageid, op, clientip, isize);
+	} else {
+		if (host.s_addr != cip->sin_addr.s_addr)
+			FrisLog("%s (%s): %s from %s (for %s), size=%llu",
+				imageid, cimageid, op, clientip,
+				inet_ntoa(host), isize);
+		else
+			FrisLog("%s (%s): %s from %s, size=%llu",
+				imageid, cimageid, op, clientip,
+				isize);
+	}
 
 	memset(msg, 0, sizeof *msg);
 	msg->hdr.type = htonl(MS_MSGTYPE_PUTREPLY);
 	strncpy((char *)msg->hdr.version, MS_MSGVERS_1,
 		sizeof(msg->hdr.version));
+
+	/*
+	 * Use the canonical name from here on out.
+	 */
+	if (cimageid != NULL) {
+		strcpy(imageid, cimageid);
+		free(cimageid);
+		cimageid = NULL;
+	}
 
 	/*
 	 * XXX we don't handle mirror mode right now.
