@@ -820,13 +820,15 @@ main(int argc, char *argv[])
 		if (hashfile && deltapct >= 0) {
 			uint32_t oldsect = sectinranges(ranges);
 			uint32_t newsect = sectinranges(nranges);
-			if (oldsect == 0 ||
-			    ((double)newsect / oldsect) * 100 > deltapct) {
-				fprintf(stderr,
-					"Delta size (%u sect) more than %d%% "
-					"the size of a full image (%u sect),\n"
-					"creating a full image instead.\n",
-					newsect, deltapct, oldsect);
+			int dofull =
+				(oldsect == 0 ||
+				 ((double)newsect / oldsect) * 100 > deltapct);
+			fprintf(stderr,
+				"Full image size %u sect, "
+				"delta image size %u sect\n"
+				"Auto image selection creating %s image.\n",
+				oldsect, newsect, dofull ? "full" : "delta");
+			if (dofull) {
 				freeranges(nranges);
 				goto done;
 			}
