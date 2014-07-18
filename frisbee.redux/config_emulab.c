@@ -1055,6 +1055,37 @@ parse_imageid(char *str, char **pidp, char **namep, char **versp, char **metap)
 	*metap = imeta;
 }
 
+static char *
+build_imageid(char *ipid, char *iname, char *ivers, char *imeta)
+{
+	char *iid;
+	int len;
+
+	len = strlen(ipid) + strlen(iname) + 2;
+	if (ivers)
+		len += strlen(ivers) + 1;
+	if (imeta)
+		len += strlen(imeta) + 1;
+	iid = mymalloc(len);
+	strcpy(iid, ipid);
+	len = strlen(ipid);
+	iid[len++] = IID_SEP_NAME;
+	strcpy(&iid[len], iname);
+	len += strlen(iname);
+	if (ivers) {
+		iid[len++] = IID_SEP_VERS;
+		strcpy(&iid[len], ivers);
+		len += strlen(ivers);
+	}
+	if (imeta) {
+		iid[len++] = IID_SEP_META;
+		strcpy(&iid[len], imeta);
+		len += strlen(imeta);
+	}
+
+	return iid;
+}
+
 /*
  * Find all images (imageid==NULL) or a specific image (imageid!=NULL)
  * that a particular node can access for GET/PUT.  At any time, a node is
@@ -1392,27 +1423,29 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			if (can_access(imageidx, ei, 1)) {
 				if (wantvers) {
 					res = mydb_query("SELECT i.pid,i.gid,"
-						 " i.imagename,v.path,i.imageid"
-						 " FROM images as i "
-						 " LEFT JOIN image_versions "
-						 "  as v on "
-						 "    v.imageid=i.imageid and "
-						 "    v.version='%s' "
-						 " WHERE i.pid='%s'"
-						 " AND i.imagename='%s'",
-						 5, wantvers, wantpid, wantname);
+						"i.imagename,v.path,"
+						"i.imageid,v.version"
+						" FROM images as i "
+						" LEFT JOIN image_versions "
+						"  as v on "
+						"    v.imageid=i.imageid and "
+						"    v.version='%s' "
+						"WHERE i.pid='%s'"
+						" AND i.imagename='%s'",
+						6, wantvers, wantpid, wantname);
 				}
 				else {
 					res = mydb_query("SELECT i.pid,i.gid,"
-						 " i.imagename,v.path,i.imageid"
-						 " FROM images as i "
-						 " LEFT JOIN image_versions "
-						 "  as v on "
-						 "    v.imageid=i.imageid and "
-						 "    v.version=i.version "
-						 " WHERE i.pid='%s'"
-						 " AND i.imagename='%s'",
-						 5, wantpid, wantname);
+						"i.imagename,v.path,"
+						"i.imageid,v.version"
+						" FROM images as i "
+						" LEFT JOIN image_versions "
+						"  as v on "
+						"    v.imageid=i.imageid and "
+						"    v.version=i.version "
+						"WHERE i.pid='%s'"
+						" AND i.imagename='%s'",
+						6, wantpid, wantname);
 				}
 			} else {
 				/*
@@ -1421,43 +1454,45 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 				 */
 				if (wantvers) {
 					res = mydb_query("SELECT i.pid,i.gid,"
-						 " i.imagename,v.path,i.imageid"
-						 " FROM images as i "
-						 " LEFT JOIN image_versions "
-						 "  as v on "
-						 "    v.imageid=i.imageid and "
-						 "    v.version='%s' "
-						 " WHERE i.pid='%s' "
-						 " AND i.imagename='%s'"
-						 " AND i.pid='%s'"
-						 " AND (i.gid='%s' OR"
-						 "    (i.gid=i.pid AND "
-						 "     v.shared=1))",
-						 5, wantvers, wantpid, wantname,
-						 ei->pid, ei->gid);
+						"i.imagename,v.path,"
+						"i.imageid,v.version"
+						" FROM images as i"
+						" LEFT JOIN image_versions "
+						"  as v on "
+						"    v.imageid=i.imageid and "
+						"    v.version='%s' "
+						" WHERE i.pid='%s' "
+						" AND i.imagename='%s' "
+						" AND i.pid='%s'"
+						" AND (i.gid='%s' OR"
+						"    (i.gid=i.pid AND "
+						"     v.shared=1))",
+						6, wantvers, wantpid, wantname,
+						ei->pid, ei->gid);
 				}
 				else {
 					res = mydb_query("SELECT i.pid,i.gid,"
-						 " i.imagename,v.path,i.imageid"
-						 " FROM images as i "
-						 " LEFT JOIN image_versions "
-						 "  as v on "
-						 "    v.imageid=i.imageid and "
-						 "    v.version=i.version "
-						 " WHERE i.pid='%s' "
-						 " AND i.imagename='%s'"
-						 " AND i.pid='%s'"
-						 " AND (i.gid='%s' OR"
-						 "    (i.gid=i.pid AND "
-						 "     v.shared=1))",
-						 5, wantpid, wantname,
-						 ei->pid, ei->gid);
+						"i.imagename,v.path,"
+						"i.imageid,v.version"
+						" FROM images as i"
+						" LEFT JOIN image_versions "
+						"  as v on "
+						"    v.imageid=i.imageid and "
+						"    v.version=i.version "
+						" WHERE i.pid='%s' "
+						" AND i.imagename='%s'"
+						" AND i.pid='%s'"
+						" AND (i.gid='%s' OR"
+						"    (i.gid=i.pid AND "
+						"     v.shared=1))",
+						6, wantpid, wantname,
+						ei->pid, ei->gid);
 				}
 			}
 		} else {
 			/* Find all images that this pid/gid can PUT */
 			res = mydb_query("SELECT i.pid,i.gid,i.imagename,"
-					 "v.path,i.imageid"
+					 "v.path,i.imageid,v.version"
 					 " FROM images as i"
 					 " LEFT JOIN image_versions as v on "
 					 "    v.imageid=i.imageid and "
@@ -1466,7 +1501,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 					 " AND (i.gid='%s' OR"
 					 "     (i.gid=i.pid AND v.shared=1))"
 					 " ORDER BY i.pid,i.gid,i.imagename",
-					 5, ei->pid, ei->gid);
+					 6, ei->pid, ei->gid);
 		}
 		assert(res != NULL);
 
@@ -1482,7 +1517,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			struct config_imageinfo *ci;
 			struct stat sb;
 			char *iid;
-			int iidx, len, issig = 0;
+			int iidx;
 
 			row = mysql_fetch_row(res);
 			/* XXX ignore rows with null or empty info */
@@ -1490,7 +1525,8 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			    !row[1] || !row[1][0] ||
 			    !row[2] || !row[2][0] ||
 			    !row[3] || !row[3][0] ||
-			    !row[4] || !row[4][0])
+			    !row[4] || !row[4][0] ||
+			    !row[5] || !row[5][0])
 				continue;
 
 			/*
@@ -1511,24 +1547,11 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 				continue;
 			}
 
-			len = strlen(row[0]) + strlen(row[2]) + 2;
-			if (wantmeta && strcmp(wantmeta, "sig") == 0) {
-				len += 4;
-				issig = 1;
-			}
-			iid = mymalloc(len);
-			strcpy(iid, row[0]);
-			strcat(iid, "/");
-			strcat(iid, row[2]);
-			if (issig) {
-				len = strlen(iid);
-				iid[len++] = IID_SEP_META;
-				strcpy(&iid[len], "sig");
-			}
+			iid = build_imageid(row[0], row[2], row[5], wantmeta);
 			ci = &put->imageinfo[put->numimages];
 			ci->imageid = iid;
 			ci->dir = NULL;
-			if (issig) {
+			if (wantmeta && strcmp(wantmeta, "sig") == 0) {
 				ci->path = mymalloc(strlen(row[3]) + 4);
 				strcpy(ci->path, row[3]);
 				strcat(ci->path, ".sig");
@@ -1583,75 +1606,78 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			if (can_access(imageidx, ei, 0)) {
 				if (wantvers) {
 					res = mydb_query("SELECT i.pid,i.gid,"
-						 "i.imagename,v.path,i.imageid"
-						 " FROM images as i "
-						 " LEFT JOIN image_versions "
-						 "  as v on "
-						 "    v.imageid=i.imageid and "
-						 "    v.version='%s' "
-						 "WHERE i.pid='%s'"
-						 " AND i.imagename='%s' and "
-						 " AND v.ready=1",
-						 5, wantvers, wantpid, wantname);
+						"i.imagename,v.path,"
+						"i.imageid,v.version"
+						" FROM images as i "
+						" LEFT JOIN image_versions "
+						"  as v on "
+						"    v.imageid=i.imageid and "
+						"    v.version='%s' "
+						"WHERE i.pid='%s'"
+						" AND i.imagename='%s' and "
+						" AND v.ready=1",
+						6, wantvers, wantpid, wantname);
 				}
 				else {
 					res = mydb_query("SELECT i.pid,i.gid,"
-						 "i.imagename,v.path,i.imageid"
-						 " FROM images as i "
-						 " LEFT JOIN image_versions "
-						 "  as v on "
-						 "    v.imageid=i.imageid and "
-						 "    v.version=i.version "
-						 "WHERE i.pid='%s'"
-						 " AND i.imagename='%s'",
-						 5, wantpid, wantname);
+						"i.imagename,v.path,"
+						"i.imageid,v.version"
+						" FROM images as i "
+						" LEFT JOIN image_versions "
+						"  as v on "
+						"    v.imageid=i.imageid and "
+						"    v.version=i.version "
+						"WHERE i.pid='%s'"
+						" AND i.imagename='%s'",
+						6, wantpid, wantname);
 				}
 			} else {
 				if (wantvers) {
 					res = mydb_query("SELECT i.pid,i.gid,"
-						 "i.imagename,v.path,i.imageid"
-						 " FROM images as i"
-						 " LEFT JOIN image_versions "
-						 "  as v on "
-						 "    v.imageid=i.imageid and "
-						 "    v.version='%s' "
-						 " WHERE i.pid='%s' "
-						 " AND i.imagename='%s' "
-						 " AND v.ready=1 " 
-						 " AND (v.global=1"
-						 "     OR (i.pid='%s'"
-						 "        AND (i.gid='%s'"
-						 "            OR v.shared=1)))"
-						 " ORDER BY pid,gid,imagename",
-						 5, wantvers, wantpid, wantname,
-						 ei->pid, ei->gid);
+						"i.imagename,v.path,"
+						"i.imageid,v.version"
+						" FROM images as i"
+						" LEFT JOIN image_versions "
+						"  as v on "
+						"    v.imageid=i.imageid and "
+						"    v.version='%s' "
+						" WHERE i.pid='%s' "
+						" AND i.imagename='%s' "
+						" AND v.ready=1 " 
+						" AND (v.global=1"
+						"     OR (i.pid='%s'"
+						"        AND (i.gid='%s'"
+						"            OR v.shared=1)))"
+						" ORDER BY pid,gid,imagename",
+						6, wantvers, wantpid, wantname,
+						ei->pid, ei->gid);
 				}
 				else {
 					res = mydb_query("SELECT i.pid,i.gid,"
-						 "i.imagename,v.path,i.imageid"
-						 " FROM images as i"
-						 " LEFT JOIN image_versions "
-						 "  as v on "
-						 "    v.imageid=i.imageid and "
-						 "    v.version=i.version "
-						 " WHERE i.pid='%s' "
-						 " AND i.imagename='%s'"
-						 " AND (v.global=1"
-						 "     OR (i.pid='%s'"
-						 "        AND (i.gid='%s'"
-						 "            OR v.shared=1)))"
-						 " ORDER BY pid,gid,imagename",
-						 5, wantpid, wantname,
-						 ei->pid, ei->gid);
+						"i.imagename,v.path,"
+						"i.imageid,v.version"
+						" FROM images as i"
+						" LEFT JOIN image_versions "
+						"  as v on "
+						"    v.imageid=i.imageid and "
+						"    v.version=i.version "
+						" WHERE i.pid='%s' "
+						" AND i.imagename='%s'"
+						" AND (v.global=1"
+						"     OR (i.pid='%s'"
+						"        AND (i.gid='%s'"
+						"            OR v.shared=1)))"
+						" ORDER BY pid,gid,imagename",
+						6, wantpid, wantname,
+						ei->pid, ei->gid);
 				}
 			}
 		} else {
 			/* Find all images that this pid/gid can GET */
 			res = mydb_query("SELECT i.pid,i.gid,i.imagename,"
-					 "v.path,i.imageid"
+					 "v.path,i.imageid,v.version"
 					 " FROM images as i"
-					 " LEFT JOIN image_versions "
-					 "  as v on "
+					 " LEFT JOIN image_versions as v on "
 					 "    v.imageid=i.imageid and "
 					 "    v.version=i.version "
 					 " WHERE"
@@ -1659,7 +1685,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 					 "  OR (i.pid='%s'"
 					 "     AND (i.gid='%s' OR v.shared=1)))"
 					 " ORDER BY i.pid,i.gid,i.imagename",
-					 5, ei->pid, ei->gid);
+					 6, ei->pid, ei->gid);
 		}
 		assert(res != NULL);
 
@@ -1675,7 +1701,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			struct config_imageinfo *ci;
 			struct stat sb;
 			char *iid;
-			int iidx, len, issig = 0;
+			int iidx;
 
 			row = mysql_fetch_row(res);
 			/* XXX ignore rows with null or empty info */
@@ -1683,26 +1709,15 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			    !row[1] || !row[1][0] ||
 			    !row[2] || !row[2][0] ||
 			    !row[3] || !row[3][0] ||
-			    !row[4] || !row[4][0])
+			    !row[4] || !row[4][0] ||
+			    !row[5] || !row[5][0])
 				continue;
-			len = strlen(row[0]) + strlen(row[2]) + 2;
-			if (wantmeta && strcmp(wantmeta, "sig") == 0) {
-				len += 4;
-				issig = 1;
-			}
-			iid = mymalloc(len);
-			strcpy(iid, row[0]);
-			strcat(iid, "/");
-			strcat(iid, row[2]);
-			if (issig) {
-				len = strlen(iid);
-				iid[len++] = IID_SEP_META;
-				strcpy(&iid[len], "sig");
-			}
+
+			iid = build_imageid(row[0], row[2], row[5], wantmeta);
 			ci = &get->imageinfo[get->numimages];
 			ci->imageid = iid;
 			ci->dir = NULL;
-			if (issig) {
+			if (wantmeta && strcmp(wantmeta, "sig") == 0) {
 				ci->path = mymalloc(strlen(row[3]) + 4);
 				strcpy(ci->path, row[3]);
 				strcat(ci->path, ".sig");
@@ -1973,32 +1988,13 @@ emulab_canonicalize_imageid(char *path)
 			}
 		}
 
-		/* Cons up our new string */
-		len = strlen(ipid) + strlen(iname) + 2;
-		if (ivers)
-			len += strlen(ivers) + 1;
-		if (imeta)
-			len += strlen(imeta) + 1;
-		iid = mymalloc(len);
-		strcpy(iid, ipid);
-		len = strlen(ipid);
+		iid = build_imageid(ipid, iname, ivers, imeta);
 		free(ipid);
-		iid[len++] = IID_SEP_NAME;
-		strcpy(&iid[len], iname);
-		len += strlen(iname);
 		free(iname);
-		if (ivers) {
-			iid[len++] = IID_SEP_VERS;
-			strcpy(&iid[len], ivers);
-			len += strlen(ivers);
+		if (ivers)
 			free(ivers);
-		}
-		if (imeta) {
-			iid[len++] = IID_SEP_META;
-			strcpy(&iid[len], imeta);
-			len += strlen(imeta);
+		if (imeta)
 			free(imeta);
-		}
 
 		return iid;
 	}
