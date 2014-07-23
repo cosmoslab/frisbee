@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2012 University of Utah and the Flux Group.
+# Copyright (c) 2000-2014 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -75,7 +75,10 @@ endif
 	$(MAKE) -C genhostsfile client-install
 ifeq ($(SYSTEM),FreeBSD)
 	$(MAKE) -C growdisk client-install
+	$(INSTALL_PROGRAM) $(SRCDIR)/create-image $(LBINDIR)/
+	$(INSTALL_PROGRAM) $(SRCDIR)/create-swapimage $(LBINDIR)/
 endif
+	$(INSTALL_PROGRAM) $(SRCDIR)/create-versioned-image $(LBINDIR)/
 
 mfs:
 	$(MAKE) -C growdisk client
@@ -83,6 +86,9 @@ mfs:
 	$(MAKE) -C growdisk client
 	$(MAKE) -C imagezip client
 	$(MAKE) -C frisbee.redux client
+	$(INSTALL_PROGRAM) $(SRCDIR)/create-image $(LBINDIR)/
+	$(INSTALL_PROGRAM) $(SRCDIR)/create-versioned-image $(LBINDIR)/
+	$(INSTALL_PROGRAM) $(SRCDIR)/create-swapimage $(LBINDIR)/
 
 subboss: subboss-subdirs
 

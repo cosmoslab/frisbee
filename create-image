@@ -1,0 +1,206 @@
+#!/usr/bin/perl -wT
+
+#
+# Copyright (c) 2000-2014 University of Utah and the Flux Group.
+# 
+# {{{EMULAB-LICENSE
+# 
+# This file is part of the Emulab network testbed software.
+# 
+# This file is free software: you can redistribute it and/or modify it
+# under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or (at
+# your option) any later version.
+# 
+# This file is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public
+# License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with this file.  If not, see <http://www.gnu.org/licenses/>.
+# 
+# }}}
+#
+
+use English;
+use Getopt::Std;
+
+#
+# Client-side to create a disk image. Caller must have sudo permission!
+#
+sub usage()
+{
+    print STDOUT "Usage: create-image [-S image-server] [-F imageid] [-s slice] <device file> <filename>\n";
+    exit(-1);
+}
+my  $optlist = "F:S:s:";
+
+#
+# Turn off line buffering on output
+#
+$| = 1;
+
+#
+# Untaint the path
+# 
+$ENV{'PATH'} = "/bin:/sbin:/usr/bin:";
+delete @ENV{'IFS', 'CDPATH', 'ENV', 'BASH_ENV'};
+
+#
+# No configure vars.
+#
+my $sudo = "";
+my $zipper = "/usr/local/bin/imagezip";
+my $uploader = "/usr/local/bin/frisupload";
+my $slice  = "";
+my $device;
+my $filename;
+
+#
+# If we are running as a user, then we will need sudo
+#
+if ($EUID != 0) {
+    for my $path (qw#/usr/local/bin /usr/bin#) {
+	if (-e "$path/sudo") {
+	    $sudo = "$path/sudo";
+	    last;
+	}
+    }
+}
+
+# Frisbee master server params
+my $iserver = "boss";	# XXX
+my $imageid;
+
+#
+# Parse command arguments. Once we return from getopts, all that should be
+# left are the required arguments.
+#
+%options = ();
+if (! getopts($optlist, \%options)) {
+    usage();
+}
+if (@ARGV != 2) {
+    usage();
+}
+
+if (defined($options{"S"})) {
+    $iserver = $options{"S"};
+    if ($iserver =~ /^([-\w\.]+)$/) {
+	$iserver = $1;
+    } else {
+	die("Bad -S hostname: '$iserver'");
+    }
+}
+if (defined($options{"F"})) {
+    $imageid = $options{"F"};
+    if ($imageid =~ /^(\S+)$/) {
+	$imageid = $1;
+    } else {
+	die("Bad -F imageid: '$imageid'");
+    }
+}
+
+if (defined($options{"s"})) {
+    my $num = $options{"s"};
+
+    if ($num =~ /(\d)/) {
+	$num = $1;
+    }
+    else {
+	die("Tainted slice number: $num");
+    }
+    
+    $slice = "-s $num";
+
+    # XXX for now we do not generate relocation info on slices
+    # XXX there are still some issues with LILO/GRUB
+    $slice = "-N $slice";
+}
+$device   = $ARGV[0];
+if (defined($imageid)) {
+    $filename = "-";
+} else {
+    $filename = $ARGV[1];
+}
+
+#
+# Untaint the arguments.
+#
+# Note different taint check (allow /).
+if ($device =~ /^([-\w.\/]+)$/) {
+    $device = $1;
+}
+else {
+    die("Tainted device name: $device");
+}
+if ($filename =~ /^([-\w.\/\+]+)$/) {
+    $filename = $1;
+}
+else {
+    die("Tainted output filename: $filename");
+}
+
+# Hack for the Linux MFS: we still use the BSD device
+# names in the database so we try to convert them to
+# the equivalent Linux devices here.  This happens to
+# work at the moment, but if device names change again
+# it could break.
+
+if ($^O eq 'linux') {
+	$device =~ m#/dev/(\D+)(\d+)#;
+	($dtype, $dunit) = ($1, $2);
+	$dunit -= 4 if ($dtype eq 'ad' && $dunit > 3);
+	$dunit =~ y/01234567/abcdefgh/;
+
+	#
+	# XXX woeful TPM dongle-boot hack.
+	# If we are imaging /dev/sda and dmesg reports that
+	# that device is write-protected, assume it is the boot dongle
+	# and use /dev/sdb instead!
+	#
+	if ($dunit eq "a") {
+	    if (!system("dmesg | fgrep -q '[sda] Write Protect is on'")) {
+		print STDERR "WARNING: suspect dongle-booted node, using sdb instead of sda\n";
+		$dunit = "b";
+	    }
+	}
+
+	$device = "/dev/sd$dunit";
+}
+
+#
+# If imageid is defined, we use the frisbee uploader.
+#
+my $cmd = "$sudo $zipper $slice $device $filename";
+if (defined($imageid)) {
+    # use basic shell sleezy trick to capture exit status from imagezip
+    $cmd = "( $cmd || echo \$? > /tmp/imagezip.stat )";
+
+    $cmd .= " | $uploader -S $iserver -F $imageid -";
+}
+
+#
+# Run the command using sudo, since by definition only testbed users
+# with proper trust should be able to zip up a disk. sudo will fail
+# if the user is not in the proper group.
+#
+if (system("$cmd") || -e "/tmp/imagezip.stat") {
+    my $stat = sprintf("0x%04x", $?);
+    my $izstat = 0;
+    if (-e "/tmp/imagezip.stat") {
+	$izstat = `cat /tmp/imagezip.stat`;
+	chomp($izstat);
+    }
+    $izstat = sprintf("0x%04x", $izstat);
+
+    print STDERR "*** Failed to create image!\n";
+    print STDERR "    command:   '$cmd'\n";
+    print STDERR "    status:    $stat\n";
+    print STDERR "    izstatus:  $izstat\n"
+	if ($izstat);
+    exit 1;
+}
+
+exit 0;
