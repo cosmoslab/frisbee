@@ -23,41 +23,26 @@
 
 all:	libntfs.a
 
-NTFSDIR		= ntfsprogs-1.7.1.linux
+NTFSDIR		= ntfsprogs-2.0.0
+LIBSRCDIR	= $(NTFSDIR)/libntfs
 INCLUDES        = -I${NTFSDIR}/include
 CFLAGS	        = -O2 -g -static -Wall $(INCLUDES)
 
-OBJS=	attrib.o \
-	bitmap.o \
-	bootsect.o \
-	compat.o \
-	debug.o \
-	dir.o \
-	disk_io.o \
-	inode.o \
-	lcnalloc.o \
-	mft.o \
-	mst.o \
-	runlist.o \
-	unistr.o \
-	volume.o
-
-%.o:	$(NTFSDIR)/libntfs/%.c
+%.o:	$(LIBSRCDIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-libntfs.a: configureit $(OBJS)
-	ar crv $@ $(OBJS)
-	ranlib $@
+libntfs.a: configureit
+	$(MAKE) -C $(LIBSRCDIR) all
+	cp -p $(LIBSRCDIR)/.libs/libntfs.a $@
 
 configureit:
-	wget -q -N http://www.emulab.net/ntfsprogs-1.7.1.tar.gz
-	tar zxf ntfsprogs-1.7.1.tar.gz
-	mv ntfsprogs-1.7.1 $(NTFSDIR)
-	patch -sN -d $(NTFSDIR) -p1 < ntfs.linuxpatch
-	patch -sN -d $(NTFSDIR) -p1 < ntfs_lvalue.patch
-	$(NTFSDIR)/configure
-	mv config.h $(NTFSDIR)/include
+	wget -q -N http://www.emulab.net/distributions/ntfsprogs-2.0.0.tar.gz
+	tar zxf ntfsprogs-2.0.0.tar.gz
+	patch -sN -d $(NTFSDIR) -p1 < ntfsprogs-2.0.0.patch
+	(cd $(NTFSDIR); ./configure)
+	cp $(NTFSDIR)/config.h $(NTFSDIR)/include
 	touch configureit
 
 clean:
-	rm -f $(OBJS) libntfs.a
+	$(MAKE) -C $(LIBSRCDIR) clean
+	rm -f libntfs.a
