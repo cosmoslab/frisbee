@@ -1,4 +1,4 @@
-#!/usr/bin/perl -wT
+#!/usr/bin/perl -w
 
 #
 # Copyright (c) 2000-2014 University of Utah and the Flux Group.
@@ -53,6 +53,7 @@ delete @ENV{'IFS', 'CDPATH', 'ENV', 'BASH_ENV'};
 my $sudo = "";
 my $zipper = "/usr/local/bin/imagezip";
 my $uploader = "/usr/local/bin/frisupload";
+my $xenscript = "/usr/local/bin/create-xen-image";
 my $slice  = "";
 my $device;
 my $filename;
@@ -67,6 +68,19 @@ if ($EUID != 0) {
 	    last;
 	}
     }
+}
+
+#
+# A newer server side is going to invoke this script for XEN nodes, to be
+# backwards compatible with older XEN client sides that had its own version
+# of create-image. It is now called create-xen-image, so call that script,
+# which conveniently is argument compatible with this script. This test for
+# the file is kinda bogus, but this script does not include libsetup, which
+# hides that. Not sure why we do not include libsetup (ask Mike).
+#
+if ($^O eq 'linux' && -e "/etc/emulab/genvmtype") {
+    exec $xenscript, @ARGV;
+    die("Could not exec $xenscript");
 }
 
 # Frisbee master server params
