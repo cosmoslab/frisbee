@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2013 University of Utah and the Flux Group.
+# Copyright (c) 2000-2014 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -280,8 +280,8 @@ subboss-install: subboss
 client: frisbee frisupload
 
 client-install: client
-	$(INSTALL_PROGRAM) frisbee $(DESTDIR)$(CLIENT_BINDIR)
-	$(INSTALL_PROGRAM) frisupload $(DESTDIR)$(CLIENT_BINDIR)
+	$(INSTALL_PROGRAM) frisbee $(DESTDIR)/usr/local/bin
+	$(INSTALL_PROGRAM) frisupload $(DESTDIR)/usr/local/bin
 
 clean:
 	/bin/rm -f *.o *.a *.debug
