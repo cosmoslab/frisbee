@@ -1,4 +1,4 @@
-#!/usr/bin/perl -wT
+#!/usr/bin/perl -w
 
 #
 # Copyright (c) 2000-2014 University of Utah and the Flux Group.
@@ -91,17 +91,20 @@ use Getopt::Std;
 # IZOPTS=<string>
 #    Additional options for imagezip.
 #
+# PROXY=<vnodeid>
+#    The proxy argument for use on XEN, when acting on behalf of a container.
+#
 
 sub usage()
 {
     print STDERR
 	"Usage:\n".
-	"create-versioned-image [-nv] -f param-file\n".
+	"create-versioned-image [-nvx] -f param-file\n".
 	"  or\n".
-	"create-versioned-image [-nv] KEY=VALUE ...\n";
+	"create-versioned-image [-nv] [-x vnode_id] KEY=VALUE ...\n";
     exit(-1);
 }
-my  $optlist = "f:nv";
+my  $optlist = "f:nvx:";
 
 #
 # Turn off line buffering on output
@@ -124,6 +127,7 @@ my $frisbee = "/usr/local/bin/frisbee";
 my $localdir = "/local";
 my $impotent = 0;
 my $verbose = 0;
+my $isxen   = 0;
 
 sub process_image($);
 sub mysystem($);
@@ -138,6 +142,13 @@ sub map_diskname($)
 {
     my ($dev) = @_;
     my ($dtype, $dunit);
+
+    #
+    # When called on XEN, the diskname is correct, and in fact we will
+    # just mess it up.
+    #
+    return $dev
+	if ($isxen);
 
     # strip off /dev/ if it is there
     $dev =~ s/^\/dev\///;
@@ -246,6 +257,10 @@ sub parse_params(@)
 		    $iinfo{$iid}{'izopts'} = $optstr;
 		    next;
 		}
+		if ($key eq "proxy") {
+		    $iinfo{$iid}{'proxy'} = $val;
+		    next;
+		}
 	    } else {
 		print STDERR "Bogus parameter: '$kv'\n";
 		$errors++;
@@ -284,6 +299,10 @@ if (defined($options{"n"})) {
 }
 if (defined($options{"v"})) {
     $verbose = 1;
+}
+if (defined($options{"x"})) {
+    $isxen = 1;
+    $localdir = "/capture/" . $options{"x"} . "/frisbee";
 }
 if (defined($options{"f"})) {
     my $pfile = $options{"f"};
@@ -340,7 +359,7 @@ foreach my $iid (sort keys %iinfo) {
 # For method=frisbee, the actual files will be here.
 # For method=file, a symlink to the actual file will be here.
 #
-if (mysystem("$sudo mkdir -p $localdir")) {
+if (! -e $localdir && mysystem("$sudo mkdir -p $localdir")) {
     print STDERR "Could not create $localdir\n";
     exit(1);
 }
@@ -359,7 +378,8 @@ if (mysystem("$sudo mkdir -p $localdir")) {
 my $MEMFS_SIZE = "64m";
 if ($dofrisbee) {
     if ($^O eq 'linux') {
-	if (mysystem("$sudo mount -t tmpfs -o size=$MEMFS_SIZE tmpfs $localdir")) {
+	if (!$isxen &&
+	    mysystem("$sudo mount -t tmpfs -o size=$MEMFS_SIZE tmpfs $localdir")) {
 	    print STDERR "Could not create $MEMFS_SIZE byte local MFS\n";
 
 	    # XXX try NFS instead
@@ -394,7 +414,7 @@ foreach my $iid (sort keys %iinfo) {
 #
 if ($dofrisbee) {
     if ($^O eq 'linux') {
-	if (mysystem("$sudo umount $localdir")) {
+	if (!$isxen && mysystem("$sudo umount $localdir")) {
 	    print STDERR "WARNING: could not destroy local MFS\n";
 	}
     } else {
@@ -573,7 +593,12 @@ sub process_image($)
 	# use basic shell sleezy trick to capture exit status from imagezip
 	$cmd = "( $cmd - || echo \$? > $localdir/imagezip.stat )";
 
-	$cmd .= " | $uploader -S $srv -F $image -";
+	$cmd .= " | $uploader -S $srv -F $image";
+	
+	if (exists($iinfo{$iid}{'proxy'})) {
+	    $cmd .= " -P " . $iinfo{$iid}{'proxy'};
+	}
+	$cmd .= " - ";
     }
 
     if (mysystem("$cmd") || -e "$localdir/imagezip.stat") {
