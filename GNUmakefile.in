@@ -86,9 +86,6 @@ mfs:
 	$(MAKE) -C growdisk client
 	$(MAKE) -C imagezip client
 	$(MAKE) -C frisbee.redux client
-	$(INSTALL_PROGRAM) $(SRCDIR)/create-image $(LBINDIR)/
-	$(INSTALL_PROGRAM) $(SRCDIR)/create-versioned-image $(LBINDIR)/
-	$(INSTALL_PROGRAM) $(SRCDIR)/create-swapimage $(LBINDIR)/
 
 subboss: subboss-subdirs
 
@@ -125,6 +122,9 @@ mfs-install:
 	$(MAKE) -C imagezip client-install
 	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C growdisk client-install
 	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C frisbee.redux client-install
+	$(INSTALL_PROGRAM) $(SRCDIR)/create-image $(LBINDIR)/
+	$(INSTALL_PROGRAM) $(SRCDIR)/create-versioned-image $(LBINDIR)/
+	$(INSTALL_PROGRAM) $(SRCDIR)/create-swapimage $(LBINDIR)/
 
 newnode-mfs: mfs
 newnode-mfs-install: mfs-install
