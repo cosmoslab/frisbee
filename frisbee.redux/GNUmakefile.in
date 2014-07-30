@@ -24,6 +24,9 @@ SRCDIR		= @srcdir@
 TESTBED_SRCDIR	= @top_srcdir@
 OBJDIR		= @top_builddir@
 SUBDIR		= $(subst $(TESTBED_SRCDIR)/,,$(SRCDIR))
+ifndef CLIENT_BINDIR
+CLIENT_BINDIR	= /usr/local/bin
+endif
 
 DISTFILES	= TODO client.c decls.h event.c event.h log.c log.h \
 		  network.c queue.h server.c trace.c trace.h utils.c utils.h
@@ -280,8 +283,8 @@ subboss-install: subboss
 client: frisbee frisupload
 
 client-install: client
-	$(INSTALL_PROGRAM) frisbee $(DESTDIR)/usr/local/bin
-	$(INSTALL_PROGRAM) frisupload $(DESTDIR)/usr/local/bin
+	$(INSTALL_PROGRAM) frisbee $(DESTDIR)$(CLIENT_BINDIR)
+	$(INSTALL_PROGRAM) frisupload $(DESTDIR)$(CLIENT_BINDIR)
 
 clean:
 	/bin/rm -f *.o *.a *.debug
