@@ -30,7 +30,7 @@ SYSTEM	       := $(shell uname -s)
 
 include $(OBJDIR)/Makeconf
 
-SUBDIRS	= syncd dijkstra genhostsfile imagezip frisbee.redux 
+SUBDIRS	= syncd dijkstra genhostsfile imagezip frisbee.redux capture
 ifeq ($(SYSTEM),FreeBSD)
 SUBDIRS += growdisk
 endif
@@ -49,6 +49,7 @@ boss-install:
 	$(MAKE) -C syncd boss-install
 	$(MAKE) -C imagezip boss-install
 	$(MAKE) -C frisbee.redux install
+	$(MAKE) -C capture install
 	-mkdir -p $(INSTALL_DIR)/opsdir/man/man1
 	$(INSTALL) -m 644 $(SRCDIR)/install-tarfile.1 \
 		$(INSTALL_DIR)/opsdir/man/man1/install-tarfile.1
@@ -71,6 +72,7 @@ client-install: client
 ifneq ($(findstring CYGWIN_NT,$(SYSTEM)),CYGWIN_NT) # Filter out again...
 	$(MAKE) -C imagezip client-install
 	$(MAKE) -C frisbee.redux client-install
+	$(MAKE) -C capture client-install
 endif
 	$(MAKE) -C genhostsfile client-install
 ifeq ($(SYSTEM),FreeBSD)
@@ -92,6 +94,7 @@ subboss: subboss-subdirs
 subboss-install: subboss
 	$(MAKE) -C genhostsfile subboss-install
 ifneq ($(findstring CYGWIN_NT,$(SYSTEM)),CYGWIN_NT) # Filter out again...
+	$(MAKE) -C capture client-install
 	$(MAKE) -C imagezip client-install
 	$(MAKE) -C frisbee.redux subboss-install
 endif

@@ -83,6 +83,9 @@
 #include "config.h"
 #endif /* USESOCKETS */
 #include "capdecls.h"
+#ifndef BOSSNODE
+#define BOSSNODE "boss"
+#endif
 
 #define geterr(e)	strerror(e)
 

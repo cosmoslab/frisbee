@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2007 University of Utah and the Flux Group.
+ * Copyright (c) 2005-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -40,6 +40,9 @@
 #include <sys/time.h>
 #include <grp.h>
 #include "capdecls.h"
+#ifndef BOSSNODE
+#define BOSSNODE "boss"
+#endif
 
 static int debug = 0;
 

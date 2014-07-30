@@ -20,11 +20,10 @@
 # 
 # }}}
 #
-
 SRCDIR		= @srcdir@
 TESTBED_SRCDIR	= @top_srcdir@
-OBJDIR		= ..
-SUBDIR		= capture
+OBJDIR		= @top_builddir@
+SUBDIR		= $(subst $(TESTBED_SRCDIR)/,,$(SRCDIR))
 
 SYSTEM	       := $(shell uname -s)
 
@@ -37,7 +36,7 @@ WITH_TELNET	= 0
 all:		boss-all tipserv-all
 boss-all:	capserver
 tipserv-all:	capture capture-tty capquery caplogserver caplog caplog.bin
-client: capture capquery caplog caplog.bin
+client: capture capture-nossl capquery caplog caplog.bin
 
 include $(TESTBED_SRCDIR)/GNUmakerules
 
@@ -97,8 +96,9 @@ install:	all $(INSTALL_SBINDIR)/capserver $(INSTALL_SBINDIR)/capture
 	$(INSTALL_PROGRAM) capture $(INSTALL_DIR)/opsdir/sbin/capture
 
 client-install: client
-	$(INSTALL_PROGRAM) capture$(EXE) $(DESTDIR)$(CLIENT_BINDIR)/capture$(EXE)
-	$(INSTALL_PROGRAM) capquery$(EXE) $(DESTDIR)$(CLIENT_BINDIR)/capquery$(EXE)
+	$(INSTALL_PROGRAM) capture$(EXE) $(DESTDIR)$(INSTALL_SBINDIR)/capture$(EXE)
+	$(INSTALL_PROGRAM) capquery$(EXE) $(DESTDIR)$(INSTALL_SBINDIR)/capquery$(EXE)
+	$(INSTALL_PROGRAM) capture-nossl$(EXE) $(DESTDIR)$(INSTALL_SBINDIR)/capture-nossl$(EXE)
 
 real-install:	all $(INSTALL_SBINDIR)/capserver $(INSTALL_SBINDIR)/capture
 
