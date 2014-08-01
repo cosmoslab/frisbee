@@ -26,6 +26,7 @@ OBJDIR		= @top_builddir@
 SUBDIR		= $(subst $(TESTBED_SRCDIR)/,,$(SRCDIR))
 SYSTEM	       := $(shell uname -s)
 LBINDIR		= $(DESTDIR)/usr/local/bin
+LSBINDIR	= $(DESTDIR)/usr/local/sbin
 SYSTEM	       := $(shell uname -s)
 
 include $(OBJDIR)/Makeconf
@@ -62,7 +63,7 @@ fs-install:
 client: client-subdirs
 
 client-install: client
-	-mkdir -p $(LBINDIR)
+	-mkdir -p $(LBINDIR) $(LSBINDIR)
 	$(INSTALL_PROGRAM) $(SRCDIR)/install-tarfile $(LBINDIR)/install-tarfile
 	-mkdir -p $(DESTDIR)$(CLIENT_MANDIR)/man1
 	$(INSTALL) -m 644 $(SRCDIR)/install-tarfile.1 $(DESTDIR)$(CLIENT_MANDIR)/man1/install-tarfile.1
