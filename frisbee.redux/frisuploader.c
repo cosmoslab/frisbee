@@ -70,8 +70,8 @@ main(int argc, char **argv)
 
 	net_init();
 
-	FrisLog("%s: listening on port %d for image data from %s (max of %llu bytes)",
-		path, portnum, inet_ntoa(clientip), maxsize);
+	FrisLog("%s: listening as %d/%d on port %d for image data from %s (max of %llu bytes)",
+		path, geteuid(), getegid(), portnum, inet_ntoa(clientip), maxsize);
 	if (idletimeout || timeout)
 		FrisLog("%s: using idletimeout=%ds, timeout=%ds\n",
 			path, idletimeout, timeout);
@@ -233,7 +233,7 @@ recv_file()
 	if (strcmp(path, "-") == 0)
 		fd = STDOUT_FILENO;
 	else
-		fd = open(path, O_WRONLY|O_CREAT, 0644);
+		fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, 0644);
 	if (fd < 0) {
 		FrisPwarning(path);
 		goto done;
