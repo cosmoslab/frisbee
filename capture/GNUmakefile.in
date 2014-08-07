@@ -96,6 +96,7 @@ install:	all $(INSTALL_SBINDIR)/capserver $(INSTALL_SBINDIR)/capture
 	$(INSTALL_PROGRAM) capture $(INSTALL_DIR)/opsdir/sbin/capture
 
 client-install: client
+	-mkdir -p $(DESTDIR)$(INSTALL_SBINDIR)
 	$(INSTALL_PROGRAM) capture$(EXE) $(DESTDIR)$(INSTALL_SBINDIR)/capture$(EXE)
 	$(INSTALL_PROGRAM) capquery$(EXE) $(DESTDIR)$(INSTALL_SBINDIR)/capquery$(EXE)
 	$(INSTALL_PROGRAM) capture-nossl$(EXE) $(DESTDIR)$(INSTALL_SBINDIR)/capture-nossl$(EXE)
