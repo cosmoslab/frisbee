@@ -1615,7 +1615,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 						"    v.version='%s' "
 						"WHERE i.pid='%s'"
 						" AND i.imagename='%s' and "
-						" AND v.ready=1",
+						"     v.ready=1",
 						6, wantvers, wantpid, wantname);
 				}
 				else {
