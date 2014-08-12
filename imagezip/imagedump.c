@@ -64,6 +64,7 @@ static int checksums = 0; // On by default?
 static int infd = -1;
 static char *chkpointdev;
 static int dumphash = 0;
+static int quickcheck = 0;
 
 static unsigned long long wasted;
 static uint32_t sectinuse;
@@ -87,7 +88,7 @@ main(int argc, char **argv)
 	extern char build_info[];
 	int errors = 0;
 
-	while ((ch = getopt(argc, argv, "C:dimvHc")) != -1)
+	while ((ch = getopt(argc, argv, "C:dimvHcq")) != -1)
 		switch(ch) {
 		case 'd':
 			detail++;
@@ -108,6 +109,9 @@ main(int argc, char **argv)
 		case 'c':
 			checksums++;
 			break;
+		case 'q':
+			quickcheck++;
+			break;
 		case 'h':
 		case '?':
 		default:
@@ -124,6 +128,12 @@ main(int argc, char **argv)
 
 	if (argc < 1)
 		usage();
+
+	if (quickcheck && argc > 1) {
+		fprintf(stderr,
+			"should specify only one file for quickcheck\n");
+		exit(1);
+	}
 
 	for (; argc > 0; argc--, argv++) {
 		int isstdin = !strcmp(argv[0], "-");
@@ -172,6 +182,8 @@ usage(void)
 	fprintf(stderr, "usage: "
 		"imagedump options <image filename> ...\n"
 		" -v              Print version info and exit\n"
+		" -q              Perform a quick check to see if file has\n"
+		"                 an imagezip header; exit non-zero if not\n"
 		" -d              Turn on progressive levels of detail\n"
 		" -c              Verify chunk checksums\n");
 	exit(1);
@@ -219,7 +231,7 @@ dumpfile(char *name, int fd)
 			perror(name);
 			return 1;
 		}
-		if ((st.st_size % CHUNKSIZE) != 0)
+		if ((st.st_size % CHUNKSIZE) != 0 && !quickcheck)
 			printf("%s: WARNING: "
 			       "file size not a multiple of chunk size\n",
 			       name);
@@ -236,7 +248,8 @@ dumpfile(char *name, int fd)
 			count = DEFAULTREGIONSIZE;
 			if (lseek(infd, (off_t)chunkno*sizeof(chunkbuf),
 				  SEEK_SET) < 0) {
-				perror("seeking on zipped image");
+				if (!quickcheck)
+					perror("seeking on zipped image");
 				return 1;
 			}
 		}
@@ -250,9 +263,13 @@ dumpfile(char *name, int fd)
 			int cc;
 
 			if ((cc = read(infd, bp, count)) <= 0) {
-				if (cc == 0)
-					goto done;
-				perror("reading zipped image");
+				if (cc == 0) {
+					if (bp == chunkbuf)
+						goto done;
+					if (!quickcheck)
+						fprintf(stderr, "short read on imagezip header\n");
+				} else if (!quickcheck)
+					perror("reading zipped image");
 				return 1;
 			}
 			count -= cc;
@@ -264,14 +281,19 @@ dumpfile(char *name, int fd)
 			magic = hdr->magic;
 			if (magic < COMPRESSED_MAGIC_BASE ||
 			    magic > COMPRESSED_MAGIC_CURRENT) {
-				printf("%s: bad version %x\n", name, magic);
+				if (!quickcheck)
+					fprintf(stderr, "%s: bad version %x\n", name, magic);
 				return 1;
 			}
 
+			/* for quickcheck, just check for legit magic */
+			if (quickcheck)
+				return 0;
+
 			if (checksums && magic < COMPRESSED_V4) {
-			    printf("%s: WARNING: -c given, but file version "
-				    "doesn't support checksums!\n",name);
-			    checksums = 0;
+				printf("%s: WARNING: -c given, but file version "
+				       "doesn't support checksums!\n",name);
+				checksums = 0;
 			}
 
 			if (ignorev1) {
@@ -294,7 +316,7 @@ dumpfile(char *name, int fd)
 						       (filesize/CHUNKSIZE),
 						       chunkcount);
 				} else if (magic == COMPRESSED_V1) {
-					if (!ignorev1)
+					if (!ignorev1 && !quickcheck)
 						printf("%s: WARNING: "
 						       "zero chunk count, "
 						       "ignoring block fields\n",
