@@ -783,6 +783,20 @@ main(int argc, char *argv[])
 	makeranges();
 	if (debug)
 		dumpranges(debug > 1);
+	if (ranges == NULL) {
+		/*
+		 * No valid ranges, exit with an error.
+		 *
+		 * XXX it is debatable whether this is really an error.
+		 * Perhaps we should just create a valid image file with
+		 * one chunk containing no valid ranges, but it seems likely
+		 * that they probably made a mistake and we should call it
+		 * out immediately.
+		 */
+		fprintf(stderr,
+			"*** No valid data on specified disk/partition!?\n");
+		exit(1);
+	}
 	sortrange(&fixups, 0, cmpfixups);
 	if (debug > 1)
 		dumpfixups(debug > 2, 0);
@@ -1551,7 +1565,8 @@ makeranges(void)
 
 	pskip = skips;
 	while (pskip) {
-		addvalid(offset, pskip->start - offset);
+		if ((pskip->start - offset) > 0)
+			addvalid(offset, pskip->start - offset);
 		offset = pskip->start + pskip->size;
 
 		ptmp  = pskip;
