@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2011 University of Utah and the Flux Group.
+# Copyright (c) 2000-2014 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -23,6 +23,7 @@
 
 # Set to 1 for "secure frisbee" support.  Requires openssl libraries.
 WITH_CRYPTO	= 1
+WITH_SIGNING	= 1
 
 # 
 # Makefile for the standalone version of frisbee.
@@ -40,6 +41,28 @@ PTHREADCFLAGS	= -D_THREAD_SAFE -pthread
 # get 64-bit off_t and pread/pwrite protos
 LINUXOPTS	= -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE \
 		  -D_XOPEN_SOURCE=500 -D_BSD_SOURCE=1
+
+#
+# STATIC = yes|no|fail
+#
+# NOTE: with some newer Linux distros (at least Ubuntu14) we cannot build
+# static with libcrypto as that library references the dynamic linker.
+# So either choose not to set STATIC for dynamic binaries, or set
+# STATIC=fail, in which case the crypto-requiring features are disabled.
+#
+STATIC		= yes
+
+ifeq ($(STATIC),yes)
+LINUXOPTS	+= -static
+LDFLAGS		+= -static
+endif
+
+ifeq ($(STATIC),fail)
+LINUXOPTS	+= -static
+LDFLAGS		+= -static
+WITH_CRYPTO	= 0
+WITH_SIGNING	= 0
+endif
 
 CLIENTFLAGS	= $(CFLAGS)
 CLIENTLIBS	= -lz -lrt $(PTHREADLIBS)
@@ -59,9 +82,8 @@ IUZFLAGS	+= -DWITH_CRYPTO -DSIGN_CHECKSUM
 IUZLIBS		+= -lcrypto
 endif
 
-CFLAGS		= -O2 -g -Wall -fno-builtin-log -static \
+CFLAGS		= -O2 -g -Wall -fno-builtin-log \
 		  $(PTHREADCFLAGS) $(LINUXOPTS) -DSTATS -DMASTER_SERVER
-LDFLAGS		= -static
 
 #
 # Define this if your implementation of cond_vars works well
