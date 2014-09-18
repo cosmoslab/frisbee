@@ -64,7 +64,6 @@
 #include <sys/time.h>
 #include <signal.h>
 #include <sys/ioctl.h>
-#include <sys/termios.h>
 #ifdef USESOCKETS
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -466,8 +465,8 @@ main(int argc, char **argv)
 	if (!programmode && argc != 2)
 		usage();
 
-	if (!debug)
-		(void)daemon(0, 0);
+	if (!debug && daemon(0, 0))
+		die("Could not daemonize");
 
 	Machine = argv[0];
 	programargv = argv;
@@ -1786,9 +1785,9 @@ progmode(int isrestart)
 		close(0);
 		close(1);
 		close(2);
-		dup(pipefds[1]);
-		dup(pipefds[1]);
-		dup(pipefds[1]);
+		(void)dup(pipefds[1]);
+		(void)dup(pipefds[1]);
+		(void)dup(pipefds[1]);
 
 		/*
 		 * Close all other descriptors.

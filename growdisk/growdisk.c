@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2005 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -107,6 +107,7 @@ int showdiskinfo(char *disk);
 char *progname;
 int list = 1, verbose, fdisk, usenewpart = 1;
 
+int
 main(int argc, char *argv[])
 {
 	int ch;
@@ -344,7 +345,7 @@ tweakdiskinfo(char *disk)
 	dp = &diskinfo.parts[lastunused];
 
 	if (fdisk) {
-		printf("p %d %d %d %d\n",
+		printf("p %d %d %ld %ld\n",
 		       lastunused+1, dp->dp_typ ? dp->dp_typ : DOSPTYP_386BSD,
 		       dp->dp_start ? dp->dp_start : firstfree,
 		       diskinfo.disksize-firstfree);
@@ -353,7 +354,7 @@ tweakdiskinfo(char *disk)
 	if (verbose || list) {
 		if (dp->dp_start)
 			printf("%s: %s size of partition %d "
-			       "from %lu to %lu\n", disk,
+			       "from %u to %lu\n", disk,
 			       list ? "would change" : "changing",
 			       lastunused+1, dp->dp_size,
 			       diskinfo.disksize-firstfree);
@@ -383,7 +384,7 @@ showdiskinfo(char *disk)
 		printf("\n");
 		for (i = 0; i < NDOSPART; i++) {
 			dp = &diskinfo.parts[i];
-			printf("  %d: start=%9lu, size=%9lu, type=0x%02x\n",
+			printf("  %d: start=%9u, size=%9u, type=0x%02x\n",
 			       i+1, dp->dp_start, dp->dp_size, dp->dp_typ);
 		}
 	}
@@ -415,7 +416,7 @@ setdiskinfo(char *disk)
 	}
 	if (cc != sizeof(diskinfo.bootblock)) {
 		warnx("%s: partial write (%d != %d)\n", disk,
-		      cc, sizeof(diskinfo.bootblock));
+		      cc, (int)sizeof(diskinfo.bootblock));
 	}
 #ifdef __linux__
 	printf("Calling ioctl() to re-read partition table.\n");

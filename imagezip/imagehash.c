@@ -459,10 +459,6 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 {
 	uint32_t i;
 	struct hashregion *reg;
-	int haschunkrange = 0;
-
-	if (hinfo->version > HASH_VERSION_1)
-		haschunkrange = 1;
 
 	if (detail > 1) {
 		switch (hinfo->version) {
@@ -596,7 +592,8 @@ createhash(char *name, struct hashinfo **hinfop)
 
 	dump_stats(0);
 #ifdef TIMEIT
-	printf("%qu bytes: inflate cycles: %llu\n", ndatabytes, dcycles);
+	printf("%qu bytes: inflate cycles: %llu\n",
+	       ndatabytes, (unsigned long long)dcycles);
 #endif
 	free(hfile);
 	return 0;
@@ -733,7 +730,8 @@ checkhash(char *name, struct hashinfo *hinfo)
 	dump_readbufs();
 #ifdef TIMEIT
 	printf("%llu bytes: read cycles: %llu, hash cycles: %llu, cmp cycles: %llu\n",
-	       ndatabytes, rcycles, hcycles, ccycles);
+	       ndatabytes, (unsigned long long)rcycles,
+	       (unsigned long long)hcycles, (unsigned long long)ccycles);
 #endif
 	return badhashes;
 }

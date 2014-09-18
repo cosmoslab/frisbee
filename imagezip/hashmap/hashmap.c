@@ -629,7 +629,6 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	unsigned char 		hash[HASH_MAXSIZE];
 	struct range		dummy_head, *range_tail;
 	struct hashregion	*hreg, *ereg;
-	char			*hashstr;
 	struct hashinfo		*hinfo;
 	struct range		*drange, tmprange;
 	int			retval, changed, gapcount;
@@ -675,12 +674,10 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	default:
 		hashlen = 16;
 		hashfunc = MD5;
-		hashstr = "MD5 digest";
 		break;
 	case HASH_TYPE_SHA1:
 		hashlen = 20;
 		hashfunc = SHA1;
-		hashstr = "SHA1 digest";
 		break;
 	}
 

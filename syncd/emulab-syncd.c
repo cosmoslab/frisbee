@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2012 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -190,7 +190,7 @@ static char *usagestr =
 void
 usage()
 {
-	fprintf(stderr, usagestr);
+	fprintf(stderr, "%s", usagestr);
 	exit(1);
 }
 
@@ -317,8 +317,10 @@ main(int argc, char **argv)
 #endif
 	
 	/* Now become a daemon */
-	if (!debug)
-		daemon(0, 1);
+	if (!debug && daemon(0, 1)) {
+		error("Could not daemonize");
+		exit(1);
+	}
 
 	signal(SIGUSR1, setverbose);
 	signal(SIGUSR2, setverbose);
