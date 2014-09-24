@@ -1715,13 +1715,27 @@ progmode(int isrestart)
 	sigset_t	mask;
 	int		rv = -1;
 
+	/*
+	 * Looks like select is woken up before the process winds up dead.
+	 * Try waiting a fraction of a second to let that happen. We do
+	 * this before blocking the signal so that it happens here rather
+	 * than gratuitously after we have done waitpid below.
+	 */
+	if (isrestart && progpid > 0)
+		usleep(100000);
+
 	/* avoid races with deadchild */
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGCHLD);
 	sigprocmask(SIG_BLOCK, &mask, 0);
 
-	/* token attempt to clean up previous child */
+	/*
+	 * Token attempt to clean up previous child. This should no
+	 * longer be necessary after the wait above, but just in case...
+	 */
 	if (isrestart && progpid > 0) {
+		warning("%s: old process (%d) is still with us!",
+			Devname, progpid);
 		deadchild(SIGCHLD);
 	}
 
@@ -1748,8 +1762,9 @@ progmode(int isrestart)
 			char buf[256];
 			int cc;
 
-			warning("program (pid=%d) died immediately, "
-				"status=0x%x, output:", progpid, status);
+			warning("%s: program (pid=%d) died immediately, "
+				"status=0x%x, output:",
+				Devname, progpid, status);
 			cc = read(pipefds[0], buf, sizeof(buf)-1);
 			if (cc > 0) {
 				buf[cc] = '\0';
@@ -1765,8 +1780,8 @@ progmode(int isrestart)
 		devfd = pipefds[0];
 
 		if (fcntl(devfd, F_SETFL, O_NONBLOCK) < 0) {
-			warning("%s: fcntl(O_NONBLOCK): %s", Devname,
-				geterr(errno));
+			warning("%s: fcntl(O_NONBLOCK): %s",
+				Devname, geterr(errno));
 			close(devfd);
 			goto err;
 		}
