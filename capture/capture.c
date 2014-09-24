@@ -64,7 +64,6 @@
 #include <sys/time.h>
 #include <signal.h>
 #include <sys/ioctl.h>
-#include <sys/termios.h>
 #ifdef USESOCKETS
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -181,7 +180,7 @@ char		   ourhostname[MAXHOSTNAMELEN];
 int		   needshake;
 gid_t		   tipgid;
 uid_t		   tipuid;
-int		   progpid;
+volatile int	   progpid = -1;
 char		  *uploadCommand;
 
 int		   docircbuf = 0;
@@ -1364,7 +1363,7 @@ deadchild(int sig)
 	 */
 	if (progpid < 0) {
 		/* XXX sanity check */
-		if ((rval = waitpid(-1, &status, WNOHANG)) > 0)
+		while ((rval = waitpid(-1, &status, WNOHANG)) > 0)
 			dolog(LOG_NOTICE,
 			      "waitpid found unexpected child %d (0x%x)\n",
 			      rval, status);
@@ -1381,13 +1380,10 @@ deadchild(int sig)
 	 * Huh, something must have died, so do a wait and find it.
 	 */
 	if (rval == 0) {
-		dolog(LOG_NOTICE, "waitpid returned zero, doing general wait");
-		do {
-			rval = waitpid(-1, &status, WNOHANG);
-			if (rval > 0)
-				dolog(LOG_NOTICE, "  pid %d: status=0x%x\n",
-				      rval, status);
-		} while (rval > 0);
+		dolog(LOG_NOTICE, "waitpid(%d) returned zero, doing general wait", progpid);
+		while ((rval = waitpid(-1, &status, WNOHANG)) > 0)
+			dolog(LOG_NOTICE, "  pid %d: status=0x%x\n",
+			      rval, status);
 		progpid = -1;
 		return;
 	}
@@ -1719,6 +1715,11 @@ progmode(int isrestart)
 	sigset_t	mask;
 	int		rv = -1;
 
+	/* avoid races with deadchild */
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGCHLD);
+	sigprocmask(SIG_BLOCK, &mask, 0);
+
 	/* token attempt to clean up previous child */
 	if (isrestart && progpid > 0) {
 		deadchild(SIGCHLD);
@@ -1726,12 +1727,8 @@ progmode(int isrestart)
 
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pipefds) < 0) {
 		warning("socketpair(): %s", geterr(errno));
-		return -1;
+		goto err;
 	}
-	/* avoid races with deadchild */
-	sigemptyset(&mask);
-	sigaddset(&mask, SIGCHLD);
-	sigprocmask(SIG_BLOCK, &mask, 0);
 
 	if ((progpid = fork()) < 0) {
 		warning("fork(): %s", geterr(errno));
