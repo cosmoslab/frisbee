@@ -48,10 +48,16 @@ use Getopt::Std;
 #    but currently that would just be a choice for downloading.
 #
 # SERVER=<name>
-#    Server to use for uploading image and up/downloading metadata.
-#    If METHOD=file, this won't be set or will be ignored by the client.
-#    Otherwise it is the name or IP to use with the frisupload or frisbee
-#    -S option.
+#    Server to use for uploading image and metadata. May also be used
+#    for downloading metadata if DOWNSERVER is not set. If METHOD=file,
+#    SERVER won't be set or will be ignored by the client. Otherwise it
+#    is the name or IP to use with the frisupload -S option.
+#
+# DOWNSERVER=<name>
+#    Server to use for downloading metadata.  If not set SERVER is used
+#    instead. If METHOD=file, DOWNSERVER won't be set or will be ignored
+#    by the client. Otherwise it is the name or IP to use with the
+#    frisbee -S option.
 #
 # IMAGENAME=<string>
 #    Context-sensitive name of the image to create. If the SERVER is set
@@ -211,6 +217,10 @@ sub parse_params(@)
 		}
 		if ($key eq "server") {
 		    $iinfo{$iid}{'server'} = $val;
+		    next;
+		}
+		if ($key eq "downserver") {
+		    $iinfo{$iid}{'downserver'} = $val;
 		    next;
 		}
 		if ($key eq "imagename") {
@@ -441,14 +451,18 @@ sub fetch($$)
     }
 
     elsif ($iinfo{$iid}{'method'} eq "frisbee") {
-	my $srv = $iinfo{$iid}{'server'};
+	my $srv = $iinfo{$iid}{'downserver'};
+	if (!defined($srv)) {
+	    $srv = $iinfo{$iid}{'server'};
+	}
+
 	#
 	# Since we are fetching small files into an MFS, there is
 	# not much need for lots of buffer memory. We also don't
 	# randomize requests.
 	#
 	my $opts = "-O -W 1 -C 32";
-	if (mysystem("$frisbee $opts -N -S $srv -F $ifile $lfile")) {
+	if (mysystem("$frisbee $opts -B 5 -N -S $srv -F $ifile $lfile")) {
 	    return -1;
 	}
     }

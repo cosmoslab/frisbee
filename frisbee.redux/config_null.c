@@ -503,7 +503,8 @@ null_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		/*
 		 * We seriously limit what chars can be in an imageid since we
 		 * use it as a file name. This check is based on the Emulab
-		 * regex for image paths: "^[-_\w\.\/:+]+$"
+		 * regex for image paths: "^[-_\w\.\/:+]+$". We need ',' as
+		 * well to allow download of image signatures.
 		 */
 		idlen = strlen(imageid);
 		if (idlen == 0 || idlen >= PATH_MAX) {
@@ -514,7 +515,7 @@ null_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		for (cp = imageid; *cp != '\0'; cp++) {
 			if (isalnum(*cp) || *cp == '-' || *cp == '_' ||
 			    *cp == '.' || *cp == '/' || *cp == ':' ||
-			    *cp == '+')
+			    *cp == '+' || *cp == ',')
 				continue;
 			if (debug)
 				fprintf(stderr,
