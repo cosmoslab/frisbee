@@ -764,6 +764,24 @@ allow_stddirs(char *imageid,
 		FrisInfo("%s: exists=%d, resolves to: '%s'",
 			 imageid, exists, tpath);
 
+#ifdef WITHAMD
+	/*
+	 * We have to explicitly check for the AMD prefix.
+	 * The realpath resolution in emulab_init checks the root of
+	 * each filesystem (e.g. "/proj") which won't be an AMD symlink,
+	 * only the contents of the directories will be
+	 * (e.g. "/proj/emulab-ops"). And, as of right now, we do not
+	 * know which of /users, /proj, /groups and /share might be an
+	 * AMD mount point.
+	 */
+	if (strncmp(AMD_ROOT, tpath, strlen(AMD_ROOT)) == 0) {
+		free(fpath);
+		fpath = mystrdup(tpath + strlen(AMD_ROOT));
+		if (debug)
+			FrisInfo("%s: stripped AMD prefix", fpath);
+	}
+#endif
+
 	/*
 	 * Make the appropriate access checks for get/put
 	 */
