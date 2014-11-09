@@ -97,6 +97,11 @@ static int INELABINELAB  = ELABINELAB;
 #else
 static int INELABINELAB  = 0;
 #endif
+#ifdef WITHAMD
+static char *AMDROOT     = AMD_ROOT;
+#else
+static char *AMDROOT     = NULL;
+#endif
 
 /*
  * An Emulab image ID string looks like:
@@ -630,6 +635,7 @@ allow_stddirs(char *imageid,
 	struct config_imageinfo *ci;
 	struct stat sb;
 	int exists;
+	int onamd;
 
 	if (get == NULL && put == NULL)
 		return;
@@ -764,7 +770,6 @@ allow_stddirs(char *imageid,
 		FrisInfo("%s: exists=%d, resolves to: '%s'",
 			 imageid, exists, tpath);
 
-#ifdef WITHAMD
 	/*
 	 * We have to explicitly check for the AMD prefix.
 	 * The realpath resolution in emulab_init checks the root of
@@ -774,13 +779,18 @@ allow_stddirs(char *imageid,
 	 * know which of /users, /proj, /groups and /share might be an
 	 * AMD mount point.
 	 */
-	if (strncmp(AMD_ROOT, tpath, strlen(AMD_ROOT)) == 0) {
-		free(fpath);
-		fpath = mystrdup(tpath + strlen(AMD_ROOT));
-		if (debug)
-			FrisInfo("%s: stripped AMD prefix", fpath);
+	onamd = 0;
+	if (AMDROOT) {
+		int arlen = strlen(AMDROOT);
+
+		if (strncmp(AMDROOT, tpath, arlen) == 0) {
+			onamd = 1;
+			free(fpath);
+			fpath = mystrdup(tpath + arlen);
+			if (debug)
+				FrisInfo("%s: stripped AMD prefix", fpath);
+		}
 	}
-#endif
 
 	/*
 	 * Make the appropriate access checks for get/put
@@ -797,7 +807,13 @@ allow_stddirs(char *imageid,
 		put->numimages = 1;
 		ci = &put->imageinfo[0];
 		ci->imageid = mystrdup(imageid);
-		ci->dir = mystrdup(fdir);
+		if (onamd) {
+			assert(fdir[0] == '/');
+			ci->dir = mymalloc(strlen(AMDROOT)+strlen(fdir)+1);
+			strcpy(ci->dir, AMDROOT);
+			strcat(ci->dir, fdir);
+		} else
+			ci->dir = mystrdup(fdir);
 		ci->path = mystrdup(imageid);
 		ci->flags = CONFIG_PATH_ISFILE|CONFIG_PATH_RESOLVE;
 		if (exists && stat(ci->path, &sb) == 0) {
@@ -827,7 +843,13 @@ allow_stddirs(char *imageid,
 		get->numimages = 1;
 		ci = &get->imageinfo[0];
 		ci->imageid = mystrdup(imageid);
-		ci->dir = mystrdup(fdir);
+		if (onamd) {
+			assert(fdir[0] == '/');
+			ci->dir = mymalloc(strlen(AMDROOT)+strlen(fdir)+1);
+			strcpy(ci->dir, AMDROOT);
+			strcat(ci->dir, fdir);
+		} else
+			ci->dir = mystrdup(fdir);
 		ci->path = mystrdup(imageid);
 		ci->flags = CONFIG_PATH_ISFILE|CONFIG_PATH_RESOLVE;
 		if (exists && stat(ci->path, &sb) == 0) {
