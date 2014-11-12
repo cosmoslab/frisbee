@@ -1765,6 +1765,7 @@ progmode(int isrestart)
 			warning("%s: program (pid=%d) died immediately, "
 				"status=0x%x, output:",
 				Devname, progpid, status);
+			fcntl(pipefds[0], F_SETFL, O_NONBLOCK);
 			cc = read(pipefds[0], buf, sizeof(buf)-1);
 			if (cc > 0) {
 				buf[cc] = '\0';
