@@ -355,6 +355,10 @@ foreach my $iid (sort keys %iinfo) {
 	print STDERR "Must specify imagename\n";
 	exit(0);
     }
+    if (!defined($iinfo{$iid}{'method'})) {
+	print STDERR "Must specify method\n";
+	exit(0);
+    }
     if ($iinfo{$iid}{'method'} eq "frisbee") {
 	$dofrisbee++;
 	if (!defined($iinfo{$iid}{'server'})) {
