@@ -761,6 +761,22 @@ main(int argc, char *argv[])
 	 * the disk or indicated partition.
 	 */
 	if (slicetype != 0) {
+		/*
+		 * See if we can get a meaningful max size value via seek
+		 */
+		if (inputmaxsec == 0) {
+			off_t maxoff = lseek(infd, (off_t)0, SEEK_END);
+			if (maxoff != (off_t)-1 && maxoff != (off_t)0) {
+				inputmaxsec = bytestosec(maxoff);
+				assert(inputmaxsec == 0 ||
+				       inputmaxsec > inputminsec);
+				if (debug)
+					fprintf(stderr, "Max sector: %lu\n",
+						inputmaxsec);
+			}
+			(void) lseek(infd, (off_t)0, SEEK_SET);
+		}
+
 		rval = read_slice(-1, slicetype, 0, inputmaxsec,
 				  infilename, infd);
 		if (rval == -1)
