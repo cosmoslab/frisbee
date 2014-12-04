@@ -55,6 +55,7 @@ my $zipper = "/usr/local/bin/imagezip";
 my $uploader = "/usr/local/bin/frisupload";
 my $xenscript = "/usr/local/bin/create-xen-image";
 my $slice  = "";
+my $slicenum = 0;
 my $device;
 my $filename;
 
@@ -117,16 +118,16 @@ if (defined($options{"F"})) {
 }
 
 if (defined($options{"s"})) {
-    my $num = $options{"s"};
+    $slicenum = $options{"s"};
 
-    if ($num =~ /(\d)/) {
-	$num = $1;
+    if ($slicenum =~ /(\d)/) {
+	$slicenum = $1;
     }
     else {
-	die("Tainted slice number: $num");
+	die("Tainted slice number: $slicenum");
     }
     
-    $slice = "-s $num";
+    $slice = "-s $slicenum";
 
     # XXX for now we do not generate relocation info on slices
     # XXX there are still some issues with LILO/GRUB
@@ -185,9 +186,30 @@ if ($^O eq 'linux') {
 }
 
 #
+# XXX we don't support GPT right now, so we can only do Linux partition
+# images directly from the partition device.
+#
+my $isgpt = 0;
+if ($^O eq 'linux' && -x "/sbin/sgdisk" &&
+    !system("/sbin/sgdisk $device >/dev/null 2>&1")) {
+    if ($slicenum == 0) {
+	print STDERR
+	    "Cannot take whole disk image of GPT disk\n";
+	exit(3);
+    }
+    $isgpt = 1;
+}
+
+#
 # If imageid is defined, we use the frisbee uploader.
 #
-my $cmd = "$sudo $zipper $slice $device $filename";
+my $cmd = "$sudo $zipper";
+if ($isgpt) {
+    # force imagezip to treat as an ext filesystem and use the slice device
+    $cmd .= " -S 131 $device$slicenum $filename";
+} else {
+    $cmd .= " $slice $device $filename";
+}
 if (defined($imageid)) {
     # use basic shell sleezy trick to capture exit status from imagezip
     $cmd = "( $cmd || echo \$? > /tmp/imagezip.stat )";
