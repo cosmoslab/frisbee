@@ -451,7 +451,6 @@ resolvepath(char *path, char *dir, int create)
 	if ((pathcopy = strdup(path)) == NULL)
 		goto done;
 	rpathlen = strlen(rpath);
-	assert(rpathlen <= pathlen);
 	if (rpathlen > 1 && strncmp(pathcopy, rpath, rpathlen) == 0 &&
 	    (pathcopy[rpathlen] == '\0' || pathcopy[rpathlen] == '/')) {
 		/* same string, start at last slash in path */
