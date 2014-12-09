@@ -113,11 +113,11 @@ read_bsdslice(int slice, int bsdtype, u_int32_t start, u_int32_t size,
 		 * memory or vnode disk.  We cons up a disklabel
 		 * and let it rip.
 		 */
-		if (size == 0) {
+		if (slice == -1) {
 			fprintf(stderr, "P%d: WARNING: No disklabel, "
 				"assuming single partition\n", slice+1);
 			dlabel.label.d_partitions[0].p_offset = 0;
-			dlabel.label.d_partitions[0].p_size = 0;
+			dlabel.label.d_partitions[0].p_size = size;
 			dlabel.label.d_partitions[0].p_fstype = FS_BSDFFS;
 			return read_bsdpartition(infd, &dlabel.label, 0);
 		}
