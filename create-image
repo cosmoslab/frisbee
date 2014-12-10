@@ -191,7 +191,7 @@ if ($^O eq 'linux') {
 #
 my $isgpt = 0;
 if ($^O eq 'linux' && -x "/sbin/sgdisk" &&
-    !system("/sbin/sgdisk $device >/dev/null 2>&1")) {
+    !system("$sudo /sbin/sgdisk $device >/dev/null 2>&1")) {
     if ($slicenum == 0) {
 	print STDERR
 	    "Cannot take whole disk image of GPT disk\n";

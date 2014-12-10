@@ -579,7 +579,7 @@ sub process_image($)
     #
     my $isgpt = 0;
     if ($^O eq 'linux' && -x "/sbin/sgdisk" &&
-	!mysystem("/sbin/sgdisk ".$iinfo{$iid}{'disk'}." >/dev/null 2>&1")) {
+	!mysystem("$sudo /sbin/sgdisk ".$iinfo{$iid}{'disk'}." >/dev/null 2>&1")) {
 	if ($iinfo{$iid}{'part'} == 0) {
 	    print STDERR
 		"Cannot take whole disk image of GPT disk\n";
