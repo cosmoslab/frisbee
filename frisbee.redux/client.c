@@ -472,7 +472,7 @@ main(int argc, char **argv)
 		struct in_addr pif;
 		GetReply reply;
 		int method = askonly ? MS_METHOD_ANY : xfermethods;
-		int timo = 5; /* XXX */
+		int timo = 10; /* XXX */
 		int host = 0;
 
 		if (proxyfor) {
