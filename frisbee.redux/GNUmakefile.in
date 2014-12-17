@@ -84,7 +84,7 @@ subboss:
 
 include $(TESTBED_SRCDIR)/GNUmakerules
 
-FRISBEEDIR	= $(TESTBED_IMAGEZIPSRCDIR)
+IZSRCDIR	= $(TESTBED_IMAGEZIPSRCDIR)
 
 SHAREDOBJS	= log.o network.o trace.o utils.o
 
@@ -107,7 +107,7 @@ CLIENTLIBS	= -lrt -lz $(PTHREADLIBS)
 else
 CLIENTLIBS	= -lz $(PTHREADLIBS)
 endif
-CLIENTOBJS	= client.o frisbee.o checksum.o disksize.o $(SHAREDOBJS)
+CLIENTOBJS	= client.o frisbee.o mbr.o checksum.o disksize.o $(SHAREDOBJS)
 
 SERVERFLAGS	= $(CFLAGS)
 SERVERLIBS	= $(PTHREADLIBS)
@@ -152,7 +152,7 @@ endif
 CFLAGS		= -O2 -g -Wall -fno-builtin-log $(LDSTATIC) $(PTHREADCFLAGS) -DSTATS -DMASTER_SERVER
 LDFLAGS		= $(LDSTATIC)
 
-IUZFLAGS	= -DFRISBEE
+IUZFLAGS	= -DFRISBEE -I$(IZSRCDIR)
 IUZLIBS		= 
 
 ifeq ($(WITH_CRYPTO),1)
@@ -257,17 +257,21 @@ log.o:		$(SRCDIR)/log.c decls.h log.h
 event.o:	$(SRCDIR)/event.c decls.h log.h event.h
 	$(CC) $(EVENTFLAGS) -c $(SRCDIR)/event.c
 
-$(FRISBEEDIR)/imageunzip.c: $(FRISBEEDIR)/imagehdr.h $(FRISBEEDIR)/queue.h $(FRISBEEDIR)/checksum.h
-$(FRISBEEDIR)/checksum.c: $(FRISBEEDIR)/imagehdr.h $(FRISBEEDIR)/checksum.h
+$(IZSRCDIR)/imageunzip.c: $(IZSRCDIR)/imagehdr.h $(IZSRCDIR)/queue.h $(IZSRCDIR)/checksum.h
+$(IZSRCDIR)/checksum.c: $(IZSRCDIR)/imagehdr.h $(IZSRCDIR)/checksum.h
+$(IZSRCDIR)/mbr/mbr.c: $(IZSRCDIR)/imagehdr.h $(IZSRCDIR)/sliceinfo.h $(IZSRCDIR)/mbr/mbr.h
 
-disksize.o:	$(FRISBEEDIR)/disksize.c
-	$(CC) -c $(CFLAGS) $(IUZFLAGS) -I$(FRISBEEDIR) -o disksize.o $<
+disksize.o:	$(IZSRCDIR)/disksize.c
+	$(CC) -c $(CFLAGS) $(IUZFLAGS) -o disksize.o $<
 
-checksum.o:	$(FRISBEEDIR)/checksum.c
-	$(CC) -c $(CFLAGS) $(IUZFLAGS) -I$(FRISBEEDIR) -o checksum.o $<
+checksum.o:	$(IZSRCDIR)/checksum.c
+	$(CC) -c $(CFLAGS) $(IUZFLAGS) -o checksum.o $<
 
-frisbee.o:	$(FRISBEEDIR)/imageunzip.c
-	$(CC) -c $(CFLAGS) $(IUZFLAGS) -I$(FRISBEEDIR) -o frisbee.o $<
+mbr.o:	$(IZSRCDIR)/mbr/mbr.c
+	$(CC) -c $(CFLAGS) $(IUZFLAGS) -I$(IZSRCDIR)/mbr -o mbr.o $<
+
+frisbee.o:	$(IZSRCDIR)/imageunzip.c
+	$(CC) -c $(CFLAGS) $(IUZFLAGS) -I$(IZSRCDIR) -o frisbee.o $<
 
 client.o:	decls.h log.h utils.h trace.h
 server.o:	decls.h log.h utils.h trace.h

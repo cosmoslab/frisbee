@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2005, 2009 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -327,7 +327,7 @@ ntfs_skipfile(ntfs_volume *vol, char *filename, u_int32_t offset)
  * Primary function to call to operate on an NTFS slice.
  */
 int
-read_ntfsslice(int slice, int stype, u_int32_t start, u_int32_t size,
+read_ntfsslice(int slice, iz_type stype, iz_lba start, iz_size size,
 	       char *openname, int infd)
 {
 	ntfs_inode     *ni_bitmap;

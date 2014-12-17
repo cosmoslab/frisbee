@@ -46,6 +46,8 @@ extern void savefixups(void);
 extern void restorefixups(int isempty);
 extern void dumpfixups(int verbose, int count);
 
+extern int parse_mbr(int fd, struct iz_slice *parttab);
+
 extern SLICEMAP_PROCESS_PROTO(read_bsdslice);
 extern SLICEMAP_PROCESS_PROTO(read_linuxslice);
 extern SLICEMAP_PROCESS_PROTO(read_linuxswap);

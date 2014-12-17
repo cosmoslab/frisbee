@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2005 University of Utah and the Flux Group.
+ * Copyright (c) 2003-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -39,7 +39,7 @@ static u_int32_t fat_offset, fat_limit;
 static int fatsecpersec;
 
 int
-read_fatslice(int slice, int stype, u_int32_t start, u_int32_t size,
+read_fatslice(int slice, iz_type stype, iz_lba start, iz_size size,
 	      char *sfilename, int infd)
 {
 	struct bootblock boot;

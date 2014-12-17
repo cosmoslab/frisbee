@@ -28,10 +28,17 @@ SUBDIR		= $(subst $(TESTBED_SRCDIR)/,,$(SRCDIR))
 DISTFILES	= global.h imagehdr.h queue.h sliceinfo.h \
 		  imagedump.c imagedump.8 imagezip.c imagezip.8 \
 		  imageunzip.c crc.c checksum.c disksize.c imageunzip.8 \
+		  mbr/*.[hc] gpt/*.[hc] \
 		  extfs/*.[hc] fat/*.[hc] ffs/*.[hc] \
 		  ntfs/*.[hc] hashmap/*.[hc]
 
 EXPANDCOPYRIGHT	= /usr/site/lib/copyright/expand-copyr
+
+#
+# At least support MBR partitioning
+#
+WITH_MBR	= 1
+WITH_GPT	= 0
 
 #
 # Support encrypted and signed-checksumed images.
@@ -143,6 +150,21 @@ ifeq ($(WITH_V3COMPAT),1)
 CFLAGS		+= -DWITH_V3COMPAT
 endif
 
+# MBR
+ifeq ($(WITH_MBR),1)
+CFLAGS		+= -DWITH_MBR
+SUBDIRS		+= mbr
+ZIPLIBS		+= mbr/libmbr.a
+UNZIPLIBS	+= mbr/libmbr.a
+endif
+
+# GPT
+ifeq ($(WITH_GPT),1)
+CFLAGS		+= -DWITH_GPT
+SUBDIRS		+= gpt
+ZIPLIBS		+= gpt/libgpt.a
+endif
+
 # UFS/UFS2
 ifeq ($(WITH_FFS),1)
 CFLAGS		+= -DWITH_FFS
@@ -208,13 +230,13 @@ endif
 
 include $(TESTBED_SRCDIR)/GNUmakerules
 
-imagezip: $(SUBDIRS) imagezip.o disksize.o checksum.o version.o $(ZIPLIBS)
-	$(CC) $(CFLAGS) imagezip.o disksize.o checksum.o version.o $(ZIPLIBS) $(LIBS) -o imagezip
+imagezip: $(SUBDIRS) imagezip.o sliceinfo.o disksize.o checksum.o version.o $(ZIPLIBS)
+	$(CC) $(CFLAGS) imagezip.o sliceinfo.o disksize.o checksum.o version.o $(ZIPLIBS) $(LIBS) -o imagezip
 
 imagezip.o:	imagezip.c
 	$(CC) -c $(ZIPCFLAGS) -o imagezip.o $<
 
-imageunzip: imageunzip.o disksize.o checksum.o crc.o version.o 
+imageunzip: mbr imageunzip.o disksize.o checksum.o crc.o version.o
 	$(CC) $(CFLAGS) imageunzip.o disksize.o checksum.o crc.o version.o $(UNZIPLIBS) -o imageunzip
 
 imageunzip.o:	imageunzip.c

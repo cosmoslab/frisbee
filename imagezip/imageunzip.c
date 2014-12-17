@@ -89,8 +89,10 @@ static long		outputmaxsec	= 0;
     } \
 }
 
-#define sectobytes(s)	((off_t)(s) * SECSIZE)
-#define bytestosec(b)	(uint32_t)((b) / SECSIZE)
+/* XXX keep macros in sync with global.h */
+int secsize = 512;
+#define sectobytes(s)	((off_t)(s) * secsize)
+#define bytestosec(b)	(uint32_t)((b) / secsize)
 
 /*
  * Sector alignment is required for buffers used with read/write on
@@ -127,8 +129,8 @@ static int	 readretries = 0;
 static int	 nodecompress = 0;
 static char	 chunkbuf[CHUNKSIZE];
 #endif
-int		 readmbr(int slice);
-int		 fixmbr(int slice, int dtype);
+int		 getslicebounds(int slice);
+void		 setslicetype(int slice, int dostype);
 static int	 write_subblock(int, const char *, int);
 static int	 inflate_subblock(const char *);
 void		 writezeros(off_t offset, off_t zcount);
@@ -785,8 +787,8 @@ main(int argc, char *argv[])
 					"cannot specify a slice\n");
 				exit(1);
 			}
-			if (readmbr(slice)) {
-				fprintf(stderr, "Failed to read MBR\n");
+			if (getslicebounds(slice)) {
+				fprintf(stderr, "Failed to read slice bounds\n");
 				exit(1);
 			}
 			close(outfd);
@@ -835,8 +837,8 @@ main(int argc, char *argv[])
 	if (slice) {
 		off_t	minseek;
 
-		if (readmbr(slice)) {
-			fprintf(stderr, "Failed to read MBR\n");
+		if (getslicebounds(slice)) {
+			fprintf(stderr, "Failed to read slice bounds\n");
 			exit(1);
 		}
 		minseek = sectobytes(outputminsec);
@@ -954,7 +956,7 @@ main(int argc, char *argv[])
 
 	/* Set the MBR type if necesary */
 	if (slice && dostype >= 0)
-		fixmbr(slice, dostype);
+		setslicetype(slice, dostype);
 
 	/* Flush any cached data and close the output device */
 	if (outfd >= 0) {
@@ -1082,8 +1084,8 @@ ImageUnzipInit(char *filename, int _slice, int _debug, int _fill,
 	if (slice) {
 		off_t	minseek;
 
-		if (readmbr(slice)) {
-			fprintf(stderr, "Failed to read MBR\n");
+		if (getslicebounds(slice)) {
+			fprintf(stderr, "Failed to read slice bounds\n");
 			exit(1);
 		}
 		minseek = sectobytes(outputminsec);
@@ -1162,7 +1164,7 @@ ImageUnzipQuit(void)
 
 	/* Set the MBR type if necesary */
 	if (slice && dostype >= 0)
-		fixmbr(slice, dostype);
+		setslicetype(slice, dostype);
 
 	/* Now we can close it */
 	if (outfd >= 0)
@@ -1904,72 +1906,28 @@ zero_remainder()
 }
 
 #include "sliceinfo.h"
+#include "mbr/mbr.h"
 
 static long long outputmaxsize = 0;
 
-/*
- * XXX Argh! We have a problem.
- *
- * The definition of the DOS boot block (doslabel struct) has an embedded
- * struct (parts) that is at a non-word boundary according to the on-disk
- * layout of the boot block. Left to its own devices, the compiler will
- * offset the parts struct inserting an implicit 2 bytes of padding before
- * it, so that word accesses within the struct (in particular, dp_start
- * and dp_size) are aligned. (Once upon a time, such unaligned accesses
- * were fatal. Now they are not on most x86-en, but we try to avoid it
- * anyway.) The problem is that the implicit padding means the struct
- * doesn't line up with the on-disk structure. So, struct doslabel inserts
- * 2 bytes of padding at the beginning of the struct ("align") so that the
- * "parts" struct does fall on a word boundary without padding. The price
- * we pay is that now whenever we read or write such a struct, we do so at
- * an offset 2 bytes in (the "pad2" field).
- *
- * That was all fine until we started using the O_DIRECT flag on open of
- * a device. O_DIRECT requires that the data buffer we pass be 512-byte
- * aligned, at least on Linux. But there is no way we can have both the
- * read-buffer aligned and the "parts" struct within the doslabel aligned.
- * One solution is to align the read buffer and just use the "packed"
- * attribute for the struct so that the compiler won't try to align it
- * and we would wind up doing unaligned word accesses. However, this would
- * be way too simple. Instead, we retain the obscure structure definition
- * and COPY the data from the read/write buffer into a properly (mis)aligned
- * doslabel struct for access!
- */
-static char mbrbuf[DOSPARTSIZE+SECSIZE];
-
-/*
- * Parse the DOS partition table to set the bounds of the slice we
- * are writing to.
- */
 int
-readmbr(int slice)
+getslicebounds(int slice)
 {
-	struct doslabel doslabel;
-	int		cc;
-	char		*mbr = SECALIGN(mbrbuf);
+	struct iz_slice parttab[MAXSLICES+1];
 
-	if (slice < 1 || slice > 4) {
-		fprintf(stderr, "Slice must be 1, 2, 3, or 4\n");
+	if (slice < 1 || slice > MAXSLICES) {
+		fprintf(stderr, "Slice must be 1-%d\n", MAXSLICES);
 		return 1;
 	}
 
-	if ((cc = devread(outfd, mbr, DOSPARTSIZE)) < 0) {
-		perror("Could not read DOS label");
+	if (parse_mbr(outfd, parttab))
 		return 1;
-	}
-	if (cc != DOSPARTSIZE) {
-		fprintf(stderr, "Could not get the entire DOS label\n");
-		return 1;
-	}
-	memcpy(&doslabel.pad2, mbr, DOSPARTSIZE);
-	if (doslabel.magic != BOOT_MAGIC) {
-		fprintf(stderr, "Wrong magic number in DOS partition table\n");
-		return 1;
-	}
 
-	outputminsec  = doslabel.parts[slice-1].dp_start;
-	outputmaxsec  = doslabel.parts[slice-1].dp_start +
-			doslabel.parts[slice-1].dp_size;
+	if (parttab[slice-1].type == IZTYPE_INVALID)
+		return 1;
+
+	outputminsec  = parttab[slice-1].offset;
+	outputmaxsec  = parttab[slice-1].offset + parttab[slice-1].size;
 	outputmaxsize = (long long)sectobytes(outputmaxsec - outputminsec);
 
 	if (debug) {
@@ -1977,49 +1935,17 @@ readmbr(int slice)
 			slice, outputminsec, outputmaxsec, outputmaxsize);
 	}
 	return 0;
+
 }
 
-int
-fixmbr(int slice, int dtype)
+void
+setslicetype(int slice, int dostype)
 {
-	struct doslabel doslabel;
-	int		cc;
-	char		*mbr = SECALIGN(mbrbuf);
-
-	if (lseek(outfd, (off_t)0, SEEK_SET) < 0) {
-		perror("Could not seek to DOS label");
-		return 1;
-	}
-	if ((cc = devread(outfd, mbr, DOSPARTSIZE)) < 0) {
-		perror("Could not read DOS label");
-		return 1;
-	}
-	if (cc != DOSPARTSIZE) {
-		fprintf(stderr, "Could not get the entire DOS label\n");
-		return 1;
-	}
-	memcpy(&doslabel.pad2, mbr, DOSPARTSIZE);
-	if (doslabel.magic != BOOT_MAGIC) {
-		fprintf(stderr, "Wrong magic number in DOS partition table\n");
-		return 1;
-	}
-
-	if (doslabel.parts[slice-1].dp_typ != dostype) {
-		doslabel.parts[slice-1].dp_typ = dostype;
-		if (lseek(outfd, (off_t)0, SEEK_SET) < 0) {
-			perror("Could not seek to DOS label");
-			return 1;
-		}
-		memcpy(mbr, &doslabel.pad2, DOSPARTSIZE);
-		cc = write(outfd, mbr, DOSPARTSIZE);
-		if (cc != DOSPARTSIZE) {
-			perror("Could not write DOS label");
-			return 1;
-		}
+	if (set_mbr_type(outfd, slice, (iz_type)dostype))
+		fprintf(stderr, "WARNING: could not set MBR type!\n");
+	else
 		fprintf(stderr, "Set type of DOS partition %d to %d\n",
 			slice, dostype);
-	}
-	return 0;
 }
 
 static struct blockreloc *reloctable;

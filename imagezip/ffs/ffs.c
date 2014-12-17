@@ -66,7 +66,7 @@ static int32_t freecount;
  * Operate on a BSD slice
  */
 int
-read_bsdslice(int slice, int bsdtype, u_int32_t start, u_int32_t size,
+read_bsdslice(int slice, iz_type bsdtype, iz_lba start, iz_size size,
 	      char *sname, int infd)
 {
 	int		cc, i, rval = 0, npart, absoffset;
@@ -77,7 +77,7 @@ read_bsdslice(int slice, int bsdtype, u_int32_t start, u_int32_t size,
 
 	if (debug)
 		fprintf(stderr, "  P%d (%sBSD Slice)\n", slice + 1,
-			bsdtype == DOSPTYP_386BSD ? "Free" : "Open");
+			bsdtype == IZTYPE_386BSD ? "Free" : "Open");
 	
 	if (devlseek(infd, sectobytes(start), SEEK_SET) < 0) {
 		warn("Could not seek to beginning of BSD slice");
@@ -148,7 +148,7 @@ read_bsdslice(int slice, int bsdtype, u_int32_t start, u_int32_t size,
 			if (dlabel.label.d_partitions[i].p_size == 0 ||
 			    dlabel.label.d_partitions[i].p_fstype == FS_UNUSED)
 				continue;
-			if (bsdtype == DOSPTYP_OPENBSD && i >= 8 && i < 16)
+			if (bsdtype == IZTYPE_OPENBSD && i >= 8 && i < 16)
 				continue;
 			if (dlabel.label.d_partitions[i].p_offset < start) {
 				fprintf(stderr, "P%d: WARNING: BSD label appears to use relative offsets, adjusting...\n", slice+1);
@@ -171,7 +171,7 @@ read_bsdslice(int slice, int bsdtype, u_int32_t start, u_int32_t size,
 		 * OpenBSD maps the extended DOS partitions as slices 8-15,
 		 * skip them.
 		 */
-		if (bsdtype == DOSPTYP_OPENBSD && i >= 8 && i < 16) {
+		if (bsdtype == IZTYPE_OPENBSD && i >= 8 && i < 16) {
 			if (debug)
 				fprintf(stderr, "    '%c'   skipping, "
 					"OpenBSD mapping of DOS partition %d\n",
@@ -234,7 +234,7 @@ read_bsdslice(int slice, int bsdtype, u_int32_t start, u_int32_t size,
 			 * extended DOS partitions.  Also leave raw partition
 			 * alone as it maps the entire disk (not just slice)
 			 */
-			if (bsdtype == DOSPTYP_OPENBSD &&
+			if (bsdtype == IZTYPE_OPENBSD &&
 			    (i == 2 || (i >= 8 && i < 16)))
 				continue;
 
@@ -247,7 +247,7 @@ read_bsdslice(int slice, int bsdtype, u_int32_t start, u_int32_t size,
 		addfixup(sectobytes(start+LABELSECTOR),
 			 sectobytes(start),
 			 (off_t)sizeof(dlabel.label), &dlabel,
-			 bsdtype == DOSPTYP_OPENBSD ?
+			 bsdtype == IZTYPE_OPENBSD ?
 			 RELOC_OBSDDISKLABEL : RELOC_FBSDDISKLABEL);
 	}
 
