@@ -50,6 +50,9 @@
 #undef CLEAR_FREE_INODES
 #endif
 
+static int _read_bsdslice(int slice, iz_type bsdtype, iz_lba start,
+			  iz_size size, char *sname, int infd,
+			  int musthavelabel);
 static int read_bsdpartition(int infd, struct disklabel *dlabel, int part);
 static int read_bsdsblock(int infd, u_int32_t off, int part, struct fs *fsp);
 static int read_bsdcg(struct fs *fsp, struct cg *cgp, int cg, u_int32_t off);
@@ -69,6 +72,20 @@ int
 read_bsdslice(int slice, iz_type bsdtype, iz_lba start, iz_size size,
 	      char *sname, int infd)
 {
+	return _read_bsdslice(slice, bsdtype, start, size, sname, infd, 1);
+}
+
+int
+read_bsdslicenl(int slice, iz_type bsdtype, iz_lba start, iz_size size,
+		char *sname, int infd)
+{
+	return _read_bsdslice(slice, bsdtype, start, size, sname, infd, 0);
+}
+
+static int
+_read_bsdslice(int slice, iz_type bsdtype, iz_lba start, iz_size size,
+	       char *sname, int infd, int musthavelabel)
+{
 	int		cc, i, rval = 0, npart, absoffset;
 	union {
 		struct disklabel	label;
@@ -77,7 +94,9 @@ read_bsdslice(int slice, iz_type bsdtype, iz_lba start, iz_size size,
 
 	if (debug)
 		fprintf(stderr, "  P%d (%sBSD Slice)\n", slice + 1,
-			bsdtype == IZTYPE_386BSD ? "Free" : "Open");
+			bsdtype == IZTYPE_OPENBSD ? "Open" :
+			(bsdtype == IZTYPE_386BSD ? "Free" :
+			 "Unlabeled Free"));
 	
 	if (devlseek(infd, sectobytes(start), SEEK_SET) < 0) {
 		warn("Could not seek to beginning of BSD slice");
@@ -106,24 +125,23 @@ read_bsdslice(int slice, iz_type bsdtype, iz_lba start, iz_size size,
 	 */
 	if (dlabel.label.d_magic  != DISKMAGIC ||
 	    dlabel.label.d_magic2 != DISKMAGIC) {
-#ifdef linux /* not needed in BSD, a fake disklabel is created by the kernel */
 		/*
-		 * If we were forced with the bsdfs option,
-		 * assume this is a single partition disk like a
-		 * memory or vnode disk.  We cons up a disklabel
+		 * This may be a situation in which there is no label
+		 * (e.g., a single partition disk like a memory or
+		 * vnode disk or a GPT partition).  We cons up a disklabel
 		 * and let it rip.
 		 */
-		if (slice == -1) {
+		if (!musthavelabel) {
 			fprintf(stderr, "P%d: WARNING: No disklabel, "
 				"assuming single partition\n", slice+1);
-			dlabel.label.d_partitions[0].p_offset = 0;
+			dlabel.label.d_partitions[0].p_offset = start;
 			dlabel.label.d_partitions[0].p_size = size;
 			dlabel.label.d_partitions[0].p_fstype = FS_BSDFFS;
 			return read_bsdpartition(infd, &dlabel.label, 0);
+		} else {
+			warnx("Wrong magic number in BSD disklabel");
+			return 1;
 		}
-#endif
-		warnx("Wrong magic number in BSD disklabel");
- 		return 1;
 	}
 
 	/*

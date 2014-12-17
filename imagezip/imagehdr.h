@@ -20,6 +20,8 @@
  * 
  * }}}
  */
+#ifndef _IMAGEHDR_H_
+#define _IMAGEHDR_H_
 
 #include <inttypes.h>
 
@@ -229,3 +231,4 @@ struct region {
  * Assumed sector (block) size
  */
 #define SECSIZE			512
+#endif /* _IMAGEHDR_H_ */

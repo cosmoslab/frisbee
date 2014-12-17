@@ -38,7 +38,7 @@ EXPANDCOPYRIGHT	= /usr/site/lib/copyright/expand-copyr
 # At least support MBR partitioning
 #
 WITH_MBR	= 1
-WITH_GPT	= 0
+WITH_GPT	= 1
 
 #
 # Support encrypted and signed-checksumed images.

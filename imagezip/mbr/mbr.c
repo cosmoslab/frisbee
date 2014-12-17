@@ -36,6 +36,8 @@
 #include "global.h"
 #include "mbr.h"
 
+static int silent = 0;
+
 static int read_mbr(int fd, uint32_t bbstart, uint32_t pstart,
 		    uint32_t extstart, struct iz_slice *parttab);
 
@@ -45,7 +47,7 @@ static int read_mbr(int fd, uint32_t bbstart, uint32_t pstart,
  * Otherwise return an error.
  */
 int
-parse_mbr(int fd, struct iz_slice *parttab)
+parse_mbr(int fd, struct iz_slice *parttab, int dowarn)
 {
 	int i;
 
@@ -53,6 +55,7 @@ parse_mbr(int fd, struct iz_slice *parttab)
 	for (i = 0; i < MAXSLICES; i++)
 		parttab[i].type = IZTYPE_INVALID;
 
+	silent = (dowarn == 0);
 	return read_mbr(fd, DOSBBSECTOR, 0, 0, parttab);
 }
 
@@ -95,21 +98,27 @@ read_mbr(int fd, uint32_t bbstart, uint32_t pstart, uint32_t extstart,
 	int cc, i;
 
 	if (lseek(fd, sectobytes(bbstart), SEEK_SET) < 0) {
-		warn("Could not seek to DOS label at sector %u", bbstart);
+		if (!silent)
+			warn("Could not seek to DOS label at sector %u",
+			     bbstart);
 		return 1;
 	}
 	if ((cc = read(fd, mbr, DOSPARTSIZE)) < 0) {
-		warn("Could not read DOS label at sector %u", bbstart);
+		if (!silent)
+			warn("Could not read DOS label at sector %u", bbstart);
 		return 1;
 	}
 	if (cc != DOSPARTSIZE) {
-		warnx("Incomplete read of DOS label at sector %u", bbstart);
+		if (!silent)
+			warnx("Incomplete read of DOS label at sector %u",
+			      bbstart);
 		return 1;
 	}
 	memcpy(&label.pad2, mbr, DOSPARTSIZE);
 	if (label.magic != BOOT_MAGIC) {
-		warnx("Wrong magic number in DOS partition table at sector %u",
-		      bbstart);
+		if (!silent)
+			warnx("Wrong magic number in DOS partition table "
+			      "at sector %u", bbstart);
 		return 1;
 	}
 
@@ -164,16 +173,16 @@ read_mbr(int fd, uint32_t bbstart, uint32_t pstart, uint32_t extstart,
 					extstart ? extstart : start,
 					parttab);
 			if (rval) {
-				warn("P%d: Could not read MBR for extended "
-				     "partition, treating as unsupported",
-				     pix+1);
+				warnx("P%d: Could not read MBR for extended "
+				      "partition, treating as unsupported",
+				      pix+1);
 				parttab[pix].flags |= IZFLAG_NOTSUP;
 			}
 			break;
 
 		default:
-			warn("P%d: Unsupported DOS partition type 0x%x",
-			     pix+1, type);
+			warnx("P%d: Unsupported DOS partition type 0x%x",
+			      pix+1, type);
 			parttab[pix].flags |= IZFLAG_NOTSUP;
 			break;
 		}

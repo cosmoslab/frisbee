@@ -424,7 +424,7 @@ main(int argc, char *argv[])
 			slicetype = IZTYPE_LINUX;
 			break;
 		case 'b':
-			slicetype = IZTYPE_386BSD;
+			slicetype = IZTYPE_FBSDNOLABEL;
 			break;
 		case 'N':
 			dorelocs = 0;
@@ -440,6 +440,9 @@ main(int argc, char *argv[])
 			break;
 		case 'S':
 			slicetype = atoi(optarg);
+			/* XXX special case for freebsd */
+			if (slicetype == IZTYPE_386BSD)
+				slicetype = IZTYPE_FBSDNOLABEL;
 			break;
 		case 's':
 			slicemode = 1;
@@ -936,17 +939,17 @@ read_image(int fd)
 	int		gotbb = 0;
 
 #ifdef WITH_GPT
-	if (!gotbb && parse_gpt(fd, parttab) == 0)
+	if (!gotbb && parse_gpt(fd, parttab, debug) == 0)
 		gotbb = 1;
 #endif
 #ifdef WITH_MBR
-	if (!gotbb && parse_mbr(fd, parttab) == 0)
+	if (!gotbb && parse_mbr(fd, parttab, debug) == 0)
 		gotbb = 2;
 #endif
 
 	if (!gotbb) {
 		/* try to parse as one of the FS types */
-		warn("No partition table found!");
+		warnx("No GPT or MBR partition table found!");
 		return 1;
 	}
 
@@ -1013,7 +1016,7 @@ read_image(int fd)
 			start2 = parttab[ii].offset;
 			if (start2+size2 > start1 &&
 			    start1+size1 > start2) {
-				warn("P%d and P%d overlap!", i+1, ii+1);
+				warnx("P%d and P%d overlap!", i+1, ii+1);
 				rval++;
 			}
 		}
@@ -1269,8 +1272,8 @@ dumpskips(int verbose)
 	}
 
 	fprintf(stderr,
-		"Total Number of Free Sectors: %d (bytes %lld) in %d ranges\n",
-		total, (long long)sectobytes(total), nranges);
+		"Total Number of Free Sectors: %u (bytes %lld) in %d ranges\n",
+		(unsigned)total, (long long)sectobytes(total), nranges);
 }
 
 #undef DOHISTO
@@ -1605,8 +1608,8 @@ dumpranges(int verbose)
 		range = range->next;
 	}
 	fprintf(stderr,
-		"Total Number of Valid Sectors: %d (bytes %llu) in %d ranges\n",
-		total, (unsigned long long)sectobytes(total), nranges);
+		"Total Number of Valid Sectors: %u (bytes %llu) in %d ranges\n",
+		(unsigned)total, (unsigned long long)sectobytes(total), nranges);
 }
 
 /*

@@ -28,16 +28,18 @@ MAINDIR		= $(SRCDIR)/..
 
 include $(OBJDIR)/Makeconf
 
-CFLAGS		+= $(SUBDIRCFLAGS) -I$(MAINDIR) -I$(SRCDIR)
+CFLAGS		+= -DIMAGEZIP $(SUBDIRCFLAGS) -I$(MAINDIR) -I$(SRCDIR)
 
 all:	libgpt.a
 
 include $(TESTBED_SRCDIR)/GNUmakerules
 
-OBJS = gpt.o
+OBJS = gpt.o crc32.o gpt_glue.o
 
-gpt.o: gpt.h
-gpt.o: $(MAINDIR)/global.h $(MAINDIR)/sliceinfo.h
+gpt.o: gpt_glue.h gpt.h
+crc32.o: crc32.h
+gpt_glue.o: gpt_glue.h gpt.h
+gpt_glue.o: $(MAINDIR)/global.h $(MAINDIR)/sliceinfo.h $(MAINDIR)/imagehdr.h
 
 libgpt.a:	$(OBJS)
 	$(AR) $(ARFLAGS) $@ $?

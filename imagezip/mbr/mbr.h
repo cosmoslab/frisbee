@@ -104,6 +104,6 @@ struct doslabel {
 #define DOSPARTSIZE \
 	(DOSPARTOFF + NDOSPART*sizeof(struct dospart) + sizeof(unsigned short))
 
-extern int parse_mbr(int fd, struct iz_slice *parttab);
+extern int parse_mbr(int fd, struct iz_slice *parttab, int dowarn);
 extern int set_mbr_type(int fd, int slice, iz_type type);
 #endif /* _MBR_H_ */

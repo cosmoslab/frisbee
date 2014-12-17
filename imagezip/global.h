@@ -46,9 +46,15 @@ extern void savefixups(void);
 extern void restorefixups(int isempty);
 extern void dumpfixups(int verbose, int count);
 
-extern int parse_mbr(int fd, struct iz_slice *parttab);
+#ifdef WITH_MBR
+extern int parse_mbr(int fd, struct iz_slice *parttab, int dowarn);
+#endif
+#ifdef WITH_GPT
+extern int parse_gpt(int fd, struct iz_slice *parttab, int dowarn);
+#endif
 
 extern SLICEMAP_PROCESS_PROTO(read_bsdslice);
+extern SLICEMAP_PROCESS_PROTO(read_bsdslicenl);
 extern SLICEMAP_PROCESS_PROTO(read_linuxslice);
 extern SLICEMAP_PROCESS_PROTO(read_linuxswap);
 extern SLICEMAP_PROCESS_PROTO(read_ntfsslice);

@@ -54,7 +54,11 @@ typedef uint16_t	iz_flags;
 #define IZTYPE_OPENBSD		0xa6	/* OpenBSD */
 
 /* These have no corresponding MBR type (should start at 0x100) */
-#define IZTYPE_INVALID		0xFFFF
+
+/* These are internal */
+#define IZTYPE_FBSDNOLABEL	0xFFA5	/* 386BSD but maybe no disklabel */
+#define IZTYPE_UNKNOWN		0xFFFE	/* valid type, we just don't know it */
+#define IZTYPE_INVALID		0xFFFF	/* invalid entry */
 
 /* Flags */
 #define IZFLAG_IGNORE		0x01	/* Explicitly ignored by imagezip */

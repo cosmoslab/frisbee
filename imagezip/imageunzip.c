@@ -1920,7 +1920,7 @@ getslicebounds(int slice)
 		return 1;
 	}
 
-	if (parse_mbr(outfd, parttab))
+	if (parse_mbr(outfd, parttab, 1))
 		return 1;
 
 	if (parttab[slice-1].type == IZTYPE_INVALID)
