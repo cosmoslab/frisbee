@@ -43,9 +43,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: releng/10.1/sys/boot/common/crc32.c 233517 2012-03-26 18:22:04Z marius $");
+//__FBSDID("$FreeBSD: releng/10.1/sys/boot/common/crc32.c 233517 2012-03-26 18:22:04Z marius $");
 
 #include <sys/types.h>
+#include <inttypes.h>
 
 #include "crc32.h"
 

@@ -1119,6 +1119,16 @@ read_image(int fd)
 	return rval;
 }
 
+int
+read_rawslice(int slice, iz_type bsdtype, iz_lba start, iz_size size,
+	      char *sname, int infd)
+{
+	if (debug)
+		fprintf(stderr, "  P%d (RAW Slice)\n", slice + 1);
+
+	/* nothing else to do! */
+	return 0;
+}
 
 /*
  * For a raw image (something we know nothing about), we report the size

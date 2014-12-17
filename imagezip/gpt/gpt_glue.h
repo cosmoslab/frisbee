@@ -15,6 +15,7 @@
 
 /* we want to intercept these */
 #define printf	 gpt_printf
+int gpt_printf(const char * __restrict fmt, ...);
 
 #ifndef DEV_BSIZE
 #define DEV_BSIZE SECSIZE

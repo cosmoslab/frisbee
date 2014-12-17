@@ -28,6 +28,9 @@
 
 static struct sliceinfo fsmap[] = {
 	{ IZTYPE_UNUSED,	"UNUSED",	0 },
+#ifdef WITH_GPT
+	{ IZTYPE_BIOSBOOT,	"BIOS Boot",	read_rawslice },
+#endif
 #ifdef WITH_FFS
 	{ IZTYPE_386BSD,	"FreeBSD FFS",	read_bsdslice },
 	{ IZTYPE_FBSDNOLABEL,	"FreeBSD FFS",	read_bsdslicenl },

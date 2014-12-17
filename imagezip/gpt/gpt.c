@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: releng/10.1/sys/boot/common/gpt.c 234176 2012-04-12 12:37:53Z ae $");
+//__FBSDID("$FreeBSD: releng/10.1/sys/boot/common/gpt.c 234176 2012-04-12 12:37:53Z ae $");
 
 #ifdef IMAGEZIP
 /* imagezip glue */
@@ -59,6 +59,7 @@ static int curent, bootonce;
  */
 static char *secbuf;
 
+#ifndef IMAGEZIP
 static void
 gptupdate(const char *which, struct dsk *dskp, struct gpt_hdr *hdr,
     struct gpt_ent *table)
@@ -95,7 +96,6 @@ gptupdate(const char *which, struct dsk *dskp, struct gpt_hdr *hdr,
 	}
 }
 
-#ifndef IMAGEZIP
 int
 gptfind(const uuid_t *uuid, struct dsk *dskp, int part)
 {

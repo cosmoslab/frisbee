@@ -53,6 +53,7 @@ extern int parse_mbr(int fd, struct iz_slice *parttab, int dowarn);
 extern int parse_gpt(int fd, struct iz_slice *parttab, int dowarn);
 #endif
 
+extern SLICEMAP_PROCESS_PROTO(read_rawslice);
 extern SLICEMAP_PROCESS_PROTO(read_bsdslice);
 extern SLICEMAP_PROCESS_PROTO(read_bsdslicenl);
 extern SLICEMAP_PROCESS_PROTO(read_linuxslice);

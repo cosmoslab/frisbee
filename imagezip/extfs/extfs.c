@@ -73,8 +73,8 @@ read_linuxslice(int slice, iz_type stype, iz_lba start, iz_size size,
 	assert((sizeof(fs) & ~LINUX_SUPERBLOCK_SIZE) == 0);
 
 	if (debug)
-		fprintf(stderr, "  P%d %s Linux Slice)\n",
-			dosslice, rval ? "(Bootable" : "(");
+		fprintf(stderr, "  P%d %sLinux Slice)\n",
+			dosslice, rval ? "(Bootable " : "(");
 	
 	/*
 	 * Skip ahead to the superblock.

@@ -53,7 +53,8 @@ typedef uint16_t	iz_flags;
 #define IZTYPE_386BSD		0xa5	/* Free/NetBSD */
 #define IZTYPE_OPENBSD		0xa6	/* OpenBSD */
 
-/* These have no corresponding MBR type (should start at 0x100) */
+/* These have no corresponding MBR type (should be 0x100 or above) */
+#define IZTYPE_BIOSBOOT		0xEF02	/* GPT BIOS Boot partition */
 
 /* These are internal */
 #define IZTYPE_FBSDNOLABEL	0xFFA5	/* 386BSD but maybe no disklabel */
