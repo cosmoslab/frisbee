@@ -82,6 +82,19 @@ read_bsdslicenl(int slice, iz_type bsdtype, iz_lba start, iz_size size,
 	return _read_bsdslice(slice, bsdtype, start, size, sname, infd, 0);
 }
 
+int
+read_bsdswapslice(int slice, iz_type bsdtype, iz_lba start, iz_size size,
+		  char *sname, int infd)
+{
+	if (debug)
+		fprintf(stderr, "  P%d (FreeBSD Swap Slice)\n", slice + 1);
+
+	/* skip the whole thing */
+	addskip(start, size);
+
+	return 0;
+}
+
 static int
 _read_bsdslice(int slice, iz_type bsdtype, iz_lba start, iz_size size,
 	       char *sname, int infd, int musthavelabel)

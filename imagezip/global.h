@@ -56,6 +56,7 @@ extern int parse_gpt(int fd, struct iz_slice *parttab, int dowarn);
 extern SLICEMAP_PROCESS_PROTO(read_rawslice);
 extern SLICEMAP_PROCESS_PROTO(read_bsdslice);
 extern SLICEMAP_PROCESS_PROTO(read_bsdslicenl);
+extern SLICEMAP_PROCESS_PROTO(read_bsdswapslice);
 extern SLICEMAP_PROCESS_PROTO(read_linuxslice);
 extern SLICEMAP_PROCESS_PROTO(read_linuxswap);
 extern SLICEMAP_PROCESS_PROTO(read_ntfsslice);

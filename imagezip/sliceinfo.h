@@ -54,6 +54,8 @@ typedef uint16_t	iz_flags;
 #define IZTYPE_OPENBSD		0xa6	/* OpenBSD */
 
 /* These have no corresponding MBR type (should be 0x100 or above) */
+#define IZTYPE_FBSDBOOT		0xA501	/* FreeBSD Boot partition */
+#define IZTYPE_FBSDSWAP		0xA502	/* FreeBSD Swap partition */
 #define IZTYPE_BIOSBOOT		0xEF02	/* GPT BIOS Boot partition */
 
 /* These are internal */
@@ -67,7 +69,8 @@ typedef uint16_t	iz_flags;
 #define IZFLAG_NOTSUP		0x04	/* Not supported by imagezip */
 
 #define ISBSD(t)	\
-	((t) == IZTYPE_386BSD || (t) == IZTYPE_OPENBSD)
+	((t) == IZTYPE_386BSD || (t) == IZTYPE_FBSDNOLABEL || \
+	 (t) == IZTYPE_OPENBSD)
 #define ISFAT(t)	\
 	((t) == IZTYPE_FAT12 || (t) == IZTYPE_FAT16 || \
 	 (t) == IZTYPE_FAT16L || (t) == IZTYPE_FAT32 || \
