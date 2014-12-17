@@ -127,7 +127,7 @@ endif
 # Necessary sometimes.
 #PTHREADCFLAGS	+= -DCONDVARS_WORK
 
-PROGS		= imagezip imageunzip imagedump
+PROGS		= imagezip imageunzip imagedump imagedelta
 CFLAGS		= $(SUBDIRCFLAGS) -I$(SRCDIR) $(LDSTATIC)
 LIBS 		= -lz
 ZIPCFLAGS	= $(CFLAGS) -Wall
@@ -137,6 +137,7 @@ UNZIPLIBS	= $(LIBS) $(PTHREADLIBS)
 UNZIPDIRS	=
 HASHCFLAGS	= $(CFLAGS) $(PTHREADCFLAGS) -Wall
 HASHLIBS	= $(LIBS) -lcrypto $(PTHREADLIBS)
+NDZLIBS		= $(LIBS) libndz/libndz.a
 
 # Secure images
 ifeq ($(WITH_CRYPTO),1)
@@ -152,6 +153,8 @@ endif
 ifeq ($(WITH_V3COMPAT),1)
 CFLAGS		+= -DWITH_V3COMPAT
 endif
+
+SUBDIRS		+= libndz
 
 # MBR
 ifeq ($(WITH_MBR),1)
@@ -257,6 +260,12 @@ imagehash: imagehash.o version.o
 imagehash.o:	imagehash.c
 	$(CC) -c $(HASHCFLAGS) -o imagehash.o $<
 
+imagedelta: imagedelta.o version.o $(NDZLIBS)
+	$(CC) $(CFLAGS) imagedelta.o version.o $(NDZLIBS) -o imagedelta
+
+imagedelta.o:	imagedelta.c
+	$(CC) -c $(CFLAGS) -o imagedelta.o $<
+
 sizetest: disksize.c
 	$(CC) -DTEST $< -o sizetest
 
@@ -275,8 +284,9 @@ endif
 imagezip.o: sliceinfo.h imagehdr.h global.h range.h hashmap/hashmap.h
 imageunzip.o: imagehdr.h
 imagehash.o: imagehdr.h imagehash.h
+imagedelta.o: imagehdr.h libndz/libndz.h
 
-version.c: imagezip.c imageunzip.c imagedump.c
+version.c: imagezip.c imageunzip.c imagedump.c imagedelta.c
 	echo >$@ "char build_info[] = \"Built `date +%d-%b-%Y` by `id -nu`@`hostname | sed 's/\..*//'`:`pwd`\";"
 
 install: $(addprefix $(INSTALL_BINDIR)/, $(PROGS))
