@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2005 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -20,108 +20,89 @@
  * 
  * }}}
  */
+#ifndef _SLICEINFO_H_
+#define _SLICEINFO_H_
 
 #include <inttypes.h>
 
 /*
- * Some of this comes from the BSD disklabel.h
+ * Partition (slice) description.
+ * We use a simplified EFI partition description for our partition type.
  */
 
-struct dospart {
-	unsigned char	dp_flag;	/* bootstrap flags */
-	unsigned char	dp_shd;		/* starting head */
-	unsigned char	dp_ssect;	/* starting sector */
-	unsigned char	dp_scyl;	/* starting cylinder */
-	unsigned char	dp_typ;		/* partition type */
-	unsigned char	dp_ehd;		/* end head */
-	unsigned char	dp_esect;	/* end sector */
-	unsigned char	dp_ecyl;	/* end cylinder */
-	u_int32_t	dp_start;	/* absolute starting sector number */
-	u_int32_t	dp_size;	/* partition size in sectors */
-};
+/* GPT max, seems reasonable */
+#define MAXSLICES	128
 
-#define DOSPTYP_UNUSED		0	/* Unused */
-#ifndef DOSPTYP_FAT12
-#define	DOSPTYP_FAT12		1	/* FAT12 */
-#endif
-#ifndef DOSPTYP_FAT16
-#define	DOSPTYP_FAT16		4	/* FAT16 */
-#endif
-#ifndef DOSPTYP_FAT16L
-#define	DOSPTYP_FAT16L		6	/* FAT16, part >= 32MB */
-#endif
-#ifndef DOSPTYP_EXT
-#define	DOSPTYP_EXT		5	/* DOS extended partition */
-#endif
-#ifndef DOSPTYPE_NTFS
-#define DOSPTYP_NTFS    	7       /* Windows NTFS partition */
-#endif
-#ifndef DOSPTYP_FAT32
-#define	DOSPTYP_FAT32		11	/* FAT32 */
-#endif
-#ifndef DOSPTYP_FAT32_LBA
-#define	DOSPTYP_FAT32_LBA	12	/* FAT32, LBA */
-#endif
-#ifndef DOSPTYP_FAT16L_LBA
-#define	DOSPTYP_FAT16L_LBA	14	/* FAT16, part >= 32MB, LBA */
-#endif
-#ifndef DOSPTYPE_EXT_LBA
-#define	DOSPTYP_EXT_LBA		15	/* DOS extended, LBA partition */
-#endif
-#ifndef DOSPTYP_LINSWP
-#define	DOSPTYP_LINSWP		0x82	/* Linux swap partition */
-#endif
-#ifndef DOSPTYP_LINUX
-#define	DOSPTYP_LINUX		0x83	/* Linux partition */
-#endif
-#ifndef DOSPTYP_386BSD
-#define DOSPTYP_386BSD	 	0xa5	/* Free/NetBSD */
-#endif
-#ifndef DOSPTYP_OPENBSD
-#define DOSPTYP_OPENBSD 	0xa6	/* OpenBSD */
-#endif
+/* We just use our own internal int types for the types we recognize */
+typedef uint16_t	iz_type;
+typedef uint16_t	iz_flags;
 
-#define ISBSD(t)	((t) == DOSPTYP_386BSD || (t) == DOSPTYP_OPENBSD)
-#define ISEXT(t)	((t) == DOSPTYP_EXT || (t) == DOSPTYP_EXT_LBA)
+/* These are the same as MBR types */
+#define IZTYPE_UNUSED		0	/* Unused */
+#define	IZTYPE_FAT12		1	/* FAT12 */
+#define	IZTYPE_FAT16		4	/* FAT16 */
+#define	IZTYPE_EXT		5	/* DOS extended partition */
+#define	IZTYPE_FAT16L		6	/* FAT16, part >= 32MB */
+#define IZTYPE_NTFS    		7       /* Windows NTFS partition */
+#define	IZTYPE_FAT32		11	/* FAT32 */
+#define	IZTYPE_FAT32_LBA	12	/* FAT32, LBA */
+#define	IZTYPE_FAT16L_LBA	14	/* FAT16, part >= 32MB, LBA */
+#define	IZTYPE_EXT_LBA		15	/* DOS extended partition, LBA */
+#define	IZTYPE_LINSWP		0x82	/* Linux swap partition */
+#define	IZTYPE_LINUX		0x83	/* Linux partition */
+#define IZTYPE_386BSD		0xa5	/* Free/NetBSD */
+#define IZTYPE_OPENBSD		0xa6	/* OpenBSD */
+
+/* These have no corresponding MBR type (should start at 0x100) */
+#define IZTYPE_INVALID		0xFFFF
+
+/* Flags */
+#define IZFLAG_IGNORE		0x01	/* Explicitly ignored by imagezip */
+#define IZFLAG_RAW		0x02	/* Explicitly forced to raw */
+#define IZFLAG_NOTSUP		0x04	/* Not supported by imagezip */
+
+#define ISBSD(t)	\
+	((t) == IZTYPE_386BSD || (t) == IZTYPE_OPENBSD)
 #define ISFAT(t)	\
-	((t) == DOSPTYP_FAT12 || (t) == DOSPTYP_FAT16 || \
-	 (t) == DOSPTYP_FAT16L || (t) == DOSPTYP_FAT32 || \
-	 (t) == DOSPTYP_FAT32_LBA || (t) == DOSPTYP_FAT16L_LBA)
+	((t) == IZTYPE_FAT12 || (t) == IZTYPE_FAT16 || \
+	 (t) == IZTYPE_FAT16L || (t) == IZTYPE_FAT32 || \
+	 (t) == IZTYPE_FAT32_LBA || (t) == IZTYPE_FAT16L_LBA)
 
-#define BOOT_MAGIC	0xAA55
+/*
+ * XXX as of V4 we are all still 32 bit sector numbers.
+ * 64-bit will come in V5...
+ */
+typedef uint32_t	iz_lba;
+typedef uint32_t	iz_size;
 
-#ifndef DOSBBSECTOR
-#define DOSBBSECTOR	0
-#endif
-#ifndef DOSPARTOFF
-#define DOSPARTOFF	446
-#endif
-#ifndef NDOSPART
-#define NDOSPART	4
-#endif
-#define MAXSLICES	32 /* > 4 to allow for extended partition naming */
-
-struct doslabel {
-	char		align[sizeof(short)];	/* Force alignment */
-	char		pad2[DOSPARTOFF];
-	struct dospart	parts[NDOSPART];
-	unsigned short  magic;
+struct iz_slice {
+	iz_type		type;
+	iz_flags	flags;
+	iz_lba		offset;
+	iz_size		size;
 };
-#define DOSPARTSIZE \
-	(DOSPARTOFF + NDOSPART*sizeof(struct dospart) + sizeof(unsigned short))
 
-struct slicemap {
-	int	type;
+struct sliceinfo {
+	iz_type	type;
 	char	*desc;
-	int	(*process)(int snum, int stype, u_int32_t start, u_int32_t size,
+	int	(*process)(int snum, iz_type stype, iz_lba start, iz_size size,
+			   char *sname, int sfd);
+	int	(*test)(int snum, iz_type stype, iz_lba start, iz_size size,
 			   char *sname, int sfd);
 };
 
-#define SLICEMAP_PROCESS_PROTO(__process_fname__)	\
-	int __process_fname__(int snum, int stype, u_int32_t start, \
-		u_int32_t size, char *sname, int sfd)
-
 /* 0 == false for all, ~0 == true for all, else true for those set */
 typedef uint32_t partmap_t[MAXSLICES];
-
 extern partmap_t ignore, forceraw;
+
+#define SLICEMAP_PROCESS_PROTO(__process_fname__)	 \
+	int __process_fname__(int snum, iz_type stype,   \
+			      iz_lba start, iz_lba size, char *sname, int sfd)
+#define SLICEMAP_TEST_PROTO(__test_fname__)	 \
+	int __test_fname__(int snum, iz_type stype,   \
+			      iz_lba start, iz_lba size, char *sname, int sfd)
+
+extern struct sliceinfo *getslicemap(iz_type stype);
+extern void printslicemap(void);
+
+#endif /* _SLICEINFO_H_ */
