@@ -45,12 +45,15 @@ extern int hasfixup(uint32_t soffset, uint32_t ssize);
 extern void savefixups(void);
 extern void restorefixups(int isempty);
 extern void dumpfixups(int verbose, int count);
+extern uint64_t getdisksize(int fd);
 
 #ifdef WITH_MBR
-extern int parse_mbr(int fd, struct iz_slice *parttab, int dowarn);
+extern int parse_mbr(int fd, struct iz_slice *parttab,
+		     iz_lba *startp, iz_size *sizep, int dowarn);
 #endif
 #ifdef WITH_GPT
-extern int parse_gpt(int fd, struct iz_slice *parttab, int dowarn);
+extern int parse_gpt(int fd, struct iz_slice *parttab,
+		     iz_lba *startp, iz_size *sizep, int dowarn);
 #endif
 
 extern SLICEMAP_PROCESS_PROTO(read_rawslice);

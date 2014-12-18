@@ -34,13 +34,13 @@ static struct sliceinfo fsmap[] = {
 	{ IZTYPE_FBSDSWAP,	"FreeBSD Swap",	read_bsdswapslice },
 #endif
 #ifdef WITH_FFS
-	{ IZTYPE_386BSD,	"FreeBSD FFS",	read_bsdslice },
-	{ IZTYPE_FBSDNOLABEL,	"FreeBSD FFS",	read_bsdslicenl },
-	{ IZTYPE_OPENBSD,	"OpenBSD FFS",	read_bsdslice },
+	{ IZTYPE_386BSD,	"FreeBSD UFS1/2",	   read_bsdslice },
+	{ IZTYPE_FBSDNOLABEL,	"FreeBSD UFS1/2 no label", read_bsdslicenl },
+	{ IZTYPE_OPENBSD,	"OpenBSD FFS",		   read_bsdslice },
 #endif
 #ifdef WITH_EXTFS
-	{ IZTYPE_LINUX,		"Linux EXT",	read_linuxslice },
-	{ IZTYPE_LINSWP,	"Linux SWP",	read_linuxswap },
+	{ IZTYPE_LINUX,		"Linux EXT2/3/4",	read_linuxslice },
+	{ IZTYPE_LINSWP,	"Linux Swap",		read_linuxswap },
 #endif
 #ifdef WITH_NTFS
 	{ IZTYPE_NTFS,		"NTFS",		read_ntfsslice },

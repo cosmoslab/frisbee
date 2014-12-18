@@ -137,7 +137,6 @@ static void output_uuid(char *, char *);
  *
  * These numbers are in sectors.
  */
-extern unsigned long getdisksize(int fd);
 unsigned long inputminsec	= 0;
 unsigned long inputmaxsec	= 0;	/* 0 means the entire input image */
 
@@ -583,10 +582,32 @@ main(int argc, char *argv[])
 	if (version || debug) {
 		fprintf(stderr, "%s\n", build_info);
 		if (version) {
-			fprintf(stderr, "Supports: ");
+			char *str;
+
+			fprintf(stderr, "Supports:\n");
+			fprintf(stderr, "  Partitioning: ");
+#ifdef WITH_MBR
+			fprintf(stderr, "MBR");
+			str = ",";
+#endif
+#ifdef WITH_GPT
+			fprintf(stderr, "%sGPT", str);
+#endif
+			fprintf(stderr, "\n  Partition types: ");
 			printslicemap();
+			fprintf(stderr, "\n  Features: ");
+			fprintf(stderr, "image UUIDs");
+#ifdef WITH_CRYPTO
+#ifdef SIGN_CHECKSUM
+			fprintf(stderr, ",signed");
+#else
+			fprintf(stderr, ",unsigned");
+#endif
+			fprintf(stderr, " SHA1 checksums");
+			fprintf(stderr, ",blowfish encryption");
+#endif
 #ifdef WITH_HASH
-			fprintf(stderr, ", hash-signature comparison");
+			fprintf(stderr, ",delta image creation");
 #endif
 			fprintf(stderr, "\n");
 			exit(0);
@@ -937,13 +958,15 @@ read_image(int fd)
 	int		i, rval = 0;
 	struct iz_slice	parttab[MAXSLICES];
 	int		gotbb = 0;
+	iz_lba		dstart;
+	iz_size		dsize;
 
 #ifdef WITH_GPT
-	if (!gotbb && parse_gpt(fd, parttab, debug) == 0)
+	if (!gotbb && parse_gpt(fd, parttab, &dstart, &dsize, debug) == 0)
 		gotbb = 1;
 #endif
 #ifdef WITH_MBR
-	if (!gotbb && parse_mbr(fd, parttab, debug) == 0)
+	if (!gotbb && parse_mbr(fd, parttab, &dstart, &dsize, debug) == 0)
 		gotbb = 2;
 #endif
 
@@ -1116,6 +1139,26 @@ read_image(int fd)
 		}
 	}
 
+	/*
+	 * Ultimately, we are going to believe the partitioner about
+	 * min/max values, but lets see how they compare.
+	 */
+	if (!slicemode) {
+		if (dstart != inputminsec) {
+			fprintf(stderr,
+				"partitioner value (%lu) different than "
+				"computed value (%lu); using the former",
+				(unsigned long)dstart, inputminsec);
+			inputminsec = dstart;
+		}
+		if (!maxmode && dstart+dsize != inputmaxsec) {
+			fprintf(stderr,
+				"partitioner value (%lu) different than "
+				"computed value (%lu); using the former",
+				(unsigned long)(dstart+dsize), inputmaxsec);
+			inputmaxsec = dstart + dsize;
+		}
+	}
 	return rval;
 }
 

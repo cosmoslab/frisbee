@@ -37,6 +37,7 @@
 #include "mbr.h"
 
 static int silent = 0;
+static uint32_t losect = ~0, hisect = 0;
 
 static int read_mbr(int fd, uint32_t bbstart, uint32_t pstart,
 		    uint32_t extstart, struct iz_slice *parttab);
@@ -47,7 +48,8 @@ static int read_mbr(int fd, uint32_t bbstart, uint32_t pstart,
  * Otherwise return an error.
  */
 int
-parse_mbr(int fd, struct iz_slice *parttab, int dowarn)
+parse_mbr(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
+	  int dowarn)
 {
 	int i;
 
@@ -56,7 +58,16 @@ parse_mbr(int fd, struct iz_slice *parttab, int dowarn)
 		parttab[i].type = IZTYPE_INVALID;
 
 	silent = (dowarn == 0);
-	return read_mbr(fd, DOSBBSECTOR, 0, 0, parttab);
+	i = read_mbr(fd, DOSBBSECTOR, 0, 0, parttab);
+	if (i)
+		return i;
+
+	/* figure out low/high */
+	if (startp)
+		*startp = 0;
+	if (sizep)
+		*sizep = (iz_size)getdisksize(fd);
+	return 0;
 }
 
 /*
@@ -186,7 +197,23 @@ read_mbr(int fd, uint32_t bbstart, uint32_t pstart, uint32_t extstart,
 			parttab[pix].flags |= IZFLAG_NOTSUP;
 			break;
 		}
+
+		if (start < losect)
+			losect = start;
+		if (start + size > hisect)
+			hisect = start + size;
 	}
+
+	/*
+	 * At this point we should sanity check the partitions, looking
+	 * for overlaps and gaps. The gaps should be added to the skip
+	 * list (except for the init pre-partition 1 space which is
+	 * typically a boot block and other magic).
+	 *
+	 * We could do this is a partitioner-indepenedent way, except
+	 * that only the partitioner knows which gaps are special and
+	 * need to be saved.
+	 */
 
 	return 0;
 }

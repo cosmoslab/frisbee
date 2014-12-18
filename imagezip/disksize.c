@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2006 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2014 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -25,6 +25,7 @@
  * Determine the size of the target disk in sectors.
  */
 
+#include <inttypes.h>
 #include <unistd.h>
 #include <stdio.h>
 
@@ -41,7 +42,7 @@
 #endif
 #endif
 
-unsigned long
+uint64_t
 getdisksize(int fd)
 {
 	unsigned long disksize = 0;
@@ -54,6 +55,9 @@ getdisksize(int fd)
 		rv = ioctl(fd, BLKGETSIZE, &disksize);
 		if (rv < 0)
 			disksize = 0;
+#ifdef TEST
+		fprintf(stderr, "Linux BLKGETSIZE returned %lu\n", disksize);
+#endif
 	}
 #else
 #ifdef DIOCGMEDIASIZE
@@ -66,6 +70,9 @@ getdisksize(int fd)
 		rv = ioctl(fd, DIOCGMEDIASIZE, &dsize);
 		if (rv >= 0)
 			disksize = (unsigned long)(dsize / ssize);
+#ifdef TEST
+		fprintf(stderr, "BSD BIOCGMEDIASIZE returned %lu\n", disksize);
+#endif
 	}
 #else
 #ifdef DIOCGDINFO
@@ -76,6 +83,9 @@ getdisksize(int fd)
 		rv = ioctl(fd, DIOCGDINFO, &label);
 		if (rv >= 0)
 			disksize = label.d_secperunit;
+#ifdef TEST
+		fprintf(stderr, "BSD DIOCGDINFO returned %lu\n", disksize);
+#endif
 	}
 #endif
 #endif
@@ -93,6 +103,10 @@ getdisksize(int fd)
 		lastoff = lseek(fd, (off_t)0, SEEK_END);
 		if (lastoff > 0)
 			disksize = (unsigned long)(lastoff / ssize);
+#ifdef TEST
+		fprintf(stderr, "lseek SEEK_END returned %lu\n", disksize);
+#endif
+
 	}
 
 	/*
@@ -111,3 +125,33 @@ getdisksize(int fd)
 
 	return disksize;
 }
+
+#ifdef TEST
+#include <fcntl.h>
+
+int
+main(int argc, char **argv)
+{
+	uint64_t dsize;
+	int fd;
+
+	if (argc != 2) {
+		fprintf(stderr, "Usage: %s disk\n", argv[0]);
+		return 1;
+	}
+
+	fd = open(argv[1], O_RDONLY);
+	if (fd < 0) {
+		fprintf(stderr, "Could not open '%s'\n", argv[1]);
+		return 1;
+	}
+
+	dsize = getdisksize(fd);
+	close(fd);
+
+	fprintf(stderr, "%s: size is %llu sectors\n",
+		argv[1], (unsigned long long)dsize);
+
+	return 0;
+}
+#endif

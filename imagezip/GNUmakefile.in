@@ -251,6 +251,9 @@ imagehash: imagehash.o version.o
 imagehash.o:	imagehash.c
 	$(CC) -c $(HASHCFLAGS) -o imagehash.o $<
 
+sizetest: disksize.c
+	$(CC) -DTEST $< -o sizetest
+
 $(SUBDIRS):
 	@$(MAKE) SUBDIRCFLAGS="$(SUBDIRCFLAGS)" -C $@ all
 

@@ -1864,7 +1864,7 @@ writedata(off_t offset, size_t size, void *buf)
 static void
 zero_remainder()
 {
-	extern unsigned long getdisksize(int fd);
+	extern uint64_t getdisksize(int fd);
 	off_t disksize;
 
 	if (!dofill)
@@ -1875,7 +1875,7 @@ zero_remainder()
 		return;
 
 	if (outputmaxsec == 0)
-		outputmaxsec = getdisksize(outfd);
+		outputmaxsec = (unsigned long)getdisksize(outfd);
 	disksize = sectobytes(outputmaxsec);
 	if (debug)
 		fprintf(stderr, "\ndisksize = %lld\n", (long long)disksize);
@@ -1920,7 +1920,7 @@ getslicebounds(int slice)
 		return 1;
 	}
 
-	if (parse_mbr(outfd, parttab, 1))
+	if (parse_mbr(outfd, parttab, NULL, NULL, 1))
 		return 1;
 
 	if (parttab[slice-1].type == IZTYPE_INVALID)

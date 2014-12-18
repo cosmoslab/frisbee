@@ -108,8 +108,7 @@ drvwrite(struct dsk *dskp, void *buf, daddr_t lba, unsigned nblk)
 uint64_t
 drvsize(struct dsk *dskp)
 {
-	off_t maxoff = lseek(dskp->fd, (off_t)0, SEEK_END);
-	return (uint64_t)(maxoff >= 0 ? maxoff : 0);
+	return (uint64_t)getdisksize(dskp->fd);
 }
 
 /* keep things aligned for O_DIRECT IO */
@@ -189,13 +188,15 @@ getgpttype(struct uuid *gtype)
  * Read a GPT partition table. Returns 0 on success, an error otherwise.
  */
 int
-parse_gpt(int fd, struct iz_slice *parttab, int dowarn)
+parse_gpt(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
+	  int dowarn)
 {
 	struct dsk dsk;
 	uuid_t uuid;
 	struct gpt_hdr *hdr;
 	struct gpt_ent *ent;
 	char secbuf[SECSIZE+SECSIZE-1], *buf = SECALIGN(secbuf);
+	uint64_t dsize, losect, hisect;
 	int i;
 
 	dsk.fd = fd;
@@ -222,6 +223,8 @@ parse_gpt(int fd, struct iz_slice *parttab, int dowarn)
 		return 1;
 	}
 
+	losect = ~0;
+	hisect = 0;
 	for (i = 0; i < hdr->hdr_entries; i++) {
 		struct gptmap *gmap = getgpttype(&ent[i].ent_type);
 		uint64_t start = ent[i].ent_lba_start;
@@ -254,6 +257,81 @@ parse_gpt(int fd, struct iz_slice *parttab, int dowarn)
 			warnx("P%d: Offset/size too large, ignoring", i+1);
 			parttab[i].flags |= IZFLAG_IGNORE;
 		}
+
+		if (type != IZTYPE_INVALID) {
+			if (start < losect)
+				losect = start;
+			if (start + size > hisect)
+				hisect = start + size;
+		}
 	}
+
+	/*
+	 * At this point we should sanity check the partitions, looking
+	 * for overlaps and gaps. The gaps should be added to the skip
+	 * list (except for the init pre-partition 1 space which is
+	 * typically a boot block and other magic).
+	 *
+	 * We could do this is a partitioner-indepenedent way, except
+	 * that only the partitioner knows which gaps are special and
+	 * need to be saved.
+	 *
+	 * For GPT right now, we just do the easy stuff. The GPT header
+	 * tells us the first and last sectors allocated to partitions.
+	 * Everything before and after, except the primary and secondary
+	 * GPTs, can be skipped.
+	 */
+	dsize = gpt_drvsize(&dsk);
+	{
+		uint64_t prilba, seclba, size;
+
+		if (hdr->hdr_lba_self > hdr->hdr_lba_alt) {
+			if (dowarn)
+				warnx("GPT: using secondary GPT");
+			prilba = hdr->hdr_lba_alt;
+			seclba = hdr->hdr_lba_self;
+		} else {
+			prilba = hdr->hdr_lba_self;
+			seclba = hdr->hdr_lba_alt;
+		}
+//fprintf(stderr, "dsize=%lu, pri=%lu, alt=%lu, lba_low=%lu, lba_high=%lu\n", dsize, prilba, seclba, hdr->hdr_lba_start, hdr->hdr_lba_end);
+		if (dowarn && (prilba == 0 || seclba == 0))
+			warnx("GPT: primary (%lu) or secondary (%lu) is zero",
+			      prilba, seclba);
+		if (dowarn && losect < hdr->hdr_lba_start)
+			warnx("GPT: partition starts (%lu) below lba_start (%lu)",
+			      losect, hdr->hdr_lba_start);
+		if (dowarn && hisect - 1 > hdr->hdr_lba_end)
+			warnx("GPT: partition ends (%lu) after lba_end (%lu)",
+			      hisect-1, hdr->hdr_lba_end);
+		if (dowarn && prilba != 1)
+			warnx("GPT: primary (%lu) not at sector 1", prilba);
+		if (dsize && seclba + 1 != dsize) {
+			if (dowarn)
+				warnx("GPT: secondary (%lu) not at end of disk (%lu)",
+				      seclba, dsize);
+			seclba = dsize - 1;
+		}
+
+		if (losect > hdr->hdr_lba_start) {
+			size = losect - hdr->hdr_lba_start;
+			addskip(hdr->hdr_lba_start, size);
+			if (dowarn)
+				warnx("Skipping %lu sectors at %lu",
+				      size, hdr->hdr_lba_start);
+		}
+		if (hisect < hdr->hdr_lba_end + 1) {
+			size = hdr->hdr_lba_end + 1 - hisect;
+			addskip(hisect, size);
+			if (dowarn)
+				warnx("Skipping %lu sectors at %lu",
+				      size, hisect);
+		}
+		if (startp)
+			*startp = 0;
+		if (sizep)
+			*sizep = seclba + 1;
+	}
+
 	return 0;
 }
