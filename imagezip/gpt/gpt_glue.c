@@ -54,9 +54,16 @@ int
 gpt_printf(const char * __restrict fmt, ...)
 {
 	va_list ap;
+	int len;
 
 	va_start(ap, fmt);
 	vsnprintf(lastmsg, sizeof(lastmsg), fmt, ap);
+
+	/* XXX get rid of newline since warn outputs one */
+	len = strlen(lastmsg);
+	if (lastmsg[len-1] == '\n')
+		lastmsg[len-1] = '\0';
+
 	if (strncmp(lastmsg, BOOTPROG, strlen(BOOTPROG)) != 0) {
 		warnx("GPT: %s", lastmsg);
 		lastmsg[0] = '\0';
