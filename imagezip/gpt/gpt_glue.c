@@ -317,20 +317,20 @@ parse_gpt(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
 			size = losect - hdr->hdr_lba_start;
 			addskip(hdr->hdr_lba_start, size);
 			if (dowarn)
-				warnx("Skipping %lu sectors at %lu",
+				warnx("GPT: Skipping %lu sectors at %lu",
 				      size, hdr->hdr_lba_start);
 		}
 		if (hisect < hdr->hdr_lba_end + 1) {
 			size = hdr->hdr_lba_end + 1 - hisect;
 			addskip(hisect, size);
 			if (dowarn)
-				warnx("Skipping %lu sectors at %lu",
+				warnx("GPT: Skipping %lu sectors at %lu",
 				      size, hisect);
 		}
 		if (startp)
 			*startp = 0;
 		if (sizep)
-			*sizep = seclba + 1;
+			*sizep = (iz_size)dsize;
 	}
 
 	return 0;

@@ -36,6 +36,15 @@
 #include "global.h"
 #include "mbr.h"
 
+/*
+ * Throughout Emulab history, the fake "track size" has always been
+ * 63 sectors and the first partition has always started at 63. We
+ * have always saved those low 63 sectors since they are used for
+ * the boot block and other purposes. We continue to do this, but
+ * will skip anything between 63 and the first partition.
+ */
+#define MAGIC_LOSECT	63
+
 static int silent = 0;
 static uint32_t losect = ~0, hisect = 0;
 
@@ -52,6 +61,7 @@ parse_mbr(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
 	  int dowarn)
 {
 	int i;
+	uint64_t dsize;
 
 	/* mark everything invalid to start */
 	for (i = 0; i < MAXSLICES; i++)
@@ -62,11 +72,30 @@ parse_mbr(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
 	if (i)
 		return i;
 
+	dsize = getdisksize(fd);
+
 	/* figure out low/high */
+	if (losect > MAGIC_LOSECT) {
+		addskip(MAGIC_LOSECT, losect-MAGIC_LOSECT);
+		warnx("MBR: lowest partition start > %d! "
+		      "Only saving first %d sectors.",
+		      MAGIC_LOSECT, MAGIC_LOSECT);
+		if (dowarn)
+			warnx("MBR: skipping %lu sectors at %lu",
+			      losect - MAGIC_LOSECT, MAGIC_LOSECT);
+	}
+	if (hisect < dsize) {
+		addskip(hisect, dsize-hisect);
+		if (dowarn)
+			warnx("MBR: skipping %lu sectors at %lu",
+			      dsize - hisect, hisect);
+	}
+
 	if (startp)
 		*startp = 0;
 	if (sizep)
-		*sizep = (iz_size)getdisksize(fd);
+		*sizep = (iz_size)dsize;
+
 	return 0;
 }
 
