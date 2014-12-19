@@ -77,18 +77,18 @@ parse_mbr(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
 	/* figure out low/high */
 	if (losect > MAGIC_LOSECT) {
 		addskip(MAGIC_LOSECT, losect-MAGIC_LOSECT);
-		warnx("MBR: lowest partition start > %d! "
-		      "Only saving first %d sectors.",
+		warnx("MBR: lowest partition start > %u! "
+		      "Only saving first %u sectors.",
 		      MAGIC_LOSECT, MAGIC_LOSECT);
 		if (dowarn)
-			warnx("MBR: skipping %lu sectors at %lu",
+			warnx("MBR: skipping %u sectors at %u",
 			      losect - MAGIC_LOSECT, MAGIC_LOSECT);
 	}
 	if (hisect < dsize) {
 		addskip(hisect, dsize-hisect);
 		if (dowarn)
-			warnx("MBR: skipping %lu sectors at %lu",
-			      dsize - hisect, hisect);
+			warnx("MBR: skipping %lu sectors at %u",
+			      (unsigned long)(dsize - hisect), hisect);
 	}
 
 	if (startp)

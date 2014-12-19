@@ -1910,6 +1910,12 @@ zero_remainder()
 
 static long long outputmaxsize = 0;
 
+/* XXX ugh, needed to compile in parse_mbr right now */
+void
+addskip(uint32_t off, uint32_t size)
+{
+}
+
 int
 getslicebounds(int slice)
 {
