@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -1723,7 +1723,7 @@ startchild(struct childinfo *ci)
 			int timo = ci->timeout;
 
 			/* XXX compensate for 2s sleep in handle_get */
-			if (timo)
+			if (timo > 0)
 				timo += 2;
 
 			pname = FRISBEE_SERVER;

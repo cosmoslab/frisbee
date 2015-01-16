@@ -58,6 +58,7 @@ struct emulab_configstate {
 	int image_maxrate_dyn;	/* sitevar:images/frisbee/maxrate_dynamic */
 	int image_maxrate_std;	/* sitevar:images/frisbee/maxrate_std (in MB/s) */
 	int image_maxrate_usr;	/* sitevar:images/frisbee/maxrate_usr (in MB/s) */
+	int image_maxlinger;	/* sitevar:images/frisbee/maxlinger (in sec) */
 };
 
 /* Extra info associated with a image information entry */
@@ -129,6 +130,7 @@ static uint32_t put_maxiwait = 120;		/* zero means no limit */
 static uint32_t get_maxrate_dyn = 0;		/* non-zero means use dynamic */
 static uint32_t get_maxrate_std = 72000000;	/* zero means no limit */
 static uint32_t get_maxrate_usr = 54000000;	/* zero means no limit */
+static int      get_maxlinger = 3600;		/* zero means forever */
 
 /* Standard image directory: assumed to be "TBROOT/images" */
 static char *STDIMAGEDIR;
@@ -262,6 +264,22 @@ emulab_read(void)
 		FrisLog("  image_get_maxrate_usr = %d MB/sec",
 			(int)(get_maxrate_usr/1000000));
 
+	val = emulab_getsitevar("images/frisbee/maxlinger");
+	if (val) {
+		ival = atoi(val);
+		if (ival < 0)
+			ival = -1;
+		get_maxlinger = ival;
+		free(val);
+	}
+	if (get_maxlinger == -1)
+		FrisLog("  server exits after last client leaves");
+	else if (get_maxlinger == 0)
+		FrisLog("  server never exits");
+	else
+		FrisLog("  server exits after %d seconds idle",
+			get_maxlinger);
+
 	return 0;
 }
 
@@ -276,6 +294,7 @@ emulab_save(void)
 	cs->image_maxrate_dyn = get_maxrate_dyn;
 	cs->image_maxrate_std = get_maxrate_std;
 	cs->image_maxrate_usr = get_maxrate_usr;
+	cs->image_maxlinger = get_maxlinger;
 
 	return (void *)cs;
 }
@@ -309,6 +328,14 @@ emulab_restore(void *state)
 	else
 		FrisLog("  image_get_maxrate_usr = %d MB/sec",
 			(int)(get_maxrate_usr/1000000));
+	get_maxlinger = cs->image_maxlinger;
+	if (get_maxlinger == -1)
+		FrisLog("  server exits after last client leaves");
+	else if (get_maxlinger == 0)
+		FrisLog("  server never exits");
+	else
+		FrisLog("  server exits after %d seconds idle",
+			get_maxlinger);
 
 	return 0;
 }
@@ -355,24 +382,13 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 #endif
 
 	/* get_timeout */
-	/*
-	 * In the short run, we leave this at pre-master-server levels
-	 * for compatibility (we still support advance startup of servers
-	 * via the localhost proxy).
-	 *
-	 * We also need this at Utah while we work out some MC problems on
-	 * our control net (sometimes nodes can take minutes before they
-	 * actually hook up with the server.
-	 *
-	 * In an inner elab, neither of these apply.
-	 */
-	if (!INELABINELAB)
-		ii->get_timeout = 1800;
+	ii->get_timeout = get_maxlinger;
+
 	/*
 	 * We use a small server inactive timeout since we no longer have
 	 * to start up a frisbeed well in advance of the client(s).
 	 */
-	else
+	if (INELABINELAB && ii->get_timeout > 60)
 		ii->get_timeout = 60;
 
 	/*
