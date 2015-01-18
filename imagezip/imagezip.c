@@ -1147,14 +1147,14 @@ read_image(int fd)
 		if (dstart != inputminsec) {
 			fprintf(stderr,
 				"partitioner value (%lu) different than "
-				"computed value (%lu); using the former",
+				"computed value (%lu); using the former\n",
 				(unsigned long)dstart, inputminsec);
 			inputminsec = dstart;
 		}
 		if (!maxmode && dstart+dsize != inputmaxsec) {
 			fprintf(stderr,
 				"partitioner value (%lu) different than "
-				"computed value (%lu); using the former",
+				"computed value (%lu); using the former\n",
 				(unsigned long)(dstart+dsize), inputmaxsec);
 			inputmaxsec = dstart + dsize;
 		}
