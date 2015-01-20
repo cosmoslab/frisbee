@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -55,6 +55,17 @@ static char *rimagedir;
 static uint32_t maxrate = 100000000;
 static int dynrate = 0;
 
+/*
+ * We use a small server inactive timeout since we no longer have
+ * to start up a frisbeed well in advance of the client(s).
+ *
+ * XXX we cranked this from 60 to 180 seconds to account for clients
+ * with lots of write buffer memory but slow disks, giving them time
+ * to flush all their buffers and report their stats before we give
+ * up on them.
+ */
+static int maxlinger = 180;
+
 /* Multicast address/port base info */
 static int mc_a, mc_b, mc_c, mc_port_lo, mc_port_num;
 
@@ -78,6 +89,15 @@ null_read(void)
 	else
 		FrisLog("  max bandwidth = %d MB/sec",
 			(int)(maxrate/1000000));
+
+	if (maxlinger < 0)
+		FrisLog("  server exits after last client leaves");
+	else if (maxlinger == 0)
+		FrisLog("  server never exits");
+	else
+		FrisLog("  server exits after %d seconds idle",
+			maxlinger);
+
 	return 0;
 }
 
@@ -99,6 +119,14 @@ null_restore(void *state)
 	else
 		FrisLog("  max bandwidth = %d MB/sec",
 			(int)(maxrate/1000000));
+
+	if (maxlinger < 0)
+		FrisLog("  server exits after last client leaves");
+	else if (maxlinger == 0)
+		FrisLog("  server never exits");
+	else
+		FrisLog("  server exits after %d seconds idle",
+			maxlinger);
 
 	return 0;
 }
@@ -136,16 +164,7 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 #endif
 
 	/* get_timeout */
-	/*
-	 * We use a small server inactive timeout since we no longer have
-	 * to start up a frisbeed well in advance of the client(s).
-	 *
-	 * XXX we cranked this from 60 to 180 seconds to account for clients
-	 * with lots of write buffer memory but slow disks, giving them time
-	 * to flush all their buffers and report their stats before we give
-	 * up on them.
-	 */
-	ai->imageinfo[ix].get_timeout = 180;
+	ai->imageinfo[ix].get_timeout = maxlinger;
 
 	/* get_options */
 	snprintf(str, sizeof str, " %s-W %u",
@@ -739,6 +758,7 @@ null_init(char *opts)
 	 *   mcaddr=A.B.C.D      MC base address
 	 *   bandwidth=NNNNNNNN  Max bandwidth of a server
 	 *   dynamicbw=(1|0)	 Use dynamic bandwidth control
+	 *   maxlinger=N	 Server lingers for N seconds after last req
 	 */
 	if (opts && opts[0]) {
 		char *opt;
@@ -757,6 +777,8 @@ null_init(char *opts)
 					dynrate =
 						(strtol(cp+1, NULL, 10) != 0) ?
 						1 : 0;
+				else if (strcmp(opt, "maxlinger") == 0)
+					maxlinger = strtol(cp+1, NULL, 10);
 			}
 		}
 		free(opts);
