@@ -74,6 +74,7 @@
 #endif
 #endif
 #include "sliceinfo.h"
+#include "mbr/mbr.h"
 
 struct diskinfo {
 	char bootblock[512];
