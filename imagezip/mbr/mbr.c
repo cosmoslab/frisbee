@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -80,13 +80,13 @@ parse_mbr(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
 		warnx("MBR: lowest partition start > %u! "
 		      "Only saving first %u sectors.",
 		      MAGIC_LOSECT, MAGIC_LOSECT);
-		if (dowarn)
+		if (dowarn > 1)
 			warnx("MBR: skipping %u sectors at %u",
 			      losect - MAGIC_LOSECT, MAGIC_LOSECT);
 	}
 	if (hisect < dsize) {
 		addskip(hisect, dsize-hisect);
-		if (dowarn)
+		if (dowarn > 1)
 			warnx("MBR: skipping %lu sectors at %u",
 			      (unsigned long)(dsize - hisect), hisect);
 	}

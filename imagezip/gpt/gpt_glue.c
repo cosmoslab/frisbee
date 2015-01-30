@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -323,14 +323,14 @@ parse_gpt(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
 		if (losect > hdr->hdr_lba_start) {
 			size = losect - hdr->hdr_lba_start;
 			addskip(hdr->hdr_lba_start, size);
-			if (dowarn)
+			if (dowarn > 1)
 				warnx("GPT: Skipping %lu sectors at %lu",
 				      size, hdr->hdr_lba_start);
 		}
 		if (hisect < hdr->hdr_lba_end + 1) {
 			size = hdr->hdr_lba_end + 1 - hisect;
 			addskip(hisect, size);
-			if (dowarn)
+			if (dowarn > 1)
 				warnx("GPT: Skipping %lu sectors at %lu",
 				      size, hisect);
 		}

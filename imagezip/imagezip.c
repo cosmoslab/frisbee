@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -960,13 +960,14 @@ read_image(int fd)
 	int		gotbb = 0;
 	iz_lba		dstart;
 	iz_size		dsize;
+	int		dowarn = debug ? 2 : 0;
 
 #ifdef WITH_GPT
-	if (!gotbb && parse_gpt(fd, parttab, &dstart, &dsize, debug) == 0)
+	if (!gotbb && parse_gpt(fd, parttab, &dstart, &dsize, dowarn) == 0)
 		gotbb = 1;
 #endif
 #ifdef WITH_MBR
-	if (!gotbb && parse_mbr(fd, parttab, &dstart, &dsize, debug) == 0)
+	if (!gotbb && parse_mbr(fd, parttab, &dstart, &dsize, dowarn) == 0)
 		gotbb = 2;
 #endif
 
