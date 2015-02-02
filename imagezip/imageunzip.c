@@ -803,11 +803,22 @@ main(int argc, char *argv[])
 		    flags |= O_DIRECT;
 #endif
 
-		if ((outfd =
-		     open(argv[1], flags, 0666)) < 0) {
+	open_again:
+		outfd = open(argv[1], flags, 0666);
+		if (outfd < 0) {
+			if (directio && errno == EINVAL) {
+				/*
+				 * XXX possibly directio is not supported,
+				 * try again without.
+				 */
+				directio = 0;
+				flags &= ~O_DIRECT;
+				fprintf(stderr,
+					"WARNING: open with O_DIRECT failed, "
+					"trying again without ...\n");
+				goto open_again;
+			}
 			perror("opening output file");
-			if (directio && errno == EINVAL)
-				fprintf(stderr, "Try again without -f\n");
 			exit(1);
 		}
 	}
