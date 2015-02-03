@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -1055,10 +1055,22 @@ ImageUnzipInit(char *filename, int _slice, int _debug, int _fill,
 		fprintf(stderr, "WARNING: O_DIRECT not supported\n");
 #endif
 
+ open_again:
 	if ((outfd = open(filename, flags, 0666)) < 0) {
 		perror("opening output file");
-		if (_directio && errno == EINVAL)
-			fprintf(stderr, "Try again without -f\n");
+		if (_directio && errno == EINVAL) {
+			/*
+			 * XXX possibly directio is not supported,
+			 * try again without.
+			 */
+			_directio = 0;
+			flags &= ~O_DIRECT;
+			fprintf(stderr,
+				"WARNING: open with O_DIRECT failed, "
+				"trying again without ...\n");
+			goto open_again;
+		}
+		fprintf(stderr, "Try again without -f\n");
 		exit(1);
 	}
 	slice     = _slice;
