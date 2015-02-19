@@ -1051,7 +1051,6 @@ ImageUnzipInit(char *filename, int _slice, int _debug, int _fill,
 
  open_again:
 	if ((outfd = open(filename, flags, 0666)) < 0) {
-		perror("opening output file");
 		if (_directio && errno == EINVAL) {
 			/*
 			 * XXX possibly directio is not supported,
@@ -1064,7 +1063,7 @@ ImageUnzipInit(char *filename, int _slice, int _debug, int _fill,
 				"trying again without ...\n");
 			goto open_again;
 		}
-		fprintf(stderr, "Try again without -f\n");
+		perror("opening output file");
 		exit(1);
 	}
 	slice     = _slice;
