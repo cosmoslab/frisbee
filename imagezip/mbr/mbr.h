@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -104,7 +104,6 @@ struct doslabel {
 #define DOSPARTSIZE \
 	(DOSPARTOFF + NDOSPART*sizeof(struct dospart) + sizeof(unsigned short))
 
-extern int parse_mbr(int fd, struct iz_slice *parttab,
-		     iz_lba *startp, iz_size *sizep, int dowarn);
+extern int parse_mbr(int fd, struct iz_disk *disk, int dowarn);
 extern int set_mbr_type(int fd, int slice, iz_type type);
 #endif /* _MBR_H_ */

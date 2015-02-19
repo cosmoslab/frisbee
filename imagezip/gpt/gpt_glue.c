@@ -195,9 +195,9 @@ getgpttype(struct uuid *gtype)
  * Read a GPT partition table. Returns 0 on success, an error otherwise.
  */
 int
-parse_gpt(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
-	  int dowarn)
+parse_gpt(int fd, struct iz_disk *disk, int dowarn)
 {
+	struct iz_slice *parttab = disk->slices;
 	struct dsk dsk;
 	uuid_t uuid;
 	struct gpt_hdr *hdr;
@@ -290,7 +290,7 @@ parse_gpt(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
 	 */
 	dsize = gpt_drvsize(&dsk);
 	{
-		uint64_t prilba, seclba, size;
+		uint64_t prilba, seclba;
 
 		if (hdr->hdr_lba_self > hdr->hdr_lba_alt) {
 			if (dowarn)
@@ -320,24 +320,11 @@ parse_gpt(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
 			seclba = dsize - 1;
 		}
 
-		if (losect > hdr->hdr_lba_start) {
-			size = losect - hdr->hdr_lba_start;
-			addskip(hdr->hdr_lba_start, size);
-			if (dowarn > 1)
-				warnx("GPT: Skipping %lu sectors at %lu",
-				      size, hdr->hdr_lba_start);
-		}
-		if (hisect < hdr->hdr_lba_end + 1) {
-			size = hdr->hdr_lba_end + 1 - hisect;
-			addskip(hisect, size);
-			if (dowarn > 1)
-				warnx("GPT: Skipping %lu sectors at %lu",
-				      size, hisect);
-		}
-		if (startp)
-			*startp = 0;
-		if (sizep)
-			*sizep = (iz_size)dsize;
+		disk->dsize = (iz_size)dsize;
+		disk->lodata = (iz_lba)hdr->hdr_lba_start;
+		disk->hidata = (iz_lba)hdr->hdr_lba_end;
+		disk->losect = (iz_lba)losect;
+		disk->hisect = (iz_lba)hisect - 1;
 	}
 
 	return 0;

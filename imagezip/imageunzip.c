@@ -559,12 +559,6 @@ dowrite_request(writebuf_t *wbuf)
 #endif
 }
 
-static __inline int devread(int fd, void *buf, size_t size)
-{
-	assert((size & (SECSIZE-1)) == 0);
-	return read(fd, buf, size);
-}
-
 #ifndef FRISBEE
 static void
 usage(void)
@@ -1933,25 +1927,21 @@ zero_remainder()
 
 static long long outputmaxsize = 0;
 
-/* XXX ugh, needed to compile in parse_mbr right now */
-void
-addskip(uint32_t off, uint32_t size)
-{
-}
-
 int
 getslicebounds(int slice)
 {
-	struct iz_slice parttab[MAXSLICES+1];
+	struct iz_disk disk;
+	struct iz_slice *parttab;
 
 	if (slice < 1 || slice > MAXSLICES) {
 		fprintf(stderr, "Slice must be 1-%d\n", MAXSLICES);
 		return 1;
 	}
 
-	if (parse_mbr(outfd, parttab, NULL, NULL, 1))
+	if (parse_mbr(outfd, &disk, 1))
 		return 1;
 
+	parttab = disk.slices;
 	if (parttab[slice-1].type == IZTYPE_INVALID)
 		return 1;
 

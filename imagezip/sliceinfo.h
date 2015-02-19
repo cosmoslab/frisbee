@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -88,6 +88,15 @@ struct iz_slice {
 	iz_flags	flags;
 	iz_lba		offset;
 	iz_size		size;
+};
+
+struct iz_disk {
+	iz_size		dsize;		/* size of disk (in sectors) */
+	iz_lba		lodata;		/* metadata below this */
+	iz_lba		hidata;		/* metadata above this */
+	iz_lba		losect;		/* lowest sector covered by a slice */
+	iz_lba		hisect;		/* highest sector covered by a slice */
+	struct iz_slice	slices[MAXSLICES];	/* slice info */
 };
 
 struct sliceinfo {

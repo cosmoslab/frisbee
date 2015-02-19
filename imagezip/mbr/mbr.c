@@ -37,9 +37,9 @@
 #include "mbr.h"
 
 /*
- * Throughout Emulab history, the fake "track size" has always been
- * 63 sectors and the first partition has always started at 63. We
- * have always saved those low 63 sectors since they are used for
+ * Throughout Emulab history, the fake "track size" for MBR has always
+ * been 63 sectors and the first partition has always started at 63.
+ * We have always saved those low 63 sectors since they are used for
  * the boot block and other purposes. We continue to do this, but
  * will skip anything between 63 and the first partition.
  */
@@ -57,11 +57,10 @@ static int read_mbr(int fd, uint32_t bbstart, uint32_t pstart,
  * Otherwise return an error.
  */
 int
-parse_mbr(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
-	  int dowarn)
+parse_mbr(int fd, struct iz_disk *disk, int dowarn)
 {
+	struct iz_slice *parttab = disk->slices;
 	int i;
-	uint64_t dsize;
 
 	/* mark everything invalid to start */
 	for (i = 0; i < MAXSLICES; i++)
@@ -72,29 +71,11 @@ parse_mbr(int fd, struct iz_slice *parttab, iz_lba *startp, iz_size *sizep,
 	if (i)
 		return i;
 
-	dsize = getdisksize(fd);
-
-	/* figure out low/high */
-	if (losect > MAGIC_LOSECT) {
-		addskip(MAGIC_LOSECT, losect-MAGIC_LOSECT);
-		warnx("MBR: lowest partition start > %u! "
-		      "Only saving first %u sectors.",
-		      MAGIC_LOSECT, MAGIC_LOSECT);
-		if (dowarn > 1)
-			warnx("MBR: skipping %u sectors at %u",
-			      losect - MAGIC_LOSECT, MAGIC_LOSECT);
-	}
-	if (hisect < dsize) {
-		addskip(hisect, dsize-hisect);
-		if (dowarn > 1)
-			warnx("MBR: skipping %lu sectors at %u",
-			      (unsigned long)(dsize - hisect), hisect);
-	}
-
-	if (startp)
-		*startp = 0;
-	if (sizep)
-		*sizep = (iz_size)dsize;
+	disk->dsize = (iz_size)getdisksize(fd);
+	disk->lodata = MAGIC_LOSECT;
+	disk->hidata = disk->dsize - 1;
+	disk->losect = (iz_lba)losect;
+	disk->hisect = (iz_lba)hisect - 1;
 
 	return 0;
 }

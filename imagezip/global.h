@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -48,12 +48,10 @@ extern void dumpfixups(int verbose, int count);
 extern uint64_t getdisksize(int fd);
 
 #ifdef WITH_MBR
-extern int parse_mbr(int fd, struct iz_slice *parttab,
-		     iz_lba *startp, iz_size *sizep, int dowarn);
+extern int parse_mbr(int fd, struct iz_disk *disk, int dowarn);
 #endif
 #ifdef WITH_GPT
-extern int parse_gpt(int fd, struct iz_slice *parttab,
-		     iz_lba *startp, iz_size *sizep, int dowarn);
+extern int parse_gpt(int fd, struct iz_disk *disk, int dowarn);
 #endif
 
 extern SLICEMAP_PROCESS_PROTO(read_rawslice);

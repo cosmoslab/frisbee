@@ -956,19 +956,25 @@ int
 read_image(int fd)
 {
 	int		i, rval = 0;
-	struct iz_slice	parttab[MAXSLICES];
+	struct iz_disk	disk;
+	struct iz_slice	*parttab;
 	int		gotbb = 0;
+	char *		bbstr;
 	iz_lba		dstart;
 	iz_size		dsize;
 	int		dowarn = debug ? 2 : 0;
 
 #ifdef WITH_GPT
-	if (!gotbb && parse_gpt(fd, parttab, &dstart, &dsize, dowarn) == 0)
+	if (!gotbb && parse_gpt(fd, &disk, dowarn) == 0) {
 		gotbb = 1;
+		bbstr = "GPT";
+	}
 #endif
 #ifdef WITH_MBR
-	if (!gotbb && parse_mbr(fd, parttab, &dstart, &dsize, dowarn) == 0)
+	if (!gotbb && parse_mbr(fd, &disk, dowarn) == 0) {
 		gotbb = 2;
+		bbstr = "MBR";
+	}
 #endif
 
 	if (!gotbb) {
@@ -977,11 +983,14 @@ read_image(int fd)
 		return 1;
 	}
 
+	parttab = disk.slices;
+	dstart = 0;
+	dsize = disk.dsize;
+
 	if (debug) {
 		int i;
 
-		fprintf(stderr, "%s Partitions:\n",
-			gotbb == 1 ? "GPT" : "MBR");
+		fprintf(stderr, "%s Partitions:\n", bbstr);
 		for (i = 0; i < MAXSLICES; i++) {
 			struct sliceinfo *sinfo;
 
@@ -1047,6 +1056,34 @@ read_image(int fd)
 	}
 	if (rval)
 		return 1;
+
+	/*
+	 * If not in slice mode, skip sectors outside of any partition.
+	 *
+	 * XXX we could skip space between partitions too since we don't
+	 * allow overlapping partitions. But partitions don't have to be
+	 * in lowest to highest order on the disk, so it is harder.
+	 */
+	if (!slicemode) {
+		iz_lba dlow = disk.lodata;
+		iz_lba dhigh = disk.hidata;
+		iz_lba losect = disk.losect;
+		iz_lba hisect = disk.hisect;
+
+		if (losect > dlow) {
+			addskip(dlow, losect-dlow);
+			if (dowarn > 1)
+				warnx("%s: skipping %u sectors at %u",
+				      bbstr, losect - dlow, dlow);
+		}
+		if (hisect < dhigh) {
+			addskip(hisect, dhigh-hisect);
+			if (dowarn > 1)
+				warnx("%s: skipping %lu sectors at %u",
+				      bbstr, (unsigned long)(dhigh - hisect),
+				      hisect + 1);
+		}
+	}
 
 	/*
 	 * Now operate on individual slices.
