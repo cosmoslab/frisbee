@@ -574,21 +574,6 @@ sub process_image($)
     }
 
     #
-    # XXX we don't support GPT right now, so we can only do Linux partition
-    # images directly from the partition device.
-    #
-    my $isgpt = 0;
-    if ($^O eq 'linux' && -x "/sbin/sgdisk" &&
-	!mysystem("$sudo /sbin/sgdisk ".$iinfo{$iid}{'disk'}." >/dev/null 2>&1")) {
-	if ($iinfo{$iid}{'part'} == 0) {
-	    print STDERR
-		"Cannot take whole disk image of GPT disk\n";
-	    exit(3);
-	}
-	$isgpt = 1;
-    }
-
-    #
     # Fire off the command:
     #
     # file:
@@ -606,13 +591,8 @@ sub process_image($)
     if (exists($iinfo{$iid}{'izopts'})) {
 	$cmd .= $iinfo{$iid}{'izopts'};
     }
-    if ($isgpt) {
-	# force imagezip to treat as an ext filesystem
-	$cmd .= " -S 131";
-    } else {
-	if ($iinfo{$iid}{'part'} != 0) {
-	    $cmd .= " -s " . $iinfo{$iid}{'part'};
-	}
+    if ($iinfo{$iid}{'part'} != 0) {
+	$cmd .= " -s " . $iinfo{$iid}{'part'};
     }
     if (exists($iinfo{$iid}{'sigfile'})) {
 	$cmd .= " -H $localdir/sigfile";
@@ -621,10 +601,6 @@ sub process_image($)
 	$cmd .= " -U $localdir/nsigfile";
     }
     $cmd .= " " . $iinfo{$iid}{'disk'};
-    if ($isgpt) {
-	# use the slice device
-	$cmd .= $iinfo{$iid}{'part'};
-    }
 
     my $image = $iinfo{$iid}{'iname'};
     if ($iinfo{$iid}{'method'} eq "file") {

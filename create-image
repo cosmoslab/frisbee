@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 
 #
-# Copyright (c) 2000-2014 University of Utah and the Flux Group.
+# Copyright (c) 2000-2015 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -186,30 +186,9 @@ if ($^O eq 'linux') {
 }
 
 #
-# XXX we don't support GPT right now, so we can only do Linux partition
-# images directly from the partition device.
-#
-my $isgpt = 0;
-if ($^O eq 'linux' && -x "/sbin/sgdisk" &&
-    !system("$sudo /sbin/sgdisk $device >/dev/null 2>&1")) {
-    if ($slicenum == 0) {
-	print STDERR
-	    "Cannot take whole disk image of GPT disk\n";
-	exit(3);
-    }
-    $isgpt = 1;
-}
-
-#
 # If imageid is defined, we use the frisbee uploader.
 #
-my $cmd = "$sudo $zipper";
-if ($isgpt) {
-    # force imagezip to treat as an ext filesystem and use the slice device
-    $cmd .= " -S 131 $device$slicenum $filename";
-} else {
-    $cmd .= " $slice $device $filename";
-}
+my $cmd = "$sudo $zipper $slice $device $filename";
 if (defined($imageid)) {
     # use basic shell sleezy trick to capture exit status from imagezip
     $cmd = "( $cmd || echo \$? > /tmp/imagezip.stat )";
