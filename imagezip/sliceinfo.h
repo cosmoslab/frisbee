@@ -52,6 +52,7 @@ typedef uint16_t	iz_flags;
 #define	IZTYPE_LINUX		0x83	/* Linux partition */
 #define IZTYPE_386BSD		0xa5	/* Free/NetBSD */
 #define IZTYPE_OPENBSD		0xa6	/* OpenBSD */
+#define IZTYPE_PROTECTIVE	0xee	/* GPT protective MBR */
 
 /* These have no corresponding MBR type (should be 0x100 or above) */
 #define IZTYPE_FBSDBOOT		0xA501	/* FreeBSD Boot partition */
@@ -121,5 +122,14 @@ extern partmap_t ignore, forceraw;
 
 extern struct sliceinfo *getslicemap(iz_type stype);
 extern void printslicemap(void);
+
+#ifdef WITH_MBR
+extern int parse_mbr(int fd, struct iz_disk *disk, int dowarn);
+extern int set_mbr_type(int fd, int slice, iz_type type);
+#endif
+#ifdef WITH_GPT
+extern int parse_gpt(int fd, struct iz_disk *disk, int dowarn);
+extern int set_gpt_type(int fd, int slice, iz_type type);
+#endif
 
 #endif /* _SLICEINFO_H_ */

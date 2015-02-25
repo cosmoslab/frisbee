@@ -60,7 +60,9 @@ static int curent, bootonce;
 static char *secbuf;
 
 #ifndef IMAGEZIP
-static void
+static
+#endif
+void
 gptupdate(const char *which, struct dsk *dskp, struct gpt_hdr *hdr,
     struct gpt_ent *table)
 {
@@ -96,6 +98,7 @@ gptupdate(const char *which, struct dsk *dskp, struct gpt_hdr *hdr,
 	}
 }
 
+#ifndef IMAGEZIP
 int
 gptfind(const uuid_t *uuid, struct dsk *dskp, int part)
 {
@@ -237,7 +240,6 @@ gptbootfailed(struct dsk *dskp)
 		gptupdate("backup", dskp, &hdr_backup, table_backup);
 	}
 }
-#endif
 
 static void
 gptbootconv(const char *which, struct dsk *dskp, struct gpt_hdr *hdr,
@@ -285,6 +287,7 @@ gptbootconv(const char *which, struct dsk *dskp, struct gpt_hdr *hdr,
 	if (drvwrite(dskp, secbuf, hdr->hdr_lba_self, 1))
 		printf("%s: unable to update %s GPT header\n", BOOTPROG, which);
 }
+#endif
 
 static int
 gptread_table(const char *which, const uuid_t *uuid, struct dsk *dskp,
@@ -371,6 +374,7 @@ gptread(const uuid_t *uuid, struct dsk *dskp, char *buf)
 		}
 	}
 
+#ifndef IMAGEZIP
 	/*
 	 * Convert all BOOTONCE without BOOTME flags into BOOTFAILED.
 	 * BOOTONCE without BOOTME means that we tried to boot from it,
@@ -384,6 +388,7 @@ gptread(const uuid_t *uuid, struct dsk *dskp, char *buf)
 		gptbootconv("primary", dskp, &hdr_primary, table_primary);
 	if (hdr_backup_lba != 0)
 		gptbootconv("backup", dskp, &hdr_backup, table_backup);
+#endif
 
 	if (hdr_primary_lba == 0 && hdr_backup_lba == 0)
 		return (-1);
@@ -392,12 +397,25 @@ gptread(const uuid_t *uuid, struct dsk *dskp, char *buf)
 
 #ifdef IMAGEZIP
 void
-gptgettables(struct gpt_hdr **hdr, struct gpt_ent **ent)
+gptgettables(struct gpt_hdr **hdr, struct gpt_ent **ent,
+	     struct gpt_hdr **ohdr, struct gpt_ent **oent)
 {
 	if (hdr)
 		*hdr = gpthdr;
 	if (ent)
 		*ent = gpttable;
+	if (ohdr)
+		*ohdr = (gpthdr == &hdr_primary) ?
+			&hdr_backup : &hdr_primary;
+	if (oent)
+		*oent = (gpttable == table_primary) ?
+			table_backup : table_primary;
+}
+
+/* XXX hack so we can use gptupdate */
+void
+gptsetcurent(int idx)
+{
+	curent = idx;
 }
 #endif
-

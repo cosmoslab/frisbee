@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -104,7 +104,7 @@ getdisksize(int fd)
 		if (lastoff > 0)
 			disksize = (unsigned long)(lastoff / ssize);
 #ifdef TEST
-		fprintf(stderr, "lseek SEEK_END returned %lu\n", disksize);
+		fprintf(stderr, "lseek SEEK_END returned %ld, disksize=%lu\n", (long)lastoff, disksize);
 #endif
 
 	}
@@ -112,15 +112,17 @@ getdisksize(int fd)
 	/*
 	 * Make sure we can seek to that sector
 	 */
-	if (lseek(fd, (off_t)(disksize-1) * ssize, SEEK_SET) < 0)
-		fprintf(stderr, "WARNING: "
-			"could not seek to final sector (%lu) of disk\n",
-			disksize - 1);
+	if (disksize > 0) {
+		if (lseek(fd, (off_t)(disksize-1) * ssize, SEEK_SET) < 0)
+			fprintf(stderr, "WARNING: could not seek to "
+				"final sector (%lu) of disk\n",
+				disksize - 1);
 
-	if (whuzat >= 0) {
-		if (lseek(fd, whuzat, SEEK_SET) < 0)
-			fprintf(stderr, "WARNING: "
-				"could not seek to previous offset on disk\n");
+		if (whuzat >= 0) {
+			if (lseek(fd, whuzat, SEEK_SET) < 0)
+				fprintf(stderr, "WARNING: could not seek to "
+					"previous offset on disk\n");
+		}
 	}
 
 	return disksize;

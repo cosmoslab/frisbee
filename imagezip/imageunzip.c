@@ -630,7 +630,7 @@ main(int argc, char *argv[])
 			break;
 
 		case 'D':
-			dostype = atoi(optarg);
+			dostype = (int)strtoul(optarg, NULL, 0);
 			break;
 
 		case 'p':
@@ -1922,27 +1922,51 @@ zero_remainder()
 }
 
 #include "sliceinfo.h"
+#ifdef WITH_MBR
 #include "mbr/mbr.h"
+#endif
+#ifdef WITH_GPT
+#include "gpt/gpt_glue.h"
+#endif
 
 static long long outputmaxsize = 0;
+static int ismbr;
 
 int
 getslicebounds(int slice)
 {
 	struct iz_disk disk;
 	struct iz_slice *parttab;
+	int dowarn = debug ? 2 : 0;
+	int gotbb = 0;
 
 	if (slice < 1 || slice > MAXSLICES) {
-		fprintf(stderr, "Slice must be 1-%d\n", MAXSLICES);
+		fprintf(stderr, "Slice must be between 1-%d\n", MAXSLICES);
 		return 1;
 	}
 
-	if (parse_mbr(outfd, &disk, 1))
+#ifdef WITH_GPT
+	if (!gotbb && parse_gpt(outfd, &disk, dowarn) == 0) {
+		gotbb = 1;
+		ismbr = 0;
+	}
+#endif
+#ifdef WITH_MBR
+	if (!gotbb && parse_mbr(outfd, &disk, dowarn) == 0) {
+		gotbb = 1;
+		ismbr = 1;
+	}
+#endif
+	if (!gotbb) {
+		fprintf(stderr, "Could not find valid partition table\n");
 		return 1;
+	}
 
 	parttab = disk.slices;
-	if (parttab[slice-1].type == IZTYPE_INVALID)
+	if (parttab[slice-1].type == IZTYPE_INVALID) {
+		fprintf(stderr, "Slice %d does not exist\n", slice);
 		return 1;
+	}
 
 	outputminsec  = parttab[slice-1].offset;
 	outputmaxsec  = parttab[slice-1].offset + parttab[slice-1].size;
@@ -1959,10 +1983,16 @@ getslicebounds(int slice)
 void
 setslicetype(int slice, int dostype)
 {
-	if (set_mbr_type(outfd, slice, (iz_type)dostype))
-		fprintf(stderr, "WARNING: could not set MBR type!\n");
+	int rv;
+
+	if (ismbr)
+		rv = set_mbr_type(outfd, slice, (iz_type)dostype);
 	else
-		fprintf(stderr, "Set type of DOS partition %d to %d\n",
+		rv = set_gpt_type(outfd, slice, (iz_type)dostype);
+	if (rv)
+		fprintf(stderr, "WARNING: could not set partition type!\n");
+	else
+		fprintf(stderr, "Set partition %d type to 0x%04X\n",
 			slice, dostype);
 }
 

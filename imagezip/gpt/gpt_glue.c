@@ -49,6 +49,7 @@
 
 static char lastmsg[512];
 static int silent = 0;
+static void gpt_utf8_to_utf16(const uint8_t *s8, uint16_t *s16, size_t s16len);
 
 int
 gpt_printf(const char * __restrict fmt, ...)
@@ -128,60 +129,80 @@ struct gptmap {
 	struct uuid gpttype;
 	char *desc;
 	iz_type iztype;
+	uint16_t shortid;
 };
 struct gptmap gptmap[] = {
-	{GPT_ENT_TYPE_UNUSED, "UNUSED", IZTYPE_UNUSED},
-	{GPT_ENT_TYPE_FREEBSD, "FREEBSD", IZTYPE_386BSD},
-	{GPT_ENT_TYPE_FREEBSD_UFS, "FREEBSD_UFS", IZTYPE_FBSDNOLABEL},
-	{GPT_ENT_TYPE_LINUX_DATA, "LINUX_DATA", IZTYPE_LINUX},
-	{GPT_ENT_TYPE_LINUX_SWAP, "LINUX_SWAP", IZTYPE_LINSWP},
-	{GPT_ENT_TYPE_BIOS_BOOT, "BIOS_BOOT", IZTYPE_BIOSBOOT},
-	{GPT_ENT_TYPE_FREEBSD_BOOT, "FREEBSD_BOOT", IZTYPE_FBSDBOOT},
-	{GPT_ENT_TYPE_FREEBSD_SWAP, "FREEBSD_SWAP", IZTYPE_FBSDSWAP},
-	{GPT_ENT_TYPE_EFI, "EFI", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_MBR, "MBR", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_FREEBSD_NANDFS, "FREEBSD_NANDFS", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_FREEBSD_VINUM, "FREEBSD_VINUM", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_FREEBSD_ZFS, "FREEBSD_ZFS", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_PREP_BOOT, "PREP_BOOT", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_MS_RESERVED, "MS_RESERVED", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_MS_BASIC_DATA, "MS_BASIC_DATA", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_MS_LDM_METADATA, "MS_LDM_METADATA", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_MS_LDM_DATA, "MS_LDM_DATA", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_LINUX_RAID, "LINUX_RAID", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_LINUX_LVM, "LINUX_LVM", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_VMFS, "VMFS", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_VMKDIAG, "VMKDIAG", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_VMRESERVED, "VMRESERVED", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_VMVSANHDR, "VMVSANHDR", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_APPLE_BOOT, "APPLE_BOOT", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_APPLE_HFS, "APPLE_HFS", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_APPLE_UFS, "APPLE_UFS", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_APPLE_ZFS, "APPLE_ZFS", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_APPLE_RAID, "APPLE_RAID", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_APPLE_RAID_OFFLINE, "APPLE_RAID_OFFLINE", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_APPLE_LABEL, "APPLE_LABEL", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_APPLE_TV_RECOVERY, "APPLE_TV_RECOVERY", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_NETBSD_FFS, "NETBSD_FFS", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_NETBSD_LFS, "NETBSD_LFS", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_NETBSD_SWAP, "NETBSD_SWAP", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_NETBSD_RAID, "NETBSD_RAID", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_NETBSD_CCD, "NETBSD_CCD", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_NETBSD_CGD, "NETBSD_CGD", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_DRAGONFLY_LABEL32, "DRAGONFLY_LABEL32", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_DRAGONFLY_SWAP, "DRAGONFLY_SWAP", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_DRAGONFLY_UFS1, "DRAGONFLY_UFS1", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_DRAGONFLY_VINUM, "DRAGONFLY_VINUM", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_DRAGONFLY_CCD, "DRAGONFLY_CCD", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_DRAGONFLY_LABEL64, "DRAGONFLY_LABEL64", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_DRAGONFLY_LEGACY, "DRAGONFLY_LEGACY", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_DRAGONFLY_HAMMER, "DRAGONFLY_HAMMER", IZTYPE_UNKNOWN},
-	{GPT_ENT_TYPE_DRAGONFLY_HAMMER2, "DRAGONFLY_HAMMER2", IZTYPE_UNKNOWN}
+	{GPT_ENT_TYPE_UNUSED, "Unused entry", IZTYPE_UNUSED, 0x0000},
+	{GPT_ENT_TYPE_FREEBSD, "FreeBSD disklabel", IZTYPE_386BSD, 0xA500},
+	{GPT_ENT_TYPE_FREEBSD_UFS, "FreeBSD UFS", IZTYPE_FBSDNOLABEL, 0xA503},
+	{GPT_ENT_TYPE_LINUX_DATA, "Linux filesystem", IZTYPE_LINUX, 0x8300},
+	{GPT_ENT_TYPE_LINUX_SWAP, "Linux swap", IZTYPE_LINSWP, 0x8200},
+	{GPT_ENT_TYPE_BIOS_BOOT, "BIOS boot partition", IZTYPE_BIOSBOOT, 0xEF02},
+	{GPT_ENT_TYPE_FREEBSD_BOOT, "FreeBSD boot", IZTYPE_FBSDBOOT, 0xA501},
+	{GPT_ENT_TYPE_FREEBSD_SWAP, "FreeBSD swap", IZTYPE_FBSDSWAP, 0xA502},
+	{GPT_ENT_TYPE_EFI, "EFI System", IZTYPE_UNKNOWN, 0xEF00},
+	{GPT_ENT_TYPE_MBR, "MBR partition scheme", IZTYPE_UNKNOWN, 0xEF01},
+	{GPT_ENT_TYPE_FREEBSD_NANDFS, "FREEBSD_NANDFS", IZTYPE_UNKNOWN, 0xFFFF},
+	{GPT_ENT_TYPE_FREEBSD_VINUM, "FreeBSD Vinum/RAID", IZTYPE_UNKNOWN, 0xA505},
+	{GPT_ENT_TYPE_FREEBSD_ZFS, "FreeBSD ZFS", IZTYPE_UNKNOWN, 0xA504},
+	{GPT_ENT_TYPE_PREP_BOOT, "PowerPC PReP boot", IZTYPE_UNKNOWN, 0x4100},
+	{GPT_ENT_TYPE_MS_RESERVED, "Microsoft reserved", IZTYPE_UNKNOWN, 0x0C01},
+	{GPT_ENT_TYPE_MS_BASIC_DATA, "Microsoft basic data", IZTYPE_UNKNOWN, 0x0700},
+	{GPT_ENT_TYPE_MS_LDM_METADATA, "Windows LDM metadata", IZTYPE_UNKNOWN, 0x4201},
+	{GPT_ENT_TYPE_MS_LDM_DATA, "Windows LDM data", IZTYPE_UNKNOWN, 0x4200},
+	{GPT_ENT_TYPE_LINUX_RAID, "Linux RAID", IZTYPE_UNKNOWN, 0xFD00},
+	{GPT_ENT_TYPE_LINUX_LVM, "Linux LVM", IZTYPE_UNKNOWN, 0x8E00},
+	{GPT_ENT_TYPE_VMFS, "VMWare VMFS", IZTYPE_UNKNOWN, 0xFB00},
+	{GPT_ENT_TYPE_VMKDIAG, "VMWare kcore crash protection", IZTYPE_UNKNOWN, 0xFC00},
+	{GPT_ENT_TYPE_VMRESERVED, "VMWare reserved", IZTYPE_UNKNOWN, 0xFB01},
+	{GPT_ENT_TYPE_VMVSANHDR, "VMVSANHDR", IZTYPE_UNKNOWN, 0xFB02},
+	{GPT_ENT_TYPE_APPLE_BOOT, "Apple boot", IZTYPE_UNKNOWN, 0xAB00},
+	{GPT_ENT_TYPE_APPLE_HFS, "Apple HFS/HFS+", IZTYPE_UNKNOWN, 0xAF00},
+	{GPT_ENT_TYPE_APPLE_UFS, "Apple UFS", IZTYPE_UNKNOWN, 0xA800},
+	{GPT_ENT_TYPE_APPLE_ZFS, "Solaris/Apple ZFS", IZTYPE_UNKNOWN, 0xBF01},
+	{GPT_ENT_TYPE_APPLE_RAID, "Apple RAID", IZTYPE_UNKNOWN, 0xAF01},
+	{GPT_ENT_TYPE_APPLE_RAID_OFFLINE, "Apple RAID offline", IZTYPE_UNKNOWN, 0xAF02},
+	{GPT_ENT_TYPE_APPLE_LABEL, "Apple label", IZTYPE_UNKNOWN, 0xAF03},
+	{GPT_ENT_TYPE_APPLE_TV_RECOVERY, "AppleTV recovery", IZTYPE_UNKNOWN, 0xAF04},
+	{GPT_ENT_TYPE_NETBSD_FFS, "NetBSD FFS", IZTYPE_UNKNOWN, 0xA902},
+	{GPT_ENT_TYPE_NETBSD_LFS, "NetBSD LFS", IZTYPE_UNKNOWN, 0xA903},
+	{GPT_ENT_TYPE_NETBSD_SWAP, "NetBSD swap", IZTYPE_UNKNOWN, 0xA901},
+	{GPT_ENT_TYPE_NETBSD_RAID, "NetBSD RAID", IZTYPE_UNKNOWN, 0xA906},
+	{GPT_ENT_TYPE_NETBSD_CCD, "NetBSD concatenated", IZTYPE_UNKNOWN, 0xA904},
+	{GPT_ENT_TYPE_NETBSD_CGD, "NetBSD encrypted", IZTYPE_UNKNOWN, 0xA905},
+	{GPT_ENT_TYPE_DRAGONFLY_LABEL32, "Dragonfly label32", IZTYPE_UNKNOWN, 0xFFFF},
+	{GPT_ENT_TYPE_DRAGONFLY_SWAP, "Dragonfly swap", IZTYPE_UNKNOWN, 0xFFFF},
+	{GPT_ENT_TYPE_DRAGONFLY_UFS1, "Dragonfly UFS1", IZTYPE_UNKNOWN, 0xFFFF},
+	{GPT_ENT_TYPE_DRAGONFLY_VINUM, "Dragonfly Vinum", IZTYPE_UNKNOWN, 0xFFFF},
+	{GPT_ENT_TYPE_DRAGONFLY_CCD, "Dragonfly concatenated", IZTYPE_UNKNOWN, 0xFFFF},
+	{GPT_ENT_TYPE_DRAGONFLY_LABEL64, "Dragonfly label64", IZTYPE_UNKNOWN, 0xFFFF},
+	{GPT_ENT_TYPE_DRAGONFLY_LEGACY, "Dragonfly legacy", IZTYPE_UNKNOWN, 0xFFFF},
+	{GPT_ENT_TYPE_DRAGONFLY_HAMMER, "Dragonfly Hammer", IZTYPE_UNKNOWN, 0xFFFF},
+	{GPT_ENT_TYPE_DRAGONFLY_HAMMER2, "Dragonfly Hammer2", IZTYPE_UNKNOWN, 0xFFFF}
 };
 int ngptmap = sizeof(gptmap) / sizeof(gptmap[0]);
 
-struct gptmap *
-getgpttype(struct uuid *gtype)
+static struct gptmap *
+getgpttypebyiztype(iz_type iztype)
+{
+	int i;
+
+	/* check both DOS ids and GPT ids */
+	if (iztype <= 0xFF) {
+		for (i = 0; i < ngptmap; i++)
+			if (gptmap[i].iztype == iztype)
+				return &gptmap[i];
+		return NULL;
+	}
+
+	for (i = 0; i < ngptmap; i++)
+		if (gptmap[i].shortid == iztype)
+			return &gptmap[i];
+	return NULL;
+}
+
+static struct gptmap *
+getgpttypebyuuid(struct uuid *gtype)
 {
 	int i;
 	for (i = 0; i < ngptmap; i++)
@@ -219,7 +240,7 @@ parse_gpt(int fd, struct iz_disk *disk, int dowarn)
 		return 1;
 
 	/* XXX get pointers to the static structs in gpt.c */
-	gptgettables(&hdr, &ent);
+	gptgettables(&hdr, &ent, NULL, NULL);
 	if (!hdr || !ent) {
 		warnx("GPT: no header or table!?");
 		return 1;
@@ -233,7 +254,7 @@ parse_gpt(int fd, struct iz_disk *disk, int dowarn)
 	losect = ~0;
 	hisect = 0;
 	for (i = 0; i < hdr->hdr_entries; i++) {
-		struct gptmap *gmap = getgpttype(&ent[i].ent_type);
+		struct gptmap *gmap = getgpttypebyuuid(&ent[i].ent_type);
 		uint64_t start = ent[i].ent_lba_start;
 		uint64_t size = ent[i].ent_lba_end - ent[i].ent_lba_start + 1;
 		iz_type type = IZTYPE_UNKNOWN;
@@ -328,4 +349,125 @@ parse_gpt(int fd, struct iz_disk *disk, int dowarn)
 	}
 
 	return 0;
+}
+
+int
+set_gpt_type(int fd, int slice, iz_type iztype)
+{
+	struct gptmap *gmap;
+	struct gpt_hdr *hdr, *ohdr;
+	struct gpt_ent *ent, *oent;
+	char secbuf[SECSIZE+SECSIZE-1], *buf = SECALIGN(secbuf);
+	struct dsk dsk;
+	uuid_t uuid;
+
+	gmap = getgpttypebyiztype(iztype);
+	if (gmap == NULL) {
+		fprintf(stderr, "Cannot map type 0x%x to a GPT type\n",
+			iztype);
+		return 1;
+	}
+
+	/* read existing GPT */
+	dsk.fd = fd;
+	if (gptread(&uuid, &dsk, buf))
+		return 1;
+	gptgettables(&hdr, &ent, &ohdr, &oent);
+	if (!hdr || !ent || !oent) {
+		fprintf(stderr, "GPT: no header or table!?\n");
+		return 1;
+	}
+	if (slice > hdr->hdr_entries) {
+		fprintf(stderr, "Invalid slice number %d\n", slice);
+		return 1;
+	}
+
+	/* change partition type in both copies */
+	memcpy(&ent[slice-1].ent_type, &gmap->gpttype, sizeof(struct uuid));
+	memcpy(&oent[slice-1].ent_type, &gmap->gpttype, sizeof(struct uuid));
+
+	/* set the name from the description (this is what sgpart does) */
+	int len = sizeof(ent[slice-1].ent_name) / 2;
+	gpt_utf8_to_utf16((uint8_t *)gmap->desc, ent[slice-1].ent_name, len);
+	gpt_utf8_to_utf16((uint8_t *)gmap->desc, oent[slice-1].ent_name, len);
+
+	/* write out new GPT */
+	gptsetcurent(slice - 1);
+	gptupdate("primary", &dsk, hdr, ent);
+	gptupdate("backup", &dsk, ohdr, oent);
+
+	return 0;
+}
+
+#ifdef __FreeBSD__
+#include <sys/endian.h>
+#endif
+
+/* Ripped from /usr/src/sys/geom/part/g_part_gpt.c */
+static void
+gpt_utf8_to_utf16(const uint8_t *s8, uint16_t *s16, size_t s16len)
+{
+	size_t s16idx, s8idx;
+	uint32_t utfchar;
+	unsigned int c, utfbytes;
+
+	s8idx = s16idx = 0;
+	utfchar = 0;
+	utfbytes = 0;
+	bzero(s16, s16len << 1);
+	while (s8[s8idx] != 0 && s16idx < s16len) {
+		c = s8[s8idx++];
+		if ((c & 0xc0) != 0x80) {
+			/* Initial characters. */
+			if (utfbytes != 0) {
+				/* Incomplete encoding of previous char. */
+				s16[s16idx++] = htole16(0xfffd);
+			}
+			if ((c & 0xf8) == 0xf0) {
+				utfchar = c & 0x07;
+				utfbytes = 3;
+			} else if ((c & 0xf0) == 0xe0) {
+				utfchar = c & 0x0f;
+				utfbytes = 2;
+			} else if ((c & 0xe0) == 0xc0) {
+				utfchar = c & 0x1f;
+				utfbytes = 1;
+			} else {
+				utfchar = c & 0x7f;
+				utfbytes = 0;
+			}
+		} else {
+			/* Followup characters. */
+			if (utfbytes > 0) {
+				utfchar = (utfchar << 6) + (c & 0x3f);
+				utfbytes--;
+			} else if (utfbytes == 0)
+				utfbytes = ~0;
+		}
+		/*
+		 * Write the complete Unicode character as UTF-16 when we
+		 * have all the UTF-8 charactars collected.
+		 */
+		if (utfbytes == 0) {
+			/*
+			 * If we need to write 2 UTF-16 characters, but
+			 * we only have room for 1, then we truncate the
+			 * string by writing a 0 instead.
+			 */
+			if (utfchar >= 0x10000 && s16idx < s16len - 1) {
+				s16[s16idx++] =
+				    htole16(0xd800 | ((utfchar >> 10) - 0x40));
+				s16[s16idx++] =
+				    htole16(0xdc00 | (utfchar & 0x3ff));
+			} else
+				s16[s16idx++] = (utfchar >= 0x10000) ? 0 :
+				    htole16(utfchar);
+		}
+	}
+	/*
+	 * If our input string was truncated, append an invalid encoding
+	 * character to the output string.
+	 */
+	if (utfbytes != 0 && s16idx < s16len)
+		s16[s16idx++] = htole16(0xfffd);
 }

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2014 University of Utah and the Flux Group.
+# Copyright (c) 2000-2015 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -31,6 +31,12 @@ endif
 DISTFILES	= TODO client.c decls.h event.c event.h log.c log.h \
 		  network.c queue.h server.c trace.c trace.h utils.c utils.h
 EXPANDCOPYRIGHT	= /usr/site/lib/copyright/expand-copyr
+
+#
+# XXX should be in sync with imagezip/GNUmakefile
+#
+WITH_MBR	= 1
+WITH_GPT	= 1
 
 #
 # Support encrypted and signed-checksumed images.
@@ -102,12 +108,13 @@ endif
 endif
 
 CLIENTFLAGS	= $(CFLAGS)
+CLIENTLIBS	=
 ifeq ($(SYSTEM),Linux)
-CLIENTLIBS	= -lrt -lz $(PTHREADLIBS)
+CLIENTLIBS	+= -lrt -lz $(PTHREADLIBS)
 else
-CLIENTLIBS	= -lz $(PTHREADLIBS)
+CLIENTLIBS	+= -lz $(PTHREADLIBS)
 endif
-CLIENTOBJS	= client.o frisbee.o mbr.o checksum.o disksize.o $(SHAREDOBJS)
+CLIENTOBJS	= client.o frisbee.o checksum.o disksize.o $(SHAREDOBJS)
 
 SERVERFLAGS	= $(CFLAGS)
 SERVERLIBS	= $(PTHREADLIBS)
@@ -154,6 +161,9 @@ LDFLAGS		= $(LDSTATIC)
 
 IUZFLAGS	= -DFRISBEE -I$(IZSRCDIR)
 IUZLIBS		= 
+IUZDEPS		=
+# be consistent with how imagezip builds
+IUZDEPFLAGS	= $(PTHREADCFLAGS)
 
 ifeq ($(WITH_CRYPTO),1)
 IUZFLAGS	+= -DWITH_CRYPTO
@@ -161,6 +171,16 @@ ifeq ($(WITH_SIGNING),1)
 IUZFLAGS	+= -DSIGN_CHECKSUM
 endif
 IUZLIBS		+= -lcrypto
+endif
+ifeq ($(WITH_MBR),1)
+IUZFLAGS	+= -DWITH_MBR
+IUZLIBS		+= ../imagezip/mbr/libmbr.a
+IUZDEPS		+= ../imagezip/mbr/libmbr.a
+endif
+ifeq ($(WITH_GPT),1)
+IUZFLAGS	+= -DWITH_GPT
+IUZLIBS		+= ../imagezip/gpt/libgpt.a
+IUZDEPS		+= ../imagezip/gpt/libgpt.a
 endif
 
 #
@@ -213,7 +233,7 @@ endif
 #CLIENTLIBS	+= -lpubsub
 #EVENTFLAGS	= $(CFLAGS) -I/usr/local/include/pubsub -I$(TESTBED_SRCDIR)
 
-frisbee-debug: $(CLIENTOBJS)
+frisbee-debug: $(CLIENTOBJS) $(IUZDEPS)
 	$(CC) $(LDFLAGS) $(CLIENTFLAGS) $(CLIENTOBJS) $(CLIENTLIBS) $(IUZLIBS) -o $@
 #	cp frisbee frisbee.debug
 #	strip frisbee
@@ -259,16 +279,18 @@ event.o:	$(SRCDIR)/event.c decls.h log.h event.h
 
 $(IZSRCDIR)/imageunzip.c: $(IZSRCDIR)/imagehdr.h $(IZSRCDIR)/queue.h $(IZSRCDIR)/checksum.h
 $(IZSRCDIR)/checksum.c: $(IZSRCDIR)/imagehdr.h $(IZSRCDIR)/checksum.h
-$(IZSRCDIR)/mbr/mbr.c: $(IZSRCDIR)/imagehdr.h $(IZSRCDIR)/sliceinfo.h $(IZSRCDIR)/mbr/mbr.h
+
+# XXX
+../imagezip/mbr/libmbr.a:
+	$(MAKE) SUBDIRCFLAGS="$(IUZDEPFLAGS)" -C ../imagezip/mbr all
+../imagezip/gpt/libgpt.a:
+	$(MAKE) SUBDIRCFLAGS="$(IUZDEPFLAGS)" -C ../imagezip/gpt all
 
 disksize.o:	$(IZSRCDIR)/disksize.c
 	$(CC) -c $(CFLAGS) $(IUZFLAGS) -o disksize.o $<
 
 checksum.o:	$(IZSRCDIR)/checksum.c
 	$(CC) -c $(CFLAGS) $(IUZFLAGS) -o checksum.o $<
-
-mbr.o:	$(IZSRCDIR)/mbr/mbr.c
-	$(CC) -c $(CFLAGS) $(IUZFLAGS) -I$(IZSRCDIR)/mbr -o mbr.o $<
 
 frisbee.o:	$(IZSRCDIR)/imageunzip.c
 	$(CC) -c $(CFLAGS) $(IUZFLAGS) -I$(IZSRCDIR) -o frisbee.o $<

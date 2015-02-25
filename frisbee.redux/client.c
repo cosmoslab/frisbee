@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -364,7 +364,7 @@ main(int argc, char **argv)
 			break;
 
 		case 'D':
-			dostype = atoi(optarg);
+			dostype = (int)strtoul(optarg, NULL, 0);
 			break;
 
 		case 'k':

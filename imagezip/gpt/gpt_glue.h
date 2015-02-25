@@ -55,6 +55,10 @@ int drvwrite(struct dsk *dskp, void *buf, daddr_t lba, unsigned nblk);
 uint64_t drvsize(struct dsk *dskp);
 
 int gptread(const uuid_t *uuid, struct dsk *dskp, char *buf);
-void gptgettables(struct gpt_hdr **hdr, struct gpt_ent **ent);
+void gptgettables(struct gpt_hdr **hdr, struct gpt_ent **ent,
+		  struct gpt_hdr **ohdr, struct gpt_ent **oent);
+void gptupdate(const char *which, struct dsk *dskp, struct gpt_hdr *hdr,
+	       struct gpt_ent *table);
+void gptsetcurent(int idx);
 
 #endif /* _GPT_GLUE_H */

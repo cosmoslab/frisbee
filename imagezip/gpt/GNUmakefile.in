@@ -30,6 +30,9 @@ include $(OBJDIR)/Makeconf
 
 CFLAGS		+= -DIMAGEZIP $(SUBDIRCFLAGS) -I$(MAINDIR) -I$(SRCDIR)
 
+# XXX avoid a symbol conflict
+CFLAGS		+= -Dcrc32=gpt_crc32
+
 all:	libgpt.a
 
 include $(TESTBED_SRCDIR)/GNUmakerules

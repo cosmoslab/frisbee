@@ -82,6 +82,9 @@ struct dospart {
 #ifndef DOSPTYP_OPENBSD
 #define DOSPTYP_OPENBSD 	0xa6	/* OpenBSD */
 #endif
+#ifndef DOSPTYP_PROTECTIVE
+#define DOSPTYP_PROTECTIVE 	0xee	/* GPT protective MBR */
+#endif
 
 #define BOOT_MAGIC	0xAA55
 
@@ -104,6 +107,4 @@ struct doslabel {
 #define DOSPARTSIZE \
 	(DOSPARTOFF + NDOSPART*sizeof(struct dospart) + sizeof(unsigned short))
 
-extern int parse_mbr(int fd, struct iz_disk *disk, int dowarn);
-extern int set_mbr_type(int fd, int slice, iz_type type);
 #endif /* _MBR_H_ */

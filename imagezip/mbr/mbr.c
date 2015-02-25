@@ -144,6 +144,15 @@ read_mbr(int fd, uint32_t bbstart, uint32_t pstart, uint32_t extstart,
 	}
 
 	/*
+	 * If partition 1 is a protective MBR, punt
+	 */
+	if (label.parts[0].dp_typ == DOSPTYP_PROTECTIVE) {
+		if (!silent)
+			warnx("Found protective MBR, this is a GPT disk!");
+		return 1;
+	}
+
+	/*
 	 * Parse out the DOS partitions filling in our partition table.
 	 * We handle extended DOS partitions here as well.
 	 */
@@ -235,6 +244,12 @@ set_mbr_type(int fd, int slice, iz_type dostype)
 	char mbrbuf[DOSPARTSIZE+SECSIZE], *mbr = SECALIGN(mbrbuf);
 	struct doslabel label;
 	int cc;
+
+	if (dostype > 0xFF) {
+		fprintf(stderr, "Unrecognized MBR partition type 0x%x\n",
+			dostype);
+		return 1;
+	}
 
 	if (lseek(fd, sectobytes(DOSBBSECTOR), SEEK_SET) < 0) {
 		perror("Could not seek to DOS label");
