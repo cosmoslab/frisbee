@@ -990,6 +990,12 @@ read_image(int fd)
 	if (debug) {
 		int i;
 
+		fprintf(stderr, "Disk:            start %12d, size %12d\n",
+			0, dsize);
+		fprintf(stderr, "Usable:          start %12d, size %12d\n",
+			disk.lodata, disk.hidata - disk.lodata + 1);
+		fprintf(stderr, "Partition range: start %12d, size %12d\n",
+			disk.losect, disk.hisect - disk.losect + 1);
 		fprintf(stderr, "%s Partitions:\n", bbstr);
 		for (i = 0; i < MAXSLICES; i++) {
 			struct sliceinfo *sinfo;
@@ -1077,7 +1083,7 @@ read_image(int fd)
 				      bbstr, losect - dlow, dlow);
 		}
 		if (hisect < dhigh) {
-			addskip(hisect, dhigh-hisect);
+			addskip(hisect+1, dhigh-hisect);
 			if (dowarn > 1)
 				warnx("%s: skipping %lu sectors at %u",
 				      bbstr, (unsigned long)(dhigh - hisect),
