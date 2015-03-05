@@ -309,8 +309,8 @@ subboss-install: subboss
 client: frisbee frisupload
 
 client-install: client
-	$(INSTALL_PROGRAM) frisbee $(DESTDIR)$(CLIENT_BINDIR)
-	$(INSTALL_PROGRAM) frisupload $(DESTDIR)$(CLIENT_BINDIR)
+	$(INSTALL_PROGRAM) frisbee $(DESTDIR)/usr/local/bin/frisbee
+	$(INSTALL_PROGRAM) frisupload $(DESTDIR)/usr/local/bin/frisupload
 
 clean:
 	/bin/rm -f *.o *.a *.debug

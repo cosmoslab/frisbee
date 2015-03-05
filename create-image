@@ -31,10 +31,16 @@ use Getopt::Std;
 #
 sub usage()
 {
-    print STDOUT "Usage: create-image [-S image-server] [-F imageid] [-s slice] <device file> <filename>\n";
+    print STDOUT "Usage: create-image [-S image-server] [-F imageid] ".
+	"[-s slice] [-b bsname | <device file>] [<filename>]\n";
     exit(-1);
 }
-my  $optlist = "F:S:s:";
+my  $optlist = "F:S:s:b:";
+
+# Drag in path stuff so we can find emulab stuff.
+BEGIN { require "/etc/emulab/paths.pm"; import emulabpaths; }
+use libsetup;
+use liblocsetup;
 
 #
 # Turn off line buffering on output
@@ -58,6 +64,10 @@ my $slice  = "";
 my $slicenum = 0;
 my $device;
 my $filename;
+my $bsname;
+my $bsref;
+my $isgpt = 0;
+my $exitval = 0;
 
 #
 # If we are running as a user, then we will need sudo
@@ -96,10 +106,6 @@ my $imageid;
 if (! getopts($optlist, \%options)) {
     usage();
 }
-if (@ARGV != 2) {
-    usage();
-}
-
 if (defined($options{"S"})) {
     $iserver = $options{"S"};
     if ($iserver =~ /^([-\w\.]+)$/) {
@@ -116,7 +122,6 @@ if (defined($options{"F"})) {
 	die("Bad -F imageid: '$imageid'");
     }
 }
-
 if (defined($options{"s"})) {
     $slicenum = $options{"s"};
 
@@ -133,37 +138,117 @@ if (defined($options{"s"})) {
     # XXX there are still some issues with LILO/GRUB
     $slice = "-N $slice";
 }
-$device   = $ARGV[0];
+if (defined($options{"b"})) {
+    $bsname = $options{"b"};
+    require liblocstorage;
+    require liblocsetup;
+}
+else {
+    #
+    # Normal imaging operation.
+    #
+    usage()
+	if (!@ARGV);
+
+    $device = shift(@ARGV);
+
+    # Untaint the arguments.
+    if ($device =~ /^([-\w.\/]+)$/) {
+	$device = $1;
+    }
+    else {
+	die("Tainted device name: $device");
+    }
+}
 if (defined($imageid)) {
     $filename = "-";
-} else {
-    $filename = $ARGV[1];
-}
-
-#
-# Untaint the arguments.
-#
-# Note different taint check (allow /).
-if ($device =~ /^([-\w.\/]+)$/) {
-    $device = $1;
 }
 else {
-    die("Tainted device name: $device");
+    usage()
+	if (!@ARGV);
+
+    $filename = shift(@ARGV);
+
+    # Untaint.
+    if ($filename =~ /^([-\w.\/\+]+)$/) {
+	$filename = $1;
+    }
+    else {
+	die("Tainted output filename: $filename");
+    }
 }
-if ($filename =~ /^([-\w.\/\+]+)$/) {
-    $filename = $1;
+
+if (defined($bsname)) {
+    #
+    # Taking a snapshot of a blockstore. We need to find the info for
+    # the blockstore so we know the device and mount point, etc. 
+    #
+    my @allcmds = ();
+    if (getstorageconfig(\@allcmds) != 0) {
+	die("Error grabbing storage config!\n");
+    }
+    # Find the blockstore we care about.
+    foreach my $ref (@allcmds) {
+	if ($ref->{'CMD'} eq "SLICE" && $ref->{'VOLNAME'} eq $bsname) {
+	    $bsref = $ref;
+	    last;
+	}
+    }
+    if (!defined($bsref)) {
+	die("Could not find storage configuration for $bsname\n");
+    }
+    #
+    # The storage map tells us the device info.
+    #
+    open(MAP, TMSTORAGEMAP()) or
+	die("Could not open the storage map!\n");
+    while (<MAP>) {
+	if ($_ =~ /^([-\w]+)\s+([-\w\.\/]+)\s+([-\w\.\/]+)\s*/) {
+	    if ($1 eq $bsname) {
+		$device = $2;
+		#
+		# Hmm, storagemap does not have the actual mount device,
+		# which seems wrong since now I have to figure it out
+		# in order to check to see if its mounted.
+		#
+		if ($bsref ne "SYSVOL") {
+		    $device = "/dev/mapper/emulab-${bsname}";
+		}
+		$bsref->{'DEVICE'} = $device;
+	    }
+	}
+    }
+    close(MAP);
+    if (!defined($device)) {
+	die("Could not find $bsname in the storage map!\n");
+    }
+    #
+    # Need to unmount the FS so we can take the snapshot.
+    #
+    if (os_ismounted($device)) {
+	os_unmount($bsref->{'MOUNTPOINT'}) == 0 or
+	    die("Could not unmount $device!\n");
+    }
+    my $fstype = liblocstorage::get_fstype($bsref, $device);
+    if (!defined($fstype)) {
+	os_mount($bsref->{'MOUNTPOINT'});
+	die("Could not determine fstype of $device\n");
+    }
+    # Hacky, cause the blockstore filesystems do not have stub MBRs.
+    if ($fstype eq "ufs") {
+	$slice = "-b";
+    }
+    else {
+	$slice = "-l";
+    }
 }
 else {
-    die("Tainted output filename: $filename");
-}
-
-# Hack for the Linux MFS: we still use the BSD device
-# names in the database so we try to convert them to
-# the equivalent Linux devices here.  This happens to
-# work at the moment, but if device names change again
-# it could break.
-
-if ($^O eq 'linux') {
+    # Hack for the Linux MFS: we still use the BSD device
+    # names in the database so we try to convert them to
+    # the equivalent Linux devices here.  This happens to
+    # work at the moment, but if device names change again
+    # it could break.
+    if ($^O eq 'linux') {
 	$device =~ m#/dev/(\D+)(\d+)#;
 	($dtype, $dunit) = ($1, $2);
 	$dunit -= 4 if ($dtype eq 'ad' && $dunit > 3);
@@ -183,6 +268,7 @@ if ($^O eq 'linux') {
 	}
 
 	$device = "/dev/sd$dunit";
+    }
 }
 
 #
@@ -195,6 +281,8 @@ if (defined($imageid)) {
 
     $cmd .= " | $uploader -S $iserver -F $imageid -";
 }
+
+print STDERR "Command: '$cmd'\n";
 
 #
 # Run the command using sudo, since by definition only testbed users
@@ -215,7 +303,11 @@ if (system("$cmd") || -e "/tmp/imagezip.stat") {
     print STDERR "    status:    $stat\n";
     print STDERR "    izstatus:  $izstat\n"
 	if ($izstat);
-    exit 1;
+    $exitval = 1;
 }
-
-exit 0;
+if (defined($bsref) &&
+    os_mount($bsref->{'MOUNTPOINT'})) {
+    print STDERR "Could not remount " . $bsref->{'MOUNTPOINT'} . "\n";
+    exit(6);
+}
+exit $exitval;

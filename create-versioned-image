@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 
 #
-# Copyright (c) 2000-2014 University of Utah and the Flux Group.
+# Copyright (c) 2000-2015 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -123,6 +123,11 @@ $| = 1;
 $ENV{'PATH'} = "/bin:/sbin:/usr/bin:";
 delete @ENV{'IFS', 'CDPATH', 'ENV', 'BASH_ENV'};
 
+# Drag in path stuff so we can find emulab stuff.
+BEGIN { require "/etc/emulab/paths.pm"; import emulabpaths; }
+use libsetup;
+use liblocsetup;
+
 #
 # No configure vars.
 #
@@ -193,6 +198,87 @@ sub map_diskname($)
     return "/dev/$dtype$dunit";
 }
 
+#
+# Map a blockstore name to its device and fstype.
+#
+my $storageconfig = undef;
+
+sub map_bsname($)
+{
+    my ($bsname) = @_;
+    my $bsref;
+    my $device;
+    require liblocstorage;
+
+    if (!defined($storageconfig)) {
+	my @allcmds = ();
+	if (getstorageconfig(\@allcmds) != 0) {
+	    print STDERR "Error grabbing storage config!\n";
+	    goto bad;
+	}
+	$storageconfig = \@allcmds;
+    }
+    # Find the blockstore we care about.
+    foreach my $ref (@$storageconfig) {
+	if ($ref->{'CMD'} eq "SLICE" && $ref->{'VOLNAME'} eq $bsname) {
+	    $bsref = $ref;
+	    last;
+	}
+    }
+    if (!defined($bsref)) {
+	print STDERR "Could not find storage configuration for $bsname\n";
+	goto bad;
+    }
+    #
+    # The storage map tells us the device info.
+    #
+    open(MAP, TMSTORAGEMAP()) or
+	die("Could not open the storage map!\n");
+    while (<MAP>) {
+	if ($_ =~ /^([-\w]+)\s+([-\w\.\/]+)\s+([-\w\.\/]+)\s*/) {
+	    if ($1 eq $bsname) {
+		$device = $2;
+		#
+		# Hmm, storagemap does not have the actual mount device,
+		# which seems wrong since now I have to figure it out
+		# in order to check to see if its mounted.
+		#
+		if ($bsref ne "SYSVOL") {
+		    $device = "/dev/mapper/emulab-${bsname}";
+		}
+		$bsref->{'DEVICE'} = $device;
+	    }
+	}
+    }
+    close(MAP);
+    if (!defined($device)) {
+	print STDERR "Could not find $bsname in the storage map!\n";
+	goto bad;
+    }
+    #
+    # Make sure we can unmount now. Remount it, we will unmount again
+    # later in process_image.
+    #
+    if (os_ismounted($device) &&
+	os_unmount($bsref->{'MOUNTPOINT'})) {
+	print STDERR "Could not unmount $device!\n";
+	goto bad;
+    }
+    my $fstype = liblocstorage::get_fstype($bsref, $device);
+    if (os_mount($bsref->{'MOUNTPOINT'})) {
+	print STDERR "Could not remount $device!\n";
+	goto bad;
+    }
+    if (!defined($fstype)) {
+	print STDERR "Could not determine fstype of $device\n";
+	goto bad;
+    }
+    $bsref->{'FSTYPE'} = $fstype;
+    return $bsref;
+  bad:
+    return undef;
+}
+
 sub parse_params(@)
 {
     my ($method,$iname,$disk,$part,$sigfile,$nsigfile);
@@ -231,6 +317,13 @@ sub parse_params(@)
 		    $iinfo{$iid}{'disk'} = map_diskname($val);
 		    if (!defined($iinfo{$iid}{'disk'})) {
 			print STDERR "Bogus DISK '$val'\n";
+			$errors++;
+		    }
+		    next;
+		}
+		if ($key eq "bsname") {
+		    $iinfo{$iid}{'bsref'} = map_bsname($val);
+		    if (!defined($iinfo{$iid}{'bsref'})) {
 			$errors++;
 		    }
 		    next;
@@ -344,8 +437,8 @@ if (defined($options{"f"})) {
 #
 my $dofrisbee = 0;
 foreach my $iid (sort keys %iinfo) {
-    if (!defined($iinfo{$iid}{'disk'})) {
-	print STDERR "Must specify disk\n";
+    if (!(defined($iinfo{$iid}{'disk'}) || defined($iinfo{$iid}{'bsref'}))) {
+	print STDERR "Must specify disk or blockstore\n";
 	exit(1);
     }
     if (!defined($iinfo{$iid}{'part'})) {
@@ -536,6 +629,7 @@ sub writetest($$)
 sub process_image($)
 {
     my ($iid) = @_;
+    my $retval = 0;
 
     if ($verbose) {
 	print "Image #$iid:\n";
@@ -600,7 +694,25 @@ sub process_image($)
     if (exists($iinfo{$iid}{'nsigfile'})) {
 	$cmd .= " -U $localdir/nsigfile";
     }
-    $cmd .= " " . $iinfo{$iid}{'disk'};
+    if (exists($iinfo{$iid}{'bsref'})) {
+	my $bsref = $iinfo{$iid}{'bsref'};
+	
+	$cmd .= " " . $bsref->{'DEVICE'};
+	# Must tell imagezip what is in the partition.
+	if ($bsref->{'FSTYPE'} eq "ufs") {
+	    $cmd .= " -b";
+	}
+	else {
+	    $cmd .= " -l";
+	}
+    }
+    else {
+	$cmd .= " " . $iinfo{$iid}{'disk'};
+	if ($isgpt) {
+	    # use the slice device
+	    $cmd .= $iinfo{$iid}{'part'};
+	}
+    }
 
     my $image = $iinfo{$iid}{'iname'};
     if ($iinfo{$iid}{'method'} eq "file") {
@@ -619,8 +731,27 @@ sub process_image($)
 	$cmd .= " - ";
     }
 
-    if (mysystem("$cmd") || -e "$localdir/imagezip.stat") {
-	my $stat = sprintf("0x%04x", $?);
+    if (exists($iinfo{$iid}{'bsref'}) &&
+	os_ismounted($iinfo{$iid}{'bsref'}->{'DEVICE'}) &&
+	os_unmount($iinfo{$iid}{'bsref'}->{'MOUNTPOINT'})) {
+	print STDERR "Could not unmount " .
+	    $iinfo{$iid}{'bsref'}->{'MOUNTPOINT'} . "!\n";
+	exit(4);
+    }
+
+    if (mysystem("$cmd")) {
+	$retval = $?;
+    }
+
+    if (exists($iinfo{$iid}{'bsref'}) &&
+	os_mount($iinfo{$iid}{'bsref'}->{'MOUNTPOINT'})) {
+	print STDERR "Could not remount ".
+	    $iinfo{$iid}{'bsref'}->{'MOUNTPOINT'} . "!\n";
+	exit(6);
+    }
+
+    if ($retval || -e "$localdir/imagezip.stat") {
+	my $stat = sprintf("0x%04x", $retval);
 	my $izstat = 0;
 	if (-e "$localdir/imagezip.stat") {
 	    $izstat = `cat $localdir/imagezip.stat`;
