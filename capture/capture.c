@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -102,9 +102,10 @@ void die(char *format, ...);
 void dolog(int level, char *format, ...);
 
 int val2speed(int val);
-void rawmode(char *devname, int speed);
-int netmode();
+int rawmode(char *devname, int speed);
+int netmode(int isrestart);
 int progmode(int isrestart);
+int xenmode(int isrestart);
 void writepid(void);
 void createkey(void);
 int handshake(void);
@@ -161,6 +162,8 @@ char   **programargv;
 #define relay_rcv 0
 #define remotemode 0
 #define programmode 0
+#define xendomain 0
+#define retryinterval 0
 #else
 char		  *Bossnode = BOSSNODE;
 struct sockaddr_in Bossaddr;
@@ -169,6 +172,8 @@ int		   serverport = SERVERPORT;
 int		   sockfd, tipactive, portnum, relay_snd, relay_rcv;
 int		   remotemode;
 int		   programmode;
+char		  *xendomain;
+int		   retryinterval = 5000;
 int		   upportnum = -1, upfd = -1, upfilefd = -1;
 char		   uptmpnam[64];
 size_t		   upfilesize = 0;
@@ -374,7 +379,7 @@ main(int argc, char **argv)
 	else
 		Progname = *argv;
 
-	while ((op = getopt(argc, argv, "rds:Hb:ip:c:T:aonu:v:PmMLCl:")) != EOF)
+	while ((op = getopt(argc, argv, "rds:Hb:ip:c:T:aonu:v:PmMLCl:X:R:")) != EOF)
 		switch (op) {
 #ifdef	USESOCKETS
 #ifdef  WITHSSL
@@ -403,6 +408,23 @@ main(int argc, char **argv)
 
 		case 'M':
 			programmode = 1;
+			break;
+		case 'X':
+			xendomain = optarg;
+			break;
+		case 'R':
+			retryinterval = atoi(optarg);
+			/*
+			 * XXX Not less than 100ms. This is mostly just a
+			 * heuristic to catch people who think the value
+			 * is in seconds rather than milliseconds.
+			 */
+			if (retryinterval < 100) {
+				fprintf(stderr,
+					"Retry interval is measured in ms, "
+					"NOT seconds; must be >= 100\n");
+				usage();
+			}
 			break;
 #endif /* USESOCKETS */
 		case 'H':
@@ -462,7 +484,7 @@ main(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-	if (!programmode && argc != 2)
+	if (!(programmode || xendomain) && argc != 2)
 		usage();
 
 	if (!debug && daemon(0, 0))
@@ -484,6 +506,8 @@ main(int argc, char **argv)
 	if (remotemode || programmode) {
 		strcpy(strbuf, argv[1]);
 	}
+	else if (xendomain)
+		strcpy(strbuf, xendomain);
 	else
 		(void) snprintf(strbuf, sizeof(strbuf),
 				DEVNAME, DEVPATH, argv[1]);
@@ -671,21 +695,49 @@ main(int argc, char **argv)
 			die("%s: chmod: %s", Logname, geterr(errno));
 	}
 	
+	writepid();
 	if (!relay_rcv) {
 #ifdef  USESOCKETS
-	    if (remotemode) {
-		if (netmode() != 0)
-		    die("Could not establish connection to %s", Devname);
-	    }
-	    else if (programmode) {
-		if (progmode(0) != 0)
-		    die("Could not start program %s", Devname);
-	    }
-	    else
+		/*
+		 * For these modes, we keep trying until they are successful.
+		 * This mimics the behavior if the connection/program/domain
+		 * dies later and we auto-restart.
+		 *
+		 * XXX this can be bad if the caller gives us a bad argument
+		 * (command line, xen domain name) as we will loop forever.
+		 */
+		int isrestart = -1;
+	retry:
+		isrestart++;
+		if (remotemode) {
+			if (netmode(isrestart) != 0) {
+				warning("could not connect;"
+					" waiting and trying again");
+				usleep(retryinterval * 1000);
+				goto retry;
+			}
+		}
+		else if (programmode) {
+			if (progmode(isrestart) != 0) {
+				warning("sub-program did not start;"
+					" waiting and trying again");
+				usleep(retryinterval * 1000);
+				goto retry;
+			}
+		}
+		else if (xendomain) {
+			if (xenmode(isrestart) != 0) {
+				warning("could not find console for domain;",
+					" waiting and trying again");
+				usleep(retryinterval * 1000);
+				goto retry;
+			}
+		}
+		else
 #endif
-		    rawmode(Devname, speed);
+		if (rawmode(Devname, speed))
+			die("rawmode failed");
 	}
-	writepid();
 	capture();
 	cleanup();
 	exit(0);
@@ -1061,22 +1113,29 @@ capture(void)
 					Machine, cc);
 			if (cc <= 0) {
 #ifdef  USESOCKETS
-				if (remotemode || programmode) {
+				if (remotemode || programmode || xendomain) {
 					FD_CLR(devfd, &sfds);
 					close(devfd);
 					if (remotemode) {
 						warning("remote socket closed;"
 						" attempting to reconnect");
-						while (netmode() != 0) {
-							usleep(5000000);
-						}
+						while (netmode(1) != 0)
+							usleep(retryinterval
+							       * 1000);
 					}
-					else {
+					else if (programmode) {
 						warning("sub-program died;"
 						" attempting to restart");
-						while (progmode(1) != 0) {
-							usleep(5000000);
-						}
+						while (progmode(1) != 0)
+							usleep(retryinterval
+							       * 1000);
+					}
+					else {
+						warning("xen console pty closed;"
+							" attempting to reopen");
+						while (xenmode(1) != 0)
+							usleep(retryinterval
+							       * 1000);
 					}
 					FD_SET(devfd, &sfds);
 					continue;
@@ -1611,18 +1670,23 @@ powermonmode(void)
 /*
  * Put the console line into raw mode.
  */
-void
+int
 rawmode(char *devname, int speed)
 {
 	struct termios t;
 
-	if ((devfd = open(devname, O_RDWR|O_NONBLOCK)) < 0)
-		die("%s: open: %s", devname, geterr(errno));
+	if ((devfd = open(devname, O_RDWR|O_NONBLOCK)) < 0) {
+		warning("%s: open: %s", devname, geterr(errno));
+		return -1;
+	}
 	
 	if (ioctl(devfd, TIOCEXCL, 0) < 0)
 		warning("TIOCEXCL %s: %s", Devname, geterr(errno));
-	if (tcgetattr(devfd, &t) < 0)
-		die("%s: tcgetattr: %s", Devname, geterr(errno));
+	if (tcgetattr(devfd, &t) < 0) {
+		warning("%s: tcgetattr: %s", Devname, geterr(errno));
+		close(devfd);
+		return -1;
+	}
 	(void) cfsetispeed(&t, speed);
 	(void) cfsetospeed(&t, speed);
 	cfmakeraw(&t);
@@ -1634,12 +1698,16 @@ rawmode(char *devname, int speed)
 		t.c_cflag |= CCTS_OFLOW | CRTS_IFLOW;
 #endif
 	t.c_cc[VSTART] = t.c_cc[VSTOP] = _POSIX_VDISABLE;
-	if (tcsetattr(devfd, TCSAFLUSH, &t) < 0)
-		die("%s: tcsetattr: %s", Devname, geterr(errno));
+	if (tcsetattr(devfd, TCSAFLUSH, &t) < 0) {
+		warning("%s: tcsetattr: %s", Devname, geterr(errno));
+		close(devfd);
+		return -1;
+	}
 
 	if (powermon && powermonmode() < 0)
 		die("%s: powermonmode: %s", Devname, geterr(errno));
-	
+
+	return 0;
 }
 
 /*
@@ -1647,7 +1715,7 @@ rawmode(char *devname, int speed)
  */
 #ifdef  USESOCKETS
 int
-netmode()
+netmode(int isrestart)
 {
 	struct sockaddr_in	sin;
 	struct hostent		*he;
@@ -1817,6 +1885,126 @@ progmode(int isrestart)
  err:
 	sigprocmask(SIG_UNBLOCK, &mask, 0);
 	return rv;
+}
+
+#define XEN_XL	"/usr/sbin/xl"
+#define XEN_XSR	"/usr/sbin/xenstore-read"
+
+/*
+ * Capture output from a shell command.
+ */
+static int
+backtick(char *cmd, char *outbuf, int outlen)
+{
+	FILE *pfd;
+	int rv, rv2, cc, len = outlen - 1;
+	char tossbuf[128], *buf = outbuf;
+
+	pfd = popen(cmd, "r");
+	if (pfd == NULL) {
+		warning("Could not execute command");
+		return -1;
+	}
+	while (len > 0 && (cc = fread(buf, 1, len, pfd)) > 0) {
+		len -= cc;
+		buf += cc;
+	}
+	outbuf[outlen - len - 1] = '\0';
+	if (cc) {
+		while (fread(tossbuf, 1, sizeof(tossbuf), pfd) > 0)
+			;
+	}
+
+	rv = ferror(pfd);
+	rv2 = pclose(pfd);
+	if (rv == 0) {
+		rv = rv2;
+		if (rv > 0)
+			rv >>= 8;
+		else if (rv < 0)
+			rv = errno;
+	}
+	return rv;
+}
+
+/*
+ * The console line is a pty exported by xenconsoled. Look it up and open
+ * it as devfd.
+ *
+ * Note that we invoke Xen command line tools here. We could use native
+ * library calls, but I don't want to have to link against Xen libraries.
+ */
+int
+xenmode(int isrestart)
+{
+	struct stat sb;
+	char cmdbuf[128], outbuf[256], *cp, *pty = NULL;
+	int domid = -1;
+
+	/*
+	 * Make sure we have the necessary Xen tools. No point in
+	 * continually retrying if we don't!
+	 */
+	if (stat(XEN_XL, &sb) < 0 || stat(XEN_XSR, &sb) < 0)
+		die("%s or %s do not exist; not running Xen?",
+		    XEN_XL, XEN_XSR);
+
+	/* first convert name to domain id */
+	snprintf(cmdbuf, sizeof(cmdbuf),
+		 "%s domid %s 2>/dev/null", XEN_XL, xendomain);
+	if (backtick(cmdbuf, outbuf, sizeof(outbuf)) || outbuf[0] == '\0') {
+		warning("%s: no such domain", xendomain);
+		return -1;
+	}
+	if ((cp = index(outbuf, '\n')) != 0)
+		*cp = '\0';
+
+	domid = strtol(outbuf, &cp, 0);
+	if (domid <= 0 || outbuf[0] == '\0' || *cp != '\0')
+		die("%s: could not parse 'xl domid' output:\n%s\n",
+		    xendomain, outbuf);
+
+	/* see if it is an HVM domain */
+	snprintf(cmdbuf, sizeof(cmdbuf),
+		 "%s /local/domain/%d/hvmloader >/dev/null 2>&1",
+		 XEN_XSR, domid);
+	if (backtick(cmdbuf, outbuf, sizeof(outbuf)) == 0) {
+		/* HVM: try looking for emulated uart */
+		snprintf(cmdbuf, sizeof(cmdbuf),
+			 "%s /local/domain/%d/serial/0/tty 2>/dev/null",
+			 XEN_XSR, domid);
+		if (backtick(cmdbuf, outbuf, sizeof(outbuf)) == 0) {
+			if ((cp = index(outbuf, '\n')) != 0)
+				*cp = '\0';
+			pty = outbuf;
+		}
+	}
+
+	/* didn't find uart, try PV console */
+	if (pty == NULL) {
+		snprintf(cmdbuf, sizeof(cmdbuf),
+			 "%s /local/domain/%d/console/tty 2>/dev/null",
+			 XEN_XSR, domid);
+		if (backtick(cmdbuf, outbuf, sizeof(outbuf)) == 0) {
+			if ((cp = index(outbuf, '\n')) != 0)
+				*cp = '\0';
+			pty = outbuf;
+		}
+	}
+	if (pty == NULL) {
+		warning("%s: could not find pty", xendomain);
+		return -1;
+	}
+
+	if (Devname)
+		free(Devname);
+	Devname = newstr(pty);
+
+	dolog(LOG_INFO, "%s (%d) using '%s'", xendomain, domid, Devname);
+	if (rawmode(Devname, speed))
+		return -1;
+
+	return 0;
 }
 #endif
 
@@ -2266,7 +2454,8 @@ handleupload(void)
 		close(devfd);
 		/* XXX run uisp */
 		(void) system(buffer);
-		rawmode(Devname, speed);
+		if (rawmode(Devname, speed))
+			die("rawmode failed");
 	}
 	else {
 		(void) write(upfilefd, buffer, rc);
