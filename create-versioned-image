@@ -708,10 +708,6 @@ sub process_image($)
     }
     else {
 	$cmd .= " " . $iinfo{$iid}{'disk'};
-	if ($isgpt) {
-	    # use the slice device
-	    $cmd .= $iinfo{$iid}{'part'};
-	}
     }
 
     my $image = $iinfo{$iid}{'iname'};
