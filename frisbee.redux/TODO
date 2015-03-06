@@ -197,6 +197,32 @@ ENHANCEMENTS:
    as well, but then we don't really save anything over just frisbeeing into
    a tmp file and giving that to the next util in the pipeline.
 
+   Another approach can be used in the case where the -N "no decompress"
+   option is used. In fact, this is likely to be the common case for
+   something that is not an imagezip image. While we can "wrap" any file
+   as an imagezip image using the -f option of imagezip, there really
+   isn't any point. Examples of distribution of non-imagezip images are
+   tarballs/rpms and more interestingly, ZFS zsend streams. The latter
+   could be used to image ZFS filesystems--we save a zend stream, distribute
+   that via multicast, and use frisbee piped into zrecv to lay it down.
+
+   Anyway, when not decompressing we can be a little more opportunistic
+   when accepting out-of-order data. We can accept any chunks that fall
+   within the window covered by the number of write buffers we have.
+   E.g., if we have written to disk blocks 0-M and we have N blocks
+   worth of write buffers, we can accept any chunk that contains blocks
+   M+1 through M+N. Then we just change the writer thread to write blocks
+   in order and to block when it is missing anything.
+
+10.Eliminate two levels of buffering in the "no decompress" case.
+
+   As distributing non-imagezip images becomes more common so does the
+   use of -N. When not decompressing, there is really no point in having
+   different chunk and write buffers, we might as well just use all the
+   space for chunk buffers and write directly from them when they fill up,
+   saving an extra copy of data. In addition to saving data copies, it would
+   make more efficient use of space.
+
 PROBLEMS:
 
 1. Have seen the clients run out of socket buffer space causing them
@@ -209,5 +235,3 @@ PROBLEMS:
    Assuming that we are getting it off the card in time, that means the
    network thread is either not running frequently enough, or it is spending
    too much time doing other things (like copying packet data, see #3 above).
-
-
