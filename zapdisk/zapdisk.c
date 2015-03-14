@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2006 University of Utah and the Flux Group.
+ * Copyright (c) 2005-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -37,46 +37,18 @@
 #ifndef __CYGWIN__
 #include <sys/types.h>
 #include <inttypes.h>
-#if __FreeBSD__ >= 5
-#include <sys/diskmbr.h>
 #endif
-#endif
+
+#include "sliceinfo.h"
 
 /*
- * For superblocks we wipe the first 8192 bytes,
- * For boot blocks just the first 512. 
+ * For superblocks we wipe the first 128k since UFS2 SB is at offset 64k.
+ * For boot blocks we need up to 32k for GPT.
  */
-#define SB_ZAPSIZE	8192
-#define BB_ZAPSIZE	512
-#define MAX_ZAPSIZE	8192
-
-#define BOOT_MAGIC	0xAA55
-
-#define DOSBBSECTOR	0
-#define DOSPARTOFF	446
-#define NDOSPART	4
-
-struct dospart {
-	uint8_t		dp_flag;	/* bootstrap flags */
-	uint8_t		dp_shd;		/* starting head */
-	uint8_t		dp_ssect;	/* starting sector */
-	uint8_t		dp_scyl;	/* starting cylinder */
-	uint8_t		dp_typ;		/* partition type */
-	uint8_t		dp_ehd;		/* end head */
-	uint8_t		dp_esect;	/* end sector */
-	uint8_t		dp_ecyl;	/* end cylinder */
-	uint32_t	dp_start;	/* absolute starting sector number */
-	uint32_t	dp_size;	/* partition size in sectors */
-};
-
-struct doslabel {
-	int8_t		align[sizeof(short)];	/* Force alignment */
-	int8_t		pad2[DOSPARTOFF];
-	struct dospart	parts[NDOSPART];
-	uint16_t	magic;
-};
-#define DOSLABELSIZE \
-	(DOSPARTOFF + NDOSPART*sizeof(struct dospart) + sizeof(uint16_t))
+#define SB_ZAPSIZE	(128*1024)
+#define MBR_ZAPSIZE	512
+#define GPT_ZAPSIZE	(32*1024)
+#define MAX_ZAPSIZE	(128*1024)
 
 static int verbose = 0;
 static int pnum = 0;
@@ -84,12 +56,15 @@ static int bootblocks = 0;
 static int superblocks = 0;
 static int doit = 0;
 
-static char zapdata[MAX_ZAPSIZE];
+static char *diskname;
+static char *zapdata;
 static int zapsize;
 
-int readmbr(char *dev);
-int zappart(char *dev, int pnum);
-int zapmbr(char *disk);
+static int zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum);
+static int zapptab(int fd, struct iz_disk *diskinfo, int ismbr);
+
+/* XXX needed for mbr lib */
+int secsize = 512;
 
 static void
 usage(void)
@@ -97,7 +72,7 @@ usage(void)
 	fprintf(stderr, "usage: "
 		"zapdisk [-BS] <diskdev>\n"
 		" -p <pnum>   operate only on the given partition\n"
-		" -B          zap MBR and partition boot programs\n"
+		" -B          zap MBR/GPT and partition boot programs\n"
 		" -S          zap possible superblocks in all partitions\n"
 		" -Z          really do the zap and don't just talk about it\n"
 		" <diskdev>   disk special file to operate on\n");
@@ -107,9 +82,11 @@ usage(void)
 int
 main(int argc, char **argv)
 {
-	char *disk;
-	int ch, i;
+	int ch, i, fd;
 	int errors = 0;
+	struct iz_disk diskinfo;
+	int ismbr;
+	int gotbb = 0;
 
 	while ((ch = getopt(argc, argv, "p:vBSZ")) != -1)
 		switch(ch) {
@@ -138,219 +115,241 @@ main(int argc, char **argv)
 		usage();
 
 	if (!bootblocks && !superblocks) {
-		fprintf(stderr, "Must specify either -B or -S\n");
+		fprintf(stderr, "Must specify one or both of -B and -S\n");
 		usage();
 	}
-	disk = argv[0];
-	if (pnum < 0 || pnum > 4) {
+	diskname = argv[0];
+	if (pnum < 0 || pnum > MAXSLICES) {
 		fprintf(stderr, "Invalid partition number %d\n", pnum);
 		exit(1);
+	} else if (pnum && bootblocks) {
+		fprintf(stderr, "Cannot use -B and -p together\n");
+		usage();
 	}
-
 #ifdef __CYGWIN__
 	fprintf(stderr, "Does't work under Windows yet\n");
 	exit(1);
 #else
-	if ((i = readmbr(disk)) != 0) {
-		/* lack of a valid MBR is ok */
-		if (i < 0) {
-			fprintf(stderr, "%s: no valid MBR, skipped\n", disk);
-			exit(0);
-		}
-
-		fprintf(stderr, "%s: error reading DOS MBR\n", disk);
+	fd = open(diskname, doit ? O_RDWR : O_RDONLY);
+	if (fd < 0) {
+		fprintf(stderr, "%s: ", diskname);
+		perror("open");
 		exit(1);
 	}
 
 	/*
 	 * We are assuming that writing zeros provides proper zap-age
 	 */
-	zapsize = superblocks ? SB_ZAPSIZE : BB_ZAPSIZE;
-	memset(zapdata, 0, zapsize);
+	zapdata = calloc(1, MAX_ZAPSIZE);
+	if (zapdata == NULL) {
+		fprintf(stderr, "%s: could not allocated zap buffer!\n",
+			diskname);
+		exit(1);
+	}
 
-	for (i = 1; i <= 4; i++)
-		if (pnum == 0 || i == pnum)
-			if (zappart(disk, i))
-				errors++;
-	if (pnum == 0 && bootblocks)
-		if (zapmbr(disk))
+#ifdef WITH_GPT
+	if (!gotbb && parse_gpt(fd, &diskinfo, 0) == 0) {
+		gotbb = 1;
+		ismbr = 0;
+		if (verbose)
+			printf("%s: has GPT\n", diskname);
+	}
+#endif
+#ifdef WITH_MBR
+	if (!gotbb && parse_mbr(fd, &diskinfo, 0) == 0) {
+		gotbb = 1;
+		ismbr = 1;
+		if (verbose)
+			printf("%s: has MBR\n", diskname);
+	}
+#endif
+	if (!gotbb) {
+		/* lack of a valid partition table is ok */
+		if (superblocks)
+			fprintf(stderr, "%s: WARNING: no valid MBR/GPT,"
+				" cannot zero partitions\n", diskname);
+
+		/* but we will force a bootblock zap if desired */
+		ismbr = -1;
+		goto whackaptab;
+	}
+
+	if (pnum > 0 && diskinfo.slices[pnum-1].type == IZTYPE_INVALID) {
+		fprintf(stderr, "%s: no partition %d, skipped\n",
+			diskname, pnum);
+		exit(0);
+	}
+
+	if (superblocks) {
+		for (i = 1; i <= MAXSLICES; i++)
+			if (pnum == 0 || i == pnum)
+				if (zappart(fd, &diskinfo, i, pnum))
+					errors++;
+	}
+ whackaptab:
+	if (bootblocks)
+		if (zapptab(fd, &diskinfo, ismbr))
 			errors++;
 
 	exit(errors);
 #endif
 }
 
-static struct doslabel doslabel;
-
-int
-readmbr(char *dev)
-{
-	int fd, cc;
-
-	fd = open(dev, O_RDONLY);
-	if (fd < 0) {
-		perror(dev);
-		return 1;
-	}
-
-	if (lseek(fd, (off_t)0, SEEK_SET) < 0) {
-		perror("Could not seek to DOS label");
-		close(fd);
-		return 1;
-	}
-	if ((cc = read(fd, doslabel.pad2, DOSLABELSIZE)) < 0) {
-		perror("Could not read DOS label");
-		close(fd);
-		return 1;
-	}
-	if (cc != DOSLABELSIZE) {
-		fprintf(stderr, "Could not get the entire DOS label\n");
-		close(fd);
- 		return 1;
-	}
-
-	/*
-	 * This is not an error for our purposes.
-	 * We assume that if the MBR is not valid, nothing would boot anyway.
-	 */
-	if (doslabel.magic != BOOT_MAGIC) {
-		fprintf(stderr, "Wrong magic number in DOS partition table\n");
-		close(fd);
- 		return -1;
-	}
-
-	return 0;
-}
-
 /*
  * Zap the bootblock/superblock in a partition.
  */
-int
-zappart(char *dev, int pnum)
+static int
+zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum)
 {
-	int fd, cc;
-	struct dospart *pinfo = &doslabel.parts[pnum-1];
+	int cc;
+	struct iz_slice *pinfo = &diskinfo->slices[pnum-1];
 
-	if (verbose)
-		printf("part%d: start=%d, size=%d\n",
-		       pnum, pinfo->dp_start, pinfo->dp_size);
-	if (pinfo->dp_start == 0 || pinfo->dp_size == 0) {
+	zapsize = SB_ZAPSIZE;
+
+	if (verbose && pinfo->type != IZTYPE_INVALID)
+		printf("%s: P%d: start=%lu, size=%lu\n",
+		       diskname, pnum, (unsigned long)pinfo->offset,
+		       (unsigned long)pinfo->size);
+
+	/* Sanity checks */
+	switch (pinfo->type) {
+	case IZTYPE_PROTECTIVE:
 		if (verbose || !doit)
-			printf("part%d: empty, skipped\n", pnum);
+			printf("%s: P%d: protective MBR, skipped\n",
+			       diskname, pnum);
+		return 0;
+	case IZTYPE_UNUSED:
+	case IZTYPE_INVALID:
+		return 0;
+	}
+	if (pinfo->size < zapsize) {
+		if (pinfo->size > 0 && (verbose || !doit))
+			printf("%s: P%d: too small for superblock,"
+			       " skipped\n", diskname, pnum);
 		return 0;
 	}
 
-	fd = open(dev, O_RDWR);
-	if (fd < 0) {
-		perror(dev);
-		return 1;
-	}
-	if (lseek(fd, (off_t)pinfo->dp_start * 512, SEEK_SET) < 0) {
-		perror("Could not seek to partition start");
-		close(fd);
+	if (lseek(fd, (off_t)pinfo->offset * secsize, SEEK_SET) < 0) {
+		fprintf(stderr, "%s: ", diskname);
+		perror("could not seek to partition start");
 		return 1;
 	}
 
 	if (!doit) {
-		printf("part%d: would zero %d bytes at sector %d\n",
-		       pnum, zapsize, pinfo->dp_start);
+		printf("%s: P%d: would zero %d bytes at sector %d\n",
+		       diskname, pnum, zapsize, pinfo->offset);
 		cc = zapsize;
 	} else {
 		if (verbose)
-			printf("part%d: zeroing %d bytes at sector %d\n",
-			       pnum, zapsize, pinfo->dp_start);
+			printf("%s: P%d: zeroing %d bytes at sector %d\n",
+			       diskname, pnum, zapsize, pinfo->offset);
 		cc = write(fd, zapdata, zapsize);
 	}
 	if (cc != zapsize) {
-		perror("Could not zap partition block");
-		close(fd);
-		return 1;
+		if (cc < 0) {
+			fprintf(stderr, "%s: P%d: ", diskname, pnum);
+			perror("could not write to partition");
+			return 1;
+		}
+		fprintf(stderr, "%s: P%d: WARNING: incomplete write "
+			"of partition block (%d of %d)\n",
+			diskname, pnum, cc, zapsize);
 	}
-	close(fd);
 	return 0;
 }
 
-/*
- * All manner of dark magic is required to write the MBR on various OSes.
- */
-int
-zapmbr(char *disk)
+static int
+zapptab(int fd, struct iz_disk *diskinfo, int ismbr)
 {
-	int fd, fdw = -1;
 	int cc;
+	off_t looff, hioff;
+	size_t losize = 0, hisize = 0;
 
 	/*
-	 * For the MBR we just zero out the 400+ bytes before the
-	 * partition table.
+	 * Unconditionally wipe the beginning and end of the disk.
 	 */
-	memset(doslabel.pad2, 0, sizeof(doslabel.pad2));
-
-	fd = open(disk, O_RDWR);
-#ifdef DIOCSMBR
-	/*
-	 * Deal with FreeBSD5 funkyness for writing the MBR.  You have to use
-	 * an ioctl on the disk to do it.  But, you apparently cannot perform
-	 * the ioctl on the "whole disk" device, you have to do it on a slice
-	 * device.  So we try opening slice devices until we get one.
-	 *
-	 * This code was derived from fdisk.
-	 */
-	if (fd < 0 && errno == EPERM) {
-		fd = open(disk, O_RDONLY);
-		if (fd >= 0) {
-			char sstr[64];
-			int p;
-
-			for (p = 1; p <= 4; p++) {
-				snprintf(sstr, sizeof sstr, "%ss%d", disk, p);
-				fdw = open(sstr, O_RDWR);
-				if (fdw >= 0)
-					break;
-			}
-			close(fd);
-			if (fdw < 0)
-				fd = -1;
+	if (ismbr == -1) {
+		losize = MAX_ZAPSIZE;
+		looff = 0;
+		hioff = (off_t)getdisksize(fd) * secsize;
+		if (hioff >= MAX_ZAPSIZE) {
+			hioff -= MAX_ZAPSIZE;
+			hisize = MAX_ZAPSIZE;
 		}
 	}
-#endif
-	if (fd < 0) {
-		perror(disk);
-		exit(1);
+	/*
+	 * We zap the metadata regions as recorded in the diskinfo.
+	 */
+	else {
+		if (diskinfo->lodata > 0) {
+			looff = 0;
+			losize = (size_t)diskinfo->lodata * secsize;
+		}
+		if (diskinfo->hidata + 1 < diskinfo->dsize) {
+			hioff = (off_t)(diskinfo->hidata + 1) * secsize;
+			hisize = (size_t)
+				(diskinfo->dsize - diskinfo->hidata - 1) *
+				secsize;
+		}
 	}
 
 	if (!doit) {
-		printf("mbr: would zero %d bytes at sector 0\n",
-		       sizeof(doslabel.pad2));
-		close(fd);
-		close(fdw);
+		if (losize)
+			printf("%s: would zero %lu bytes at offset %lu\n",
+			       diskname,
+			       (unsigned long)losize, (unsigned long)looff);
+		if (hisize)
+			printf("%s: would zero %lu bytes at offset %lu\n",
+			       diskname,
+			       (unsigned long)hisize, (unsigned long)hioff);
 		return 0;
 	}
 
-	if (verbose)
-		printf("mbr: zeroing %d bytes at sector 0\n",
-		       sizeof(doslabel.pad2));
-	if (fdw < 0) {
-		if (lseek(fd, (off_t)0, SEEK_SET) < 0) {
-			perror("Could not seek to DOS label");
-			close(fd);
+	if (losize) {
+		if (verbose)
+			printf("%s: zeroing %lu bytes at offset %lu\n",
+			       diskname,
+			       (unsigned long)losize, (unsigned long)looff);
+		if (lseek(fd, looff, SEEK_SET) < 0) {
+			fprintf(stderr, "%s: ", diskname);
+			perror("could not seek to low ptab sector");
 			return 1;
 		}
-		cc = write(fd, doslabel.pad2, DOSLABELSIZE);
-		if (cc != DOSLABELSIZE) {
-			perror("Could not write DOS label");
-			close(fd);
+		cc = write(fd, zapdata, losize);
+		if (cc != losize) {
+			fprintf(stderr, "%s: ", diskname);
+			if (cc < 0)
+				perror("could not write low ptab");
+			else
+				fprintf(stderr, "partial write of low ptab "
+					"(%lu of %lu)\n",
+					(unsigned long)cc,
+					(unsigned long)losize);
 			return 1;
 		}
 	}
-#ifdef DIOCSMBR
-	else {
-		if (ioctl(fdw, DIOCSMBR, doslabel.pad2) < 0) {
-			perror("Could not write DOS label");
-			close(fdw);
+	if (hisize) {
+		if (verbose)
+			printf("%s: zeroing %lu bytes at offset %lu\n",
+			       diskname,
+			       (unsigned long)hisize, (unsigned long)hioff);
+		if (lseek(fd, hioff, SEEK_SET) < 0) {
+			fprintf(stderr, "%s: ", diskname);
+			perror("could not seek to high ptab sector");
 			return 1;
 		}
-		close(fdw);
+		cc = write(fd, zapdata, hisize);
+		if (cc != hisize) {
+			fprintf(stderr, "%s: ", diskname);
+			if (cc < 0)
+				perror("could not write high ptab");
+			else
+				fprintf(stderr, "partial write of high ptab "
+					"(%lu of %lu)\n",
+					(unsigned long)cc,
+					(unsigned long)hisize);
+			return 1;
+		}
 	}
-#endif
 	return 0;
 }

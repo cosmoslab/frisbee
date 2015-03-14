@@ -261,6 +261,15 @@ sizetest: disksize.c
 $(SUBDIRS):
 	@$(MAKE) SUBDIRCFLAGS="$(SUBDIRCFLAGS)" -C $@ all
 
+# XXX target for other software to build MBR/GPT libraries
+partlibs:
+ifeq ($(WITH_MBR),1)
+	@$(MAKE) SUBDIRCFLAGS="$(SUBDIRCFLAGS)" -C mbr all
+endif
+ifeq ($(WITH_GPT),1)
+	@$(MAKE) SUBDIRCFLAGS="$(SUBDIRCFLAGS)" -C gpt all
+endif
+
 imagezip.o: sliceinfo.h imagehdr.h global.h range.h hashmap/hashmap.h
 imageunzip.o: imagehdr.h
 imagehash.o: imagehdr.h imagehash.h
