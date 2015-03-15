@@ -25,6 +25,7 @@ TESTBED_SRCDIR	= @top_srcdir@
 OBJDIR		= @top_builddir@
 SUBDIR		= $(subst $(TESTBED_SRCDIR)/,,$(SRCDIR))
 SYSTEM	       := $(shell uname -s)
+CBINDIR		= $(DESTDIR)$(CLIENT_BINDIR)
 LBINDIR		= $(DESTDIR)/usr/local/bin
 LSBINDIR	= $(DESTDIR)/usr/local/sbin
 SYSTEM	       := $(shell uname -s)
@@ -86,7 +87,6 @@ endif
 mfs:
 	$(MAKE) -C growdisk client
 	$(MAKE) -C zapdisk mfs
-	$(MAKE) -C growdisk client
 	$(MAKE) -C imagezip client
 	$(MAKE) -C frisbee.redux client
 
@@ -110,25 +110,31 @@ distclean:	subdir-distclean
 
 frisbee-mfs:
 	$(MAKE) -C growdisk client
+	$(MAKE) -C zapdisk mfs
 	$(MAKE) -C frisbee.redux client
 
 frisbee-mfs-install:
 ifeq ($(SYSTEM),FreeBSD)
-	CLIENT_BINDIR=/etc/testbed $(MAKE) -e -C growdisk client-install
 	CLIENT_BINDIR=/etc/testbed $(MAKE) -e -C frisbee.redux client-install
+	CLIENT_BINDIR=/etc/testbed $(MAKE) -e -C growdisk client-install
+	CLIENT_BINDIR=/etc/testbed $(MAKE) -e -C zapdisk frisbee-mfs-install
 else
-	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C growdisk client-install
 	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C frisbee.redux client-install
+	$(MAKE) -C growdisk client-install
+	$(MAKE) -C zapdisk frisbee-mfs-install
+	rm -f $(CBINDIR)/frisbee $(CBINDIR)/frisupload
 endif
 
 mfs-install:
-	$(MAKE) -C zapdisk mfs-install
 	$(MAKE) -C imagezip client-install
-	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C growdisk client-install
-	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C frisbee.redux client-install
+	$(MAKE) -C frisbee.redux client-install
+	$(MAKE) -C growdisk client-install
+	$(MAKE) -C zapdisk mfs-install
 	$(INSTALL_PROGRAM) $(SRCDIR)/create-image $(LBINDIR)/
 	$(INSTALL_PROGRAM) $(SRCDIR)/create-versioned-image $(LBINDIR)/
 	$(INSTALL_PROGRAM) $(SRCDIR)/create-swapimage $(LBINDIR)/
+	rm -f $(CBINDIR)/frisbee $(CBINDIR)/frisupload
+	rm -f $(CBINDIR)/imagezip $(CBINDIR)/imageunzip $(CBINDIR)/imagedump
 
 newnode-mfs: mfs
 newnode-mfs-install: mfs-install

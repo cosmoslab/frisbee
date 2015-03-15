@@ -67,11 +67,14 @@ $(PARTLIBS):
 
 install:
 
-mfs: zapdisk
+mfs frisbee-mfs: zapdisk
 
 mfs-install: mfs
 	$(INSTALL_PROGRAM) -m 700 -s zapdisk$(EXE) $(CBINDIR)/zapdisk$(EXE)
 	$(INSTALL_PROGRAM) -m 700 $(SRCDIR)/diskzap $(LBINDIR)/diskzap
+
+frisbee-mfs-install: frisbee-mfs
+	$(INSTALL_PROGRAM) -m 700 -s zapdisk$(EXE) $(CBINDIR)/zapdisk$(EXE)
 
 clean:
 	rm -f *.o zapdisk zapdisk.debug
