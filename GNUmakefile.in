@@ -115,11 +115,11 @@ frisbee-mfs:
 
 frisbee-mfs-install:
 ifeq ($(SYSTEM),FreeBSD)
-	CLIENT_BINDIR=/etc/testbed $(MAKE) -e -C frisbee.redux client-install
+	CLIENT_BINDIR=/etc/testbed $(MAKE) -e -C frisbee.redux frisbee-mfs-install
 	CLIENT_BINDIR=/etc/testbed $(MAKE) -e -C growdisk client-install
 	CLIENT_BINDIR=/etc/testbed $(MAKE) -e -C zapdisk frisbee-mfs-install
 else
-	CLIENT_BINDIR=/usr/local/bin $(MAKE) -e -C frisbee.redux client-install
+	$(MAKE) -C frisbee.redux client-install
 	$(MAKE) -C growdisk client-install
 	$(MAKE) -C zapdisk frisbee-mfs-install
 	rm -f $(CBINDIR)/frisbee $(CBINDIR)/frisupload
