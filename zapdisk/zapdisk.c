@@ -207,9 +207,9 @@ zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum)
 	zapsize = SB_ZAPSIZE;
 
 	if (verbose && pinfo->type != IZTYPE_INVALID)
-		printf("%s: P%d: start=%lu, size=%lu\n",
+		printf("%s: P%d: start=%lu, size=%lu, type=0x%04x\n",
 		       diskname, pnum, (unsigned long)pinfo->offset,
-		       (unsigned long)pinfo->size);
+		       (unsigned long)pinfo->size, pinfo->type);
 
 	/* Sanity checks */
 	switch (pinfo->type) {
@@ -222,7 +222,7 @@ zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum)
 	case IZTYPE_INVALID:
 		return 0;
 	}
-	if (pinfo->size < zapsize) {
+	if (pinfo->size*secsize < zapsize) {
 		if (pinfo->size > 0 && (verbose || !doit))
 			printf("%s: P%d: too small for superblock,"
 			       " skipped\n", diskname, pnum);
