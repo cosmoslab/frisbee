@@ -606,7 +606,11 @@ sub writetest($$)
     #
     elsif ($iinfo{$iid}{'method'} eq "frisbee") {
 	my $srv = $iinfo{$iid}{'server'};
-	my $cmd = "$uploader -S $srv -Q $ifile $lfile";
+	my $cmd = "$uploader -S $srv -Q $ifile";
+	if (exists($iinfo{$iid}{'proxy'})) {
+	    $cmd .= " -P " . $iinfo{$iid}{'proxy'};
+	}
+	$cmd .= " $lfile";
 
 	if ($impotent) {
 	    print STDERR "Would: '$cmd' ...\n";
@@ -766,7 +770,11 @@ sub process_image($)
     if ($iinfo{$iid}{'method'} eq "frisbee" &&
 	exists($iinfo{$iid}{'nsigfile'})) {
 	$cmd = "$uploader -S " . $iinfo{$iid}{'server'} .
-	    " -F " . $iinfo{$iid}{'nsigfile'} . " $localdir/nsigfile";
+	    " -F " . $iinfo{$iid}{'nsigfile'};
+	if (exists($iinfo{$iid}{'proxy'})) {
+	    $cmd .= " -P " . $iinfo{$iid}{'proxy'};
+	}
+	$cmd .= " $localdir/nsigfile";
 	if (mysystem("$cmd")) {
 	    print STDERR "*** Failed to upload signature for created image!\n";
 	    print STDERR "    command: '$cmd'\n";
