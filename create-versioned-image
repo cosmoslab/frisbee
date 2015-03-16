@@ -559,6 +559,9 @@ sub fetch($$)
 	# randomize requests.
 	#
 	my $opts = "-O -W 1 -C 32";
+	if (exists($iinfo{$iid}{'proxy'})) {
+	    $opts .= " -P " . $iinfo{$iid}{'proxy'};
+	}
 	if (mysystem("$frisbee $opts -B 5 -N -S $srv -F $ifile $lfile")) {
 	    return -1;
 	}
