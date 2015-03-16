@@ -58,7 +58,7 @@ static int doit = 0;
 
 static char *diskname;
 static char *zapdata;
-static int zapsize;
+static size_t zapsize;
 
 static int zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum);
 static int zapptab(int fd, struct iz_disk *diskinfo, int ismbr);
@@ -222,7 +222,7 @@ zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum)
 	case IZTYPE_INVALID:
 		return 0;
 	}
-	if (pinfo->size*secsize < zapsize) {
+	if ((size_t)pinfo->size*secsize < zapsize) {
 		if (pinfo->size > 0 && (verbose || !doit))
 			printf("%s: P%d: too small for superblock,"
 			       " skipped\n", diskname, pnum);
