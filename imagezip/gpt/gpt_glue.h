@@ -35,6 +35,20 @@
 #define drvwrite gpt_drvwrite
 #define drvsize  gpt_drvsize
 
+#ifdef __linux__
+#include <string.h>
+#define bcopy(s,d,n)	memcpy((d),(s),(n))
+#define bzero(m,n)	memset((m),0,(n))
+#define bcmp(a,b,n)	memcmp((a),(b),(n))
+#ifndef htole16
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+#define htole16(x)	(x)
+#else
+#define htole16(x)	__bswap_16(x)
+#endif
+#endif
+#endif
+
 /* we want to intercept these */
 #define printf	 gpt_printf
 int gpt_printf(const char * __restrict fmt, ...);

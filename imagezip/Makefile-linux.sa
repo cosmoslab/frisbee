@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2014 University of Utah and the Flux Group.
+# Copyright (c) 2000-2015 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -26,6 +26,12 @@
 # (Standalone meaning not part of the Emulab build environment.)
 #
 BINDIR=	/usr/local/bin
+
+#
+# At least support MBR partitioning
+#
+WITH_MBR	= 1
+WITH_GPT	= 1
 
 # Set to 1 for "secure frisbee" support.  Requires openssl libraries.
 WITH_CRYPTO	= 1
@@ -86,6 +92,18 @@ ifeq ($(WITH_V3COMPAT),1)
 CFLAGS		+= -DWITH_V3COMPAT
 endif
 
+# MBR
+ifeq ($(WITH_MBR),1)
+PTOBJS		+= mbr/mbr.o
+CFLAGS		+= -DWITH_MBR -Imbr
+endif
+
+# GPT
+ifeq ($(WITH_GPT),1)
+PTOBJS		+= gpt/gpt.o gpt/crc32.o gpt/gpt_glue.o
+CFLAGS		+= -DWITH_GPT -Igpt -Dcrc32=gpt_crc32 -DIMAGEZIP
+endif
+
 ifeq ($(WITH_EXTFS),1)
 FSOBJS		+= extfs/extfs.o extfs/reloc_lilo.o
 CFLAGS		+= -DWITH_EXTFS -Iextfs
@@ -116,10 +134,10 @@ endif
 
 all:	imagezip imageunzip imagedump
 
-imagezip: imagezip.o checksum.o version.o $(FSOBJS) $(FSLIBS)
+imagezip: imagezip.o sliceinfo.o disksize.o checksum.o version.o $(PTOBJS) $(FSOBJS) $(FSLIBS)
 	$(CC) $(CFLAGS) $^ $(LIBS) -o imagezip
 
-imageunzip: imageunzip.o checksum.o crc.o version.o disksize.o
+imageunzip: imageunzip.o disksize.o checksum.o crc.o version.o $(PTOBJS)
 	$(CC) $(CFLAGS) $^ $(UNZIPLIBS) -o imageunzip
 
 imageunzip.o: imageunzip.c
