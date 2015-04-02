@@ -220,6 +220,10 @@ zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum)
 		return 0;
 	case IZTYPE_INVALID:
 		return 0;
+	case IZTYPE_UNUSED:
+		if (pinfo->size == 0)
+			return 0;
+		break;
 	}
 	if ((size_t)pinfo->size*secsize < zapsize) {
 		if (pinfo->size > 0 && (verbose || !doit))
@@ -236,12 +240,12 @@ zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum)
 
 	if (!doit) {
 		printf("%s: P%d: would zero %d bytes at sector %d\n",
-		       diskname, pnum, zapsize, pinfo->offset);
+		       diskname, pnum, (int)zapsize, pinfo->offset);
 		cc = zapsize;
 	} else {
 		if (verbose)
 			printf("%s: P%d: zeroing %d bytes at sector %d\n",
-			       diskname, pnum, zapsize, pinfo->offset);
+			       diskname, pnum, (int)zapsize, pinfo->offset);
 		cc = write(fd, zapdata, zapsize);
 	}
 	if (cc != zapsize) {
@@ -252,7 +256,7 @@ zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum)
 		}
 		fprintf(stderr, "%s: P%d: WARNING: incomplete write "
 			"of partition block (%d of %d)\n",
-			diskname, pnum, cc, zapsize);
+			diskname, pnum, cc, (int)zapsize);
 	}
 	return 0;
 }
@@ -268,6 +272,8 @@ zapptab(int fd, struct iz_disk *diskinfo, int ismbr)
 	 * Unconditionally wipe the beginning and end of the disk.
 	 */
 	if (ismbr == -1) {
+		extern uint64_t getdisksize(int fd);
+
 		losize = MAX_ZAPSIZE;
 		looff = 0;
 		hioff = (off_t)getdisksize(fd) * secsize;
