@@ -218,7 +218,6 @@ zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum)
 			printf("%s: P%d: protective MBR, skipped\n",
 			       diskname, pnum);
 		return 0;
-	case IZTYPE_UNUSED:
 	case IZTYPE_INVALID:
 		return 0;
 	}
