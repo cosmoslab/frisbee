@@ -42,13 +42,14 @@
 #include "sliceinfo.h"
 
 /*
- * For superblocks we wipe the first 128k since UFS2 SB is at offset 64k.
+ * For FS superblocks and other metadata we wipe the first 1M since that
+ *   is sufficient to wipe the most commonly sized LVM metadata block.
  * For boot blocks we need up to 32k for GPT.
  */
-#define SB_ZAPSIZE	(128*1024)
+#define MD_ZAPSIZE	(1024*1024)
 #define MBR_ZAPSIZE	512
 #define GPT_ZAPSIZE	(32*1024)
-#define MAX_ZAPSIZE	(128*1024)
+#define MAX_ZAPSIZE	(1024*1024)
 
 static int verbose = 0;
 static int pnum = 0;
@@ -196,7 +197,7 @@ main(int argc, char **argv)
 }
 
 /*
- * Zap the bootblock/superblock in a partition.
+ * Zap the bootblock/superblock/metadata in a partition.
  */
 static int
 zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum)
@@ -204,7 +205,7 @@ zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum)
 	int cc;
 	struct iz_slice *pinfo = &diskinfo->slices[pnum-1];
 
-	zapsize = SB_ZAPSIZE;
+	zapsize = MD_ZAPSIZE;
 
 	if (verbose && pinfo->type != IZTYPE_INVALID)
 		printf("%s: P%d: start=%lu, size=%lu, type=0x%04x\n",
@@ -221,16 +222,16 @@ zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum)
 	case IZTYPE_INVALID:
 		return 0;
 	case IZTYPE_UNUSED:
-		if (pinfo->size == 0)
-			return 0;
 		break;
 	}
-	if ((size_t)pinfo->size*secsize < zapsize) {
-		if (pinfo->size > 0 && (verbose || !doit))
-			printf("%s: P%d: too small for superblock,"
-			       " skipped\n", diskname, pnum);
+
+	/* If partition size is zero, silently skip it. */
+	if (pinfo->size == 0)
 		return 0;
-	}
+
+	/* If it is smaller than our usual zapsize, zero the whole thing! */
+	if ((size_t)pinfo->size*secsize < zapsize)
+		zapsize = pinfo->size * secsize;
 
 	if (lseek(fd, (off_t)pinfo->offset * secsize, SEEK_SET) < 0) {
 		fprintf(stderr, "%s: ", diskname);
