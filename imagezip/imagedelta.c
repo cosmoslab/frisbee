@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -24,13 +24,18 @@
 #define FIXMAP_DEBUG
 
 /*
- * imagedelta [ -S ] image1.ndz image2.ndz delta1to2.ndz
+ * imagedelta [ -S -f ] image1.ndz image2.ndz delta1to2.ndz
  *
  * Take two images (image1, image2) and produce a delta (delta1to2)
  * based on the differences. The -S option says to use the signature
- * files if possible to determine differences between the images.
- * Otherwise we compare the corresponding areas of both images to
- * determine if they are different.
+ * files: image1.ndz.sig and image2.ndz.sig, if possible to determine
+ * differences between the images. Signature files will be rejected
+ * unless they can be positively matched with the image (right now,
+ * via the modtime!) Using -f will force it to use a questionable
+ * signature file.
+ *
+ * Without signature files, we compare the corresponding areas of both
+ * images to determine if they are different.
  *
  * Note that order matters here! We are generating a delta to get from
  * "image1" to "image2"; i.e., doing:
@@ -80,7 +85,7 @@
 
 struct ifileinfo {
     struct ndz_file *ndz;
-    int sigfd;
+    char *sigfile;
     struct ndz_rangemap *map, *sigmap;
 } ndz1, ndz2;
 
@@ -90,6 +95,7 @@ struct mergestate {
 };
 
 int usesigfiles = 0;
+int forcesig = 0;
 
 static int fixmap(struct ndz_rangemap *map, struct ndz_range *range, void *arg);
 
@@ -97,12 +103,13 @@ void
 usage(void)
 {
     fprintf(stderr,
-	    "Usage: imagedelta [-S] image1.ndz image2.ndz delta1to2.ndz\n"
+	    "Usage: imagedelta [-Sf] image1.ndz image2.ndz delta1to2.ndz\n"
 	    "\n"
 	    "Produce a delta image (delta1to2) containing the changes\n"
 	    "necessary to get from image1 to image2.\n"
 	    "\n"
-	    "  -S   Use signature files when computing differences.\n");
+	    "  -S   Use signature files when computing differences.\n"
+	    "  -f   With -S, force imagedelta to use a questionable sigfile.\n");
     exit(1);
 }
 
@@ -114,7 +121,7 @@ usage(void)
 void
 openifile(char *file, struct ifileinfo *info)
 {
-    int rv;
+    int sigfd;
 
     info->ndz = ndz_open(file, 0);
     if (info->ndz == NULL) {
@@ -123,14 +130,39 @@ openifile(char *file, struct ifileinfo *info)
 	exit(1);
     }
 
-    /* XXX check sigfile */
     if (usesigfiles) {
-	;
+	struct stat sb1, sb2;
+
+	info->sigfile = malloc(strlen(file) + 5);
+	assert(info->sigfile != NULL);
+	strcpy(info->sigfile, file);
+	strcat(info->sigfile, ".sig");
+	sigfd = open(info->sigfile, 0);
+	if (sigfd < 0) {
+	    fprintf(stderr, "%s: could not find signature file %s\n",
+		    file, info->sigfile);
+	    exit(1);
+	}
+	if (fstat(info->ndz->fd, &sb1) < 0 || fstat(sigfd, &sb2) < 0) {
+	    fprintf(stderr, "%s: could stat image or signature file\n", file);
+	    exit(1);
+	}
+	if (!forcesig && sb1.st_mtime != sb2.st_mtime) {
+	    fprintf(stderr, "%s: image and signature disagree, "
+		    "use -f to override.\n", file);
+	    exit(1);
+	}
+	close(sigfd);
     }
+}
+
+void
+readifile(struct ifileinfo *info)
+{
 
     /* read range info from image */
-    rv = ndz_readranges(info->ndz, &info->map);
-    if (rv) {
+    info->map = ndz_readranges(info->ndz);
+    if (info->map == NULL) {
 	fprintf(stderr, "%s: could not read ranges\n",
 		ndz_filename(info->ndz));
 	exit(1);
@@ -138,8 +170,14 @@ openifile(char *file, struct ifileinfo *info)
 
     /* read signature info */
     if (usesigfiles) {
-	;
-    }
+	info->sigmap = ndz_readhashinfo(info->ndz, info->sigfile);
+	if (info->sigmap == NULL) {
+	    fprintf(stderr, "%s: could not read signature info\n",
+		    ndz_filename(info->ndz));
+	    exit(1);
+	}
+    } else
+	info->sigmap = NULL;
 }
 
 static void
@@ -161,13 +199,16 @@ main(int argc, char **argv)
 {
     int ch, version = 0;
     extern char build_info[];
-    int delta, rv;
+    int delta;
     struct ndz_rangemap *mmap;
 
     while ((ch = getopt(argc, argv, "Sv")) != -1)
 	switch(ch) {
 	case 'S':
 	    usesigfiles = 1;
+	    break;
+	case 'f':
+	    forcesig = 1;
 	    break;
 	case 'v':
 	    version++;
@@ -239,6 +280,12 @@ main(int argc, char **argv)
     ndz_rangemap_dump(mmap, twochunkfunc);
     fflush(stdout);
 #endif
+
+    /*
+     * Iterate through the produced map either copying the data
+     * directly into the new image (data == NULL) or hashing the
+     * two versions to determine if it should be copied.
+     */
 
     return 0;
 }

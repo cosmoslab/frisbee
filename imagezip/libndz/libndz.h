@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 University of Utah and the Flux Group.
+ * Copyright (c) 2014-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -24,25 +24,44 @@
 #ifndef _LIBNDZ_H_
 #define	_LIBNDZ_H_
 
+#include "imagehdr.h"
 #include "rangemap.h"
 
-typedef uint32_t ndz_chunk_t;
+typedef uint32_t ndz_chunkno_t;
+/* XXX keep this opaque so we don't create dependencies on zlib */
+typedef void * ndz_chunk_t;
+
+#ifdef maybenotneeded
+struct ndz_chunkmap {
+    ndz_addr_t start;
+    ndz_addr_t end;
+};
+#endif
 
 struct ndz_file {
     int fd;
+    int seekable;
+    off_t curoff;
     char *fname;
     int sectsize;
     int chunksize;
-    ndz_chunk_t nchunks;
+    ndz_chunkno_t nchunks;
+    ndz_chunk_t chunkobj;
+    ndz_addr_t chunksect;
+#ifdef STATS
+    unsigned chunkuses;
+    unsigned chunkhits;
+#endif
+#ifdef maybenotneeded
+    struct ndz_chunkmap *chunkmap;
+#endif
     struct ndz_rangemap *rangemap;
+    unsigned hashblksize;
+    void *hashdata;
+    struct ndz_rangemap *hashmap;
     /* per-chunk info to verify */
     /* readahead cache stuff */
 };
-
-struct chunkmap {
-	ndz_addr_t start;
-	ndz_addr_t end;
-} *chunkmap;
 
 struct ndz_chunkhdr {
     blockhdr_t *header;
@@ -57,11 +76,18 @@ char *ndz_filename(struct ndz_file *ndz);
 ssize_t ndz_read(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset);
 int ndz_readahead(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset);
 
-int ndz_readchunkheader(struct ndz_file *ndz, ndz_chunk_t chunkno,
+int ndz_readchunkheader(struct ndz_file *ndz, ndz_chunkno_t chunkno,
 			struct ndz_chunkhdr *chunkhdr);
-
+ssize_t ndz_readdata(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset);
 struct ndz_rangemap *ndz_readranges(struct ndz_file *ndz);
 void ndz_dumpranges(struct ndz_rangemap *map);
+
+ndz_chunk_t ndz_chunk_open(struct ndz_file *ndz, ndz_chunkno_t chunkno);
+void ndz_chunk_close(ndz_chunk_t chobj);
+ssize_t ndz_chunk_read(ndz_chunk_t chobj, void *buf, size_t bytes);
+ndz_chunkno_t ndz_chunk_chunkno(ndz_chunk_t chobj);
+
+struct ndz_rangemap *ndz_readhashinfo(struct ndz_file *ndz, char *sigfile);
 
 #endif /* _LIBNDZ_H_ */
 

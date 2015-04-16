@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 University of Utah and the Flux Group.
+ * Copyright (c) 2014-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -28,7 +28,6 @@
 #include <errno.h>
 #include <assert.h>
 
-#include "../imagehdr.h"
 #include "libndz.h"
 
 struct ndz_file *
@@ -41,10 +40,26 @@ ndz_open(const char *name, int flags)
     blockhdr_t *hdr;
     unsigned int magic;
 
-    fd = open(name, 0);
-    if (fd < 0)
+    /* XXX only do read right now */
+    if (flags != 0) {
+	fprintf(stderr, "%s: ndz_open can only read right now.\n", name);
 	goto fail;
+    }
+
+    if (strcmp(name, "-") == 0) {
+	fd = fileno(stdin);
+	name = "<STDIN>";
+	ndz->seekable = 0;
+    } else {
+	fd = open(name, 0);
+	if (fd < 0) {
+	    perror(name);
+	    goto fail;
+	}
+	ndz->seekable = 1;
+    }
     ndz->fd = fd;
+    ndz->curoff = 0;
 
     /*
      * It should have at least one chunk header. Read that and verify
@@ -115,8 +130,17 @@ ndz_read(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset)
     size_t count = bytes;
     char *bp = buf;
 
-    if (lseek(ndz->fd, offset, SEEK_SET) < 0)
-	return -1;
+    if (ndz->seekable) {
+	if (lseek(ndz->fd, offset, SEEK_SET) < 0)
+	    return -1;
+    } else {
+	if (offset != ndz->curoff) {
+	    fprintf(stderr, "%s: non-contiguous read on unseekable input.\n",
+		    ndz->fname);
+	    errno = ESPIPE;
+	    return -1;
+	}
+    }
 
     /*
      * We might be reading from stdin or a pipe, so we may not get the
@@ -136,6 +160,7 @@ ndz_read(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset)
 	bp += cc;
     }
 
+    ndz->curoff += (bytes - count);
     return bytes - count;
 }
 
@@ -157,7 +182,7 @@ ndz_readranges(struct ndz_file *ndz)
     blockhdr_t *hdr;
     struct region *reg;
     int rv, i;
-    ndz_chunk_t chunkno;
+    ndz_chunkno_t chunkno;
 
     if (ndz == NULL)
 	return NULL;
@@ -177,7 +202,7 @@ ndz_readranges(struct ndz_file *ndz)
     for (chunkno = 0; ; chunkno++) {
 	rv = ndz_readchunkheader(ndz, chunkno, &head);
 	if (rv)
-	    return rv;
+	    return NULL;
 
 	/* null header pointer indicates EOF */
 	if ((hdr = head.header) == NULL)
@@ -207,7 +232,7 @@ ndz_readranges(struct ndz_file *ndz)
 }
 
 int
-ndz_readchunkheader(struct ndz_file *ndz, ndz_chunk_t chunkno,
+ndz_readchunkheader(struct ndz_file *ndz, ndz_chunkno_t chunkno,
 		    struct ndz_chunkhdr *chunkhdr)
 {
     ssize_t cc;
@@ -216,7 +241,7 @@ ndz_readchunkheader(struct ndz_file *ndz, ndz_chunk_t chunkno,
     struct blockreloc *rel;
 
     cc = ndz_read(ndz, chunkhdr->data, sizeof chunkhdr->data,
-		  (off_t)chunkno * CHUNKSIZE);
+		  (off_t)chunkno * ndz->chunksize);
     if (cc != sizeof chunkhdr->data) {
 	/* EOF: return null header pointer */
 	if (cc == 0) {
@@ -285,8 +310,8 @@ main(int argc, char **argv)
     }
     
     ndz = ndz_open(argv[1], 0);
-    rv = ndz_readranges(ndz, &map);
-    if (rv) {
+    map = ndz_readranges(ndz);
+    if (map == NULL) {
 	fprintf(stderr, "Could not read ranges from %s\n", argv[1]);
 	ndz_close(ndz);
 	exit(1);

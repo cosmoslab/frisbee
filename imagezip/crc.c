@@ -37,9 +37,9 @@
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)crc.c	8.1 (Berkeley) 6/17/93";
-#endif
 static const char rcsid[] =
   "$FreeBSD: src/usr.bin/cksum/crc.c,v 1.4 1999/12/05 20:03:21 charnier Exp $";
+#endif
 #endif /* not lint */
 
 #include <sys/types.h>
