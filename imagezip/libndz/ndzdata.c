@@ -31,9 +31,6 @@
 
 #include "libndz.h"
 
-static int init_chunkmap(struct ndz_file *ndz);
-static void dump_chunkmap(struct ndz_file *ndz);
-
 /*
  * Find the first range for a particular chunk.
  *
@@ -61,21 +58,18 @@ findchunk(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
 /*
  * Read uncompessed data from an imagefile.
  *
- * Right now it returns an error if it cannot read the indicated number of
- * contiguous bytes.
- *
- * It should probably return as many contiguous bytes as it can get at the
- * indicated location, or an error if there are no data at the indicated location.
+ * Return as many contiguous sectors as it can get at the indicated location,
+ * or an error if there are no data at the indicated location.
  */
-ssize_t
-ndz_readdata(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset)
+ndz_size_t
+ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
 {
     ndz_addr_t ssect, esect, csect, resect;
     struct ndz_range *range, *crange;
     ndz_chunkno_t chunkno, lchunkno;
     ndz_chunk_t chunk;
     struct fcarg fcarg;
-    ssize_t gotbytes, rbytes, cc;
+    ssize_t rbytes, cc;
 
     if (ndz->rangemap == NULL && ndz_readranges(ndz) == NULL) {
 	fprintf(stderr, "%s could not read sector ranges\n", ndz->fname);
@@ -86,14 +80,8 @@ ndz_readdata(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset)
      * Find the range entry corresponding to the desired offset.
      * If the offset isn't included in the image, return zero.
      */
-    assert(ndz->sectsize != 0);
-    if ((offset % ndz->sectsize) != 0 || (bytes % ndz->sectsize) != 0) {
-	fprintf(stderr, "%s: only handle %d-byte aligned reads\n",
-		ndz->fname, ndz->sectsize);
-	return -1;
-    }
-    ssect = offset / ndz->sectsize;
-    esect = (offset + bytes) / ndz->sectsize;
+    ssect = sect;
+    esect = sect + nsect;
     range = ndz_rangemap_lookup(ndz->rangemap, ssect, NULL);
     if (range == NULL)
 	return 0;
@@ -211,7 +199,6 @@ ndz_readdata(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset)
 	}
     }
     
-    gotbytes = 0;
     lchunkno = chunkno;
     while (ssect < esect) {
 	resect = range->end + 1;
@@ -227,7 +214,6 @@ ndz_readdata(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset)
 	    ndz->chunkobj = NULL;
 	    return -1;
 	}
-	gotbytes += cc;
 	ndz->chunksect = resect;
 	ssect = resect;
 
@@ -251,7 +237,7 @@ ndz_readdata(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset)
 		    ndz_chunk_close(chunk);
 		    ndz->chunkobj = NULL;
 		}
-		return gotbytes;
+		return (ssect - sect);
 	    }
 	    chunkno = (ndz_chunkno_t)range->data;
 	    assert(chunkno != 0);
@@ -289,93 +275,8 @@ ndz_readdata(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset)
 	}
     }
 
-    return gotbytes;
+    return (ssect - sect);
 }
-
-#ifdef MAYBE_NOTNEEDED
-static int
-init_chunkmap(struct ndz_file *ndz)
-{
-    struct stat sb;
-    ndz_chunkno_t chunkno;
-
-    /*
-     * XXX for now we don't handle streaming an image (fd == stdin).
-     * We could do it, we would just have to construct the chunkmap
-     * on the fly.
-     */
-    if (ndz->seekable == 0) {
-	perror(ndz->fname);
-	return 1;
-    }
-
-    ndz->nchunks = (sb.st_size + ndz->chunksize - 1) / ndz->chunksize;
-    if (ndz->nchunks == 0)
-	return 0;
-
-    ndz->chunkmap = calloc(ndz->nchunks, sizeof(struct chunkmap));
-    if (ndz->chunkmap == NULL) {
-	fprintf(stderr, "%s: could not allocate chunkmap\n", ndz->fname);
-	ndz->nchunks = 0;
-	return 1;
-    }
-
-    for (chunkno = 0; chunkno < ndz->nchunks; chunkno++) {
-	struct ndz_chunkhdr head;
-	blockhdr_t *hdr;
-	struct region *reg;
-	ndz_addr_t lo, hi;
-	int i;
-
-	if (ndz_readchunkheader(ndz, chunkno, &head) != 0) {
-	    free(ndz->chunkmap);
-	    ndz->chunkmap = NULL;
-	    ndz->nchunks = 0;
-	    return 1;
-	}
-
-	/* null header pointer indicates EOF */
-	if ((hdr = head.header) == NULL) {
-	    fprintf(stderr, "%s: unexpected EOF!?\n", ndz->fname);
-	    free(ndz->chunkmap);
-	    ndz->chunkmap = NULL;
-	    ndz->nchunks = 0;
-	    return 1;
-	}
-
-	reg = head.region;
-	assert(reg != NULL || hdr->regioncount == 0);
-	lo = NDZ_HIADDR;
-	hi = NDZ_LOADDR;
-	for (i = 0; i < hdr->regioncount; i++) {
-	    if (reg->start < lo)
-		lo = reg->start;
-	    if (reg->start+reg->size-1 > hi)
-		hi = reg->start + reg->size - 1;
-	    reg++;
-	}
-	ndz->chunkmap[chunkno].start = lo;
-	ndz->chunkmap[chunkno].end = hi;
-    }
-
-    return 0;
-}
-
-#ifdef NDZDATA_TEST
-static void
-dump_chunkmap(struct ndz_file *ndz)
-{
-    ndz_chunkno_t chunkno;
-
-    printf("%s (%d chunks):\n", ndz->fname, ndz->nchunks);
-    if (ndz->chunkmap == NULL)
-	return;
-    for (chunkno = 0; chunkno < ndz->nchunks; chunkno++)
-	printf("  %u: [%lu - %lu]\n", chunkno+1,
-	       ndz->chunkmap[chunkno].start, ndz->chunkmap[chunkno].end);
-}
-#endif
-#endif
 
 #ifdef NDZDATA_TEST
 
@@ -385,25 +286,22 @@ readrange(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
     static char dbuf[1*1024*1024];
     struct ndz_file *ndz = arg;
     ndz_addr_t ssect, rsize;
-    ssize_t bytes, cc, excc;
-    off_t offset;
+    ndz_size_t sc, exsc;
 
     /* just read up to 1M of every range */
     ssect = range->start;
     rsize = range->end + 1 - range->start;
-    offset = (off_t)ssect * ndz->sectsize;
-    bytes = rsize * ndz->sectsize;
-    if (bytes > sizeof(dbuf)) {
-	bytes = sizeof(dbuf);
-	rsize = bytes / ndz->sectsize;
-    }
-    excc = bytes;
-    cc = ndz_readdata(ndz, dbuf, bytes, offset);
+    if (rsize > sizeof(dbuf) / ndz->sectsize)
+	rsize = sizeof(dbuf) / ndz->sectsize;
+    exsc = rsize;
+    sc = ndz_readdata(ndz, dbuf, rsize, ssect);
+#if 0
     fprintf(stderr,
-	    "  read [%lu-%lu] from [%d:%lu-%lu] returned %ld of %ld bytes\n",
+	    "  read [%lu-%lu] from [%d:%lu-%lu] returned %lu of %lu sectors\n",
 	    ssect, ssect+rsize-1, (int)range->data, range->start, range->end,
-	    cc, excc);
-    if (cc != excc) {
+	    sc, exsc);
+#endif
+    if (sc != exsc) {
 	fprintf(stderr, "*** short read!\n");
 	return 1;
     }
@@ -414,23 +312,22 @@ readrange(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
 	ssect = range->end - rsize / 2;
 	if (ssect < range->start)
 	    ssect = range->start;
-	offset = (off_t)ssect * ndz->sectsize;
-	bytes = rsize * ndz->sectsize;
-	excc = ((off_t)range->end + 1 - ssect) * ndz->sectsize;
+	exsc = range->end + 1 - ssect;
 	if (range->end + 1 == range->next->start) {
-	    excc += ((off_t)range->next->end + 1 - range->next->start) *
-		ndz->sectsize;
-	    if (excc > bytes)
-		excc = bytes;
+	    exsc += range->next->end + 1 - range->next->start;
+	    if (exsc > rsize)
+		exsc = rsize;
 	}
-	cc = ndz_readdata(ndz, dbuf, bytes, offset);
+	sc = ndz_readdata(ndz, dbuf, rsize, ssect);
+#if 0
 	fprintf(stderr,
-		"  read [%lu-%lu] from [%d:%lu-%lu][%d:%lu-%lu] returned %ld of %ld bytes\n",
+		"  read [%lu-%lu] from [%d:%lu-%lu][%d:%lu-%lu] returned %lu of %lu sectors\n",
 		ssect, ssect+rsize-1,
 		(int)range->data, range->start, range->end,
 		(int)range->next->data, range->next->start, range->next->end,
-		cc, excc);
-	if (cc != excc) {
+		sc, exsc);
+#endif
+	if (sc != exsc) {
 	    fprintf(stderr, "*** short read!\n");
 	    return 1;
 	}

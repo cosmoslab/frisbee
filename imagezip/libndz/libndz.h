@@ -40,7 +40,7 @@ struct ndz_chunkmap {
 
 struct ndz_file {
     int fd;
-    int seekable;
+    int flags;
     off_t curoff;
     char *fname;
     int sectsize;
@@ -48,20 +48,20 @@ struct ndz_file {
     ndz_chunkno_t nchunks;
     ndz_chunk_t chunkobj;
     ndz_addr_t chunksect;
-#ifdef STATS
     unsigned chunkuses;
     unsigned chunkhits;
-#endif
-#ifdef maybenotneeded
-    struct ndz_chunkmap *chunkmap;
-#endif
     struct ndz_rangemap *rangemap;
+    unsigned hashtype;
     unsigned hashblksize;
     void *hashdata;
     struct ndz_rangemap *hashmap;
     /* per-chunk info to verify */
     /* readahead cache stuff */
 };
+
+/* flags */
+#define NDZ_FILE_WRITE		1
+#define NDZ_FILE_SEEKABLE	2
 
 struct ndz_chunkhdr {
     blockhdr_t *header;
@@ -74,11 +74,13 @@ struct ndz_file *ndz_open(const char *name, int flags);
 int ndz_close(struct ndz_file *ndz);
 char *ndz_filename(struct ndz_file *ndz);
 ssize_t ndz_read(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset);
+ssize_t ndz_write(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset);
 int ndz_readahead(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset);
 
 int ndz_readchunkheader(struct ndz_file *ndz, ndz_chunkno_t chunkno,
 			struct ndz_chunkhdr *chunkhdr);
-ssize_t ndz_readdata(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset);
+ndz_size_t ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect,
+			ndz_addr_t sect);
 struct ndz_rangemap *ndz_readranges(struct ndz_file *ndz);
 void ndz_dumpranges(struct ndz_rangemap *map);
 
@@ -86,8 +88,17 @@ ndz_chunk_t ndz_chunk_open(struct ndz_file *ndz, ndz_chunkno_t chunkno);
 void ndz_chunk_close(ndz_chunk_t chobj);
 ssize_t ndz_chunk_read(ndz_chunk_t chobj, void *buf, size_t bytes);
 ndz_chunkno_t ndz_chunk_chunkno(ndz_chunk_t chobj);
+ndz_chunk_t ndz_chunk_create(struct ndz_file *ndz, ndz_chunkno_t chunkno);
+void ndz_chunk_flush(ndz_chunk_t chobj);
+ssize_t ndz_chunk_left(ndz_chunk_t chobj);
+ssize_t ndz_chunk_append(ndz_chunk_t chobj, ndz_addr_t ssect,
+			 void *buf, size_t bytes);
 
 struct ndz_rangemap *ndz_readhashinfo(struct ndz_file *ndz, char *sigfile);
+char *ndz_hash_dump(unsigned char *h, int hlen);
+void ndz_hashmap_dump(struct ndz_rangemap *map, int summaryonly);
+struct ndz_rangemap *ndz_compute_delta(struct ndz_rangemap *omap,
+				       struct ndz_rangemap *nmap);
 
 #endif /* _LIBNDZ_H_ */
 

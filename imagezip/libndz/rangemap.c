@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 University of Utah and the Flux Group.
+ * Copyright (c) 2014-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -301,6 +301,16 @@ ndz_rangemap_iterate(struct ndz_rangemap *map,
 }
 
 /*
+ * Return a pointer to the first entry in the map.
+ * Returns NULL if map is empty.
+ */
+struct ndz_range *
+ndz_rangemap_first(struct ndz_rangemap *map)
+{
+    return map->head.next;
+}
+
+/*
  * Locate the indicated address in the map.
  * Returns the range containing the address if it is allocated, NULL ow.
  * If prev is non-NULL, it also returns a pointer to the entry preceeding
@@ -320,7 +330,7 @@ ndz_rangemap_lookup(struct ndz_rangemap *map, ndz_addr_t addr,
 {
     struct ndz_range *prev, *range, **prange, **oprange;
 #ifdef STATS
-    int first = 1;
+    int passes = 0;
 
     map->stats.lookups++;
 #endif
@@ -345,6 +355,9 @@ ndz_rangemap_lookup(struct ndz_rangemap *map, ndz_addr_t addr,
 
 	    return NULL;
 	}
+#ifdef STATS
+	map->stats.fullscans++;
+#endif
     }
 
     oprange = NULL;
@@ -379,15 +392,17 @@ ndz_rangemap_lookup(struct ndz_rangemap *map, ndz_addr_t addr,
 	}
 
 #ifdef STATS
-	first = 0;
+	passes++;
 #endif
 	oprange = prange;
 	prange = &range->next;
     }
 
 #ifdef STATS
-    if (first)
+    if (passes == 0)
 	map->stats.hits++;
+    else if (passes == 1)
+	map->stats.onehops++;
 #endif
     map->hint = prange;
 
@@ -411,34 +426,40 @@ void
 ndz_rangemap_dumpstats(struct ndz_rangemap *map)
 {
 #ifdef STATS
-	printf("\t%d lookups, %d hits, %d scans\n",
-	       map->stats.lookups, map->stats.hits, map->stats.entriesscanned);
+	printf("\t%d lookups, %d hits, %d one-scans, %d full-scans, %d entries scanned\n",
+	       map->stats.lookups, map->stats.hits, map->stats.onehops,
+	       map->stats.fullscans, map->stats.entriesscanned);
 #endif
 }
 
 void
-ndz_rangemap_dump(struct ndz_rangemap *map, void (*dfunc)(void *))
+ndz_rangemap_dump(struct ndz_rangemap *map, int summaryonly,
+		  void (*dfunc)(struct ndz_rangemap *, void *))
 {
-	struct ndz_range *range;
-	int nrange = 0;
+    struct ndz_range *range;
+    unsigned long elements = 0;
+    int nrange = 0;
 
-	printf("MAP: %p (hint=%p, gen=%lu)\n", map, map->hint, map->gen);
-	ndz_rangemap_dumpstats(map);
-	for (range = map->head.next; range; range = range->next) {
-		printf("\t%p: %c[%lu - %lu]",
-		       range, *map->hint == range ? '*' : ' ',
-		       (unsigned long)range->start, (unsigned long)range->end);
-		if (range->data) {
-		    printf(", ");
-		    if (dfunc)
-			(*dfunc)(range->data);
-		    else
-			printf("data=%p", range->data);
-		}
-		putchar('\n');
-		nrange++;
+    printf("MAP: %p (hint=%p, gen=%lu)\n", map, map->hint, map->gen);
+    ndz_rangemap_dumpstats(map);
+    for (range = map->head.next; range; range = range->next) {
+	if (!summaryonly) {
+	    printf("\t%p: %c[%lu - %lu]",
+		   range, *map->hint == range ? '*' : ' ',
+		   (unsigned long)range->start, (unsigned long)range->end);
+	    if (range->data) {
+		printf(", ");
+		if (dfunc)
+		    (*dfunc)(map, range->data);
+		else
+		    printf("data=%p", range->data);
+	    }
+	    putchar('\n');
 	}
-	printf("%d ranges\n", nrange);
+	elements += (range->end - range->start + 1);
+	nrange++;
+    }
+    printf("\t%d ranges, %lu elements\n", nrange, elements);
 }
 
 #ifdef RANGEMAP_TEST
@@ -459,7 +480,7 @@ whackme(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
 			      range->start,
 			      range->end - range->start + 1);
     if (verbose)
-	ndz_rangemap_dump(map, NULL);
+	ndz_rangemap_dump(map, 0, NULL);
 
     return rv;
 }
@@ -495,7 +516,7 @@ joinme(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
     }
 #endif
     if (verbose)
-	ndz_rangemap_dump(map, NULL);
+	ndz_rangemap_dump(map, 0, NULL);
 
     return rv;
 }
@@ -505,7 +526,7 @@ zapdata(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
 {
     range->data = NULL;
     if (verbose)
-	ndz_rangemap_dump(map, NULL);
+	ndz_rangemap_dump(map, 0, NULL);
 
     return 0;
 }
@@ -526,7 +547,7 @@ coalesce(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
 	goto again;
     }
     if (verbose)
-	ndz_rangemap_dump(map, NULL);
+	ndz_rangemap_dump(map, 0, NULL);
 
     return rv;
 }
@@ -577,14 +598,14 @@ main(int argc, char **argv)
 	    if (rv)
 		printf("*** map_alloc failed: %d\n", rv);
 	    else if (verbose)
-		ndz_rangemap_dump(map, NULL);
+		ndz_rangemap_dump(map, 0, NULL);
 	    break;
 	case 'd': case 'D':
 	    rv = ndz_rangemap_dealloc(map, lo, hi-lo+1);
 	    if (rv)
 		printf("*** map_dealloc failed: %d\n", rv);
 	    else if (verbose)
-		ndz_rangemap_dump(map, NULL);
+		ndz_rangemap_dump(map, 0, NULL);
 	    break;
 	case 'l': case 'L':
 	    range = ndz_rangemap_lookup(map, lo, NULL);
@@ -592,7 +613,7 @@ main(int argc, char **argv)
 		printf("%lu found in [%lu - %lu]\n",
 		       lo, range->start, range->end);
 		if (verbose)
-		    ndz_rangemap_dump(map, NULL);
+		    ndz_rangemap_dump(map, 0, NULL);
 	    } else
 		printf("*** %lu not found\n", lo);
 	    break;
@@ -619,7 +640,7 @@ main(int argc, char **argv)
 	    break;
 	}
 	case 'p': case 'P':
-	    ndz_rangemap_dump(map, NULL);
+	    ndz_rangemap_dump(map, 0, NULL);
 	    break;
 	case 'q': case 'Q':
 	    goto done;

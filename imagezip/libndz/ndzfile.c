@@ -31,7 +31,7 @@
 #include "libndz.h"
 
 struct ndz_file *
-ndz_open(const char *name, int flags)
+ndz_open(const char *name, int forwrite)
 {
     struct ndz_file *ndz = calloc(1, sizeof(struct ndz_file));
     int fd;
@@ -40,50 +40,48 @@ ndz_open(const char *name, int flags)
     blockhdr_t *hdr;
     unsigned int magic;
 
-    /* XXX only do read right now */
-    if (flags != 0) {
-	fprintf(stderr, "%s: ndz_open can only read right now.\n", name);
-	goto fail;
-    }
-
     if (strcmp(name, "-") == 0) {
-	fd = fileno(stdin);
-	name = "<STDIN>";
-	ndz->seekable = 0;
+	fd = forwrite ? fileno(stdout) : fileno(stdin);
+	name = forwrite ? "<STDOUT>" : "<STDIN>";
     } else {
-	fd = open(name, 0);
+	int flags = forwrite ? (O_WRONLY|O_CREAT|O_TRUNC) : (O_RDONLY);
+	fd = open(name, flags, 0666);
 	if (fd < 0) {
 	    perror(name);
 	    goto fail;
 	}
-	ndz->seekable = 1;
+	ndz->flags |= NDZ_FILE_SEEKABLE;
     }
     ndz->fd = fd;
     ndz->curoff = 0;
+    if (forwrite)
+	ndz->flags |= NDZ_FILE_WRITE;
 
     /*
      * It should have at least one chunk header. Read that and verify
      * what we can.
      */
-    cc = ndz_read(ndz, buf, sizeof buf, 0);
-    if (cc < 0) {
-	perror(name);
-	goto fail;
-    }
-    if (cc != sizeof buf) {
-	fprintf(stderr, "%s: short read, got %d, expected %d\n",
-		name, (int)cc, (int)sizeof buf);
-	goto fail;
-    }
+    if (!forwrite) {
+	cc = ndz_read(ndz, buf, sizeof buf, 0);
+	if (cc < 0) {
+	    perror(name);
+	    goto fail;
+	}
+	if (cc != sizeof buf) {
+	    fprintf(stderr, "%s: short read, got %d, expected %d\n",
+		    name, (int)cc, (int)sizeof buf);
+	    goto fail;
+	}
 
-    hdr = (blockhdr_t *)buf;
+	hdr = (blockhdr_t *)buf;
 
-    magic = hdr->magic;
-    if (magic < COMPRESSED_MAGIC_BASE ||
-	magic > COMPRESSED_MAGIC_CURRENT) {
-	fprintf(stderr, "%s: bad version 0x%x, not an ndz file?\n",
-		name, magic);
-	goto fail;
+	magic = hdr->magic;
+	if (magic < COMPRESSED_MAGIC_BASE ||
+	    magic > COMPRESSED_MAGIC_CURRENT) {
+	    fprintf(stderr, "%s: bad version 0x%x, not an ndz file?\n",
+		    name, magic);
+	    goto fail;
+	}
     }
 
     /* XXX hardwired right now */
@@ -107,8 +105,13 @@ ndz_close(struct ndz_file *ndz)
 {
     int rv;
 
+    if (ndz == NULL)
+	return -1;
+
     rv = close(ndz->fd);
     if (rv == 0) {
+	if (ndz->hashmap)
+	    ndz_rangemap_deinit(ndz->hashmap);
 	if (ndz->rangemap)
 	    ndz_rangemap_deinit(ndz->rangemap);
 	if (ndz->fname)
@@ -130,7 +133,16 @@ ndz_read(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset)
     size_t count = bytes;
     char *bp = buf;
 
-    if (ndz->seekable) {
+    if (ndz == NULL) {
+	errno = EINVAL;
+	return -1;
+    }
+    if ((ndz->flags & NDZ_FILE_WRITE) != 0) {
+	errno = EACCES;
+	return -1;
+    }
+
+    if ((ndz->flags & NDZ_FILE_SEEKABLE) != 0) {
 	if (lseek(ndz->fd, offset, SEEK_SET) < 0)
 	    return -1;
     } else {
@@ -184,7 +196,7 @@ ndz_readranges(struct ndz_file *ndz)
     int rv, i;
     ndz_chunkno_t chunkno;
 
-    if (ndz == NULL)
+    if (ndz == NULL || (ndz->flags & NDZ_FILE_WRITE) != 0)
 	return NULL;
     if (ndz->rangemap)
 	return ndz->rangemap;
@@ -240,6 +252,9 @@ ndz_readchunkheader(struct ndz_file *ndz, ndz_chunkno_t chunkno,
     struct region *reg;
     struct blockreloc *rel;
 
+    if (ndz == NULL || (ndz->flags & NDZ_FILE_WRITE) != 0)
+	return -1;
+
     cc = ndz_read(ndz, chunkhdr->data, sizeof chunkhdr->data,
 		  (off_t)chunkno * ndz->chunksize);
     if (cc != sizeof chunkhdr->data) {
@@ -279,6 +294,55 @@ ndz_readchunkheader(struct ndz_file *ndz, ndz_chunkno_t chunkno,
     chunkhdr->reloc = (rel != NULL && hdr->reloccount) ? rel : NULL;
 
     return 0;
+}
+
+ssize_t
+ndz_write(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset)
+{
+    size_t count = bytes;
+    char *bp = buf;
+
+    if (ndz == NULL) {
+	errno = EINVAL;
+	return -1;
+    }
+    if ((ndz->flags & NDZ_FILE_WRITE) == 0) {
+	errno = EACCES;
+	return -1;
+    }
+
+    if ((ndz->flags & NDZ_FILE_SEEKABLE) != 0) {
+	if (lseek(ndz->fd, offset, SEEK_SET) < 0)
+	    return -1;
+    } else {
+	if (offset != ndz->curoff) {
+	    fprintf(stderr, "%s: non-contiguous write on unseekable output.\n",
+		    ndz->fname);
+	    errno = ESPIPE;
+	    return -1;
+	}
+    }
+
+    /*
+     * We might be writing to stdout or a pipe, so we may not put the
+     * entire amount in one operation. Keep writing til we get EOF,
+     * an error, or we put it all.
+     */
+    while (count) {
+	int cc;
+
+	if ((cc = write(ndz->fd, bp, count)) <= 0) {
+	    if (cc == 0)
+		break;
+
+	    return -1;
+	}
+	count -= cc;
+	bp += cc;
+    }
+
+    ndz->curoff += (bytes - count);
+    return bytes - count;
 }
 
 static int

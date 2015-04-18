@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 University of Utah and the Flux Group.
+ * Copyright (c) 2014-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -35,9 +35,11 @@ typedef uint64_t ndz_size_t;
 
 #ifdef NDZ_RANGEMAP_STATS
 struct ndz_rangemap_stats {
-	unsigned lookups;
-	unsigned hits;
-	unsigned entriesscanned;
+    unsigned lookups;
+    unsigned hits;
+    unsigned onehops;
+    unsigned fullscans;
+    unsigned entriesscanned;
 };
 #endif
 
@@ -70,10 +72,12 @@ int ndz_rangemap_iterate(struct ndz_rangemap *map,
 				      struct ndz_range *,
 				      void *),
 			 void *arg);
+struct ndz_range *ndz_rangemap_first(struct ndz_rangemap *map);
 struct ndz_range *ndz_rangemap_lookup(struct ndz_rangemap *map,
 				      ndz_addr_t addr,
 				      struct ndz_range **prev);
-void ndz_rangemap_dump(struct ndz_rangemap *map, void (*dfunc)(void *));
+void ndz_rangemap_dump(struct ndz_rangemap *map, int summaryonly,
+		       void (*dfunc)(struct ndz_rangemap *, void *));
 void ndz_rangemap_dumpstats(struct ndz_rangemap *map);
 
 struct ndz_range *ndz_range_alloc(void);
