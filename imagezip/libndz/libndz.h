@@ -50,6 +50,7 @@ struct ndz_file {
     ndz_addr_t chunksect;
     unsigned chunkuses;
     unsigned chunkhits;
+    unsigned chunkreopens;
     struct ndz_rangemap *rangemap;
     unsigned hashtype;
     unsigned hashblksize;
@@ -85,16 +86,21 @@ struct ndz_rangemap *ndz_readranges(struct ndz_file *ndz);
 void ndz_dumpranges(struct ndz_rangemap *map);
 
 ndz_chunk_t ndz_chunk_open(struct ndz_file *ndz, ndz_chunkno_t chunkno);
+int ndz_chunk_rewind(ndz_chunk_t chobj);
 void ndz_chunk_close(ndz_chunk_t chobj);
 ssize_t ndz_chunk_read(ndz_chunk_t chobj, void *buf, size_t bytes);
 ndz_chunkno_t ndz_chunk_chunkno(ndz_chunk_t chobj);
-ndz_chunk_t ndz_chunk_create(struct ndz_file *ndz, ndz_chunkno_t chunkno);
-void ndz_chunk_flush(ndz_chunk_t chobj);
+blockhdr_t *ndz_chunk_header(ndz_chunk_t chobj);
+ssize_t ndz_chunk_datasize(ndz_chunk_t chobj);
+ndz_chunk_t ndz_chunk_create(struct ndz_file *ndz, ndz_chunkno_t chunkno,
+			     int clevel);
+int ndz_chunk_flush(ndz_chunk_t chobj, int withheader);
 ssize_t ndz_chunk_left(ndz_chunk_t chobj);
-ssize_t ndz_chunk_append(ndz_chunk_t chobj, ndz_addr_t ssect,
-			 void *buf, size_t bytes);
+ssize_t ndz_chunk_append(ndz_chunk_t chobj, void *buf, size_t bytes);
 
 struct ndz_rangemap *ndz_readhashinfo(struct ndz_file *ndz, char *sigfile);
+void ndz_hash_data(struct ndz_file *ndz, unsigned char *data, unsigned long count,
+		   unsigned char *hash);
 char *ndz_hash_dump(unsigned char *h, int hlen);
 void ndz_hashmap_dump(struct ndz_rangemap *map, int summaryonly);
 struct ndz_rangemap *ndz_compute_delta(struct ndz_rangemap *omap,

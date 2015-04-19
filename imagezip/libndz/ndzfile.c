@@ -62,7 +62,12 @@ ndz_open(const char *name, int forwrite)
      * what we can.
      */
     if (!forwrite) {
+#if 0
+	/* XXX use this instead */
+	cc = ndz_readchunkheader(ndz, 0, buf);
+#else
 	cc = ndz_read(ndz, buf, sizeof buf, 0);
+#endif
 	if (cc < 0) {
 	    perror(name);
 	    goto fail;

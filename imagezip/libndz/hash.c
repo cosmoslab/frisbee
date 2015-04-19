@@ -33,6 +33,8 @@
 #include <errno.h>
 #include <assert.h>
 #include <sys/stat.h>
+#include <openssl/md5.h>
+#include <openssl/sha.h>
 
 #include "libndz.h"
 #include "imagehash.h"
@@ -78,6 +80,20 @@ ndz_hashmap_dump(struct ndz_rangemap *map, int summaryonly)
     if (map)
 	ndz_rangemap_dump(map, summaryonly, printhashdata);
 }
+
+void
+ndz_hash_data(struct ndz_file *ndz, unsigned char *data, unsigned long count,
+	      unsigned char *hash)
+{
+    assert(ndz != NULL && ndz->hashtype != 0);
+    assert(data != NULL && hash != NULL);
+
+    if (ndz->hashtype == HASH_TYPE_SHA1)
+	SHA1(data, count, hash);
+    else if (ndz->hashtype == HASH_TYPE_MD5)
+	MD5(data, count, hash);
+}
+
 
 /*
  * Read the hash info from a signature file into a region map associated

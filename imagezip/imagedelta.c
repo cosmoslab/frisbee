@@ -100,18 +100,16 @@ static int usesigfiles = 0;
 static int forcesig = 0;
 static int debug = 0;
 static int verify = 0;
+static int clevel = 4;
 static int hashtype = HASH_TYPE_SHA1;
 static int hashlen = 20;
 static long hashblksize = HASHBLK_SIZE / 512;
-static ndz_chunk_t chunkobj;
-static ndz_chunkno_t chunkno;
-static char *chunkdatabuf;
 
 void
 usage(void)
 {
     fprintf(stderr,
-	    "Usage: imagedelta [-SVfd] [-b blksize] [-D hashfunc] image1.ndz image2.ndz delta1to2.ndz\n"
+	    "Usage: imagedelta [-SVfd] [-b blksize] [-D hashfunc] [-z level] image1.ndz image2.ndz delta1to2.ndz\n"
 	    "\n"
 	    "Produce a delta image (delta1to2) containing the changes\n"
 	    "necessary to get from image1 to image2.\n"
@@ -121,7 +119,9 @@ usage(void)
 	    "-f         Force imagedelta to use a questionable sigfile.\n"
 	    "-d         Enable debugging.\n"
 	    "-D hfunc   Hash function to use (md5 or sha1).\n"
-	    "-b blksize Size of hash blocks (512 <= size <= 32M).\n");
+	    "-b blksize Size of hash blocks (512 <= size <= 32M).\n"
+	    "-z level   Compression level (0 to 9).\n");
+
     exit(1);
 }
 
@@ -252,13 +252,14 @@ openofile(char *file, struct fileinfo *info)
 	perror(file);
 	exit(1);
     }
+
     info->sigfile = malloc(strlen(file) + 5);
     assert(info->sigfile != NULL);
     strcpy(info->sigfile, file);
     strcat(info->sigfile, ".sig");
 
     /* check early that we can write to the sigfile! */
-    sigfd = open(info->sigfile, O_WRONLY|O_CREAT|O_TRUNC);
+    sigfd = open(info->sigfile, O_WRONLY|O_CREAT|O_TRUNC, 0666);
     if (sigfd < 0) {
 	perror(info->sigfile);
 	exit(1);
@@ -315,6 +316,47 @@ readifile(struct fileinfo *info)
 	info->sigmap = NULL;
 }
 
+struct chunkstate {
+    ndz_chunk_t chunkobj;
+    ndz_chunkno_t chunkno;
+    unsigned char *chunkdatabuf;
+    blockhdr_t *header;
+    struct region *region;
+    struct region *curregion;
+};
+
+static int
+initnewchunk(struct chunkstate *cstate)
+{
+    struct blockhdr_V2 *hdr;
+
+    cstate->chunkobj = ndz_chunk_create(delta.ndz, cstate->chunkno, clevel);
+    if (cstate->chunkobj == NULL) {
+	fprintf(stderr, "Error creating chunk %u\n", cstate->chunkno);
+	return 1;
+    }
+    cstate->header = ndz_chunk_header(cstate->chunkobj);
+
+    /*
+     * XXX we still do V3 (actually V2 format) headers.
+     * We still don't really support V4 yet...
+     */
+    hdr = (struct blockhdr_V2 *)cstate->header;
+    hdr->magic = COMPRESSED_V3;
+    hdr->size = 0;
+    hdr->blockindex = cstate->chunkno;
+    hdr->regionsize = DEFAULTREGIONSIZE;
+    hdr->regioncount = 0;
+    hdr->firstsect = 0;
+    hdr->lastsect = 0;
+    hdr->reloccount = 0;
+
+    cstate->region = (struct region *)(hdr + 1);
+    cstate->curregion = cstate->region;
+
+    return 0;
+}
+
 /*
  * Iterator for ranges in the delta map.
  * Read and chunkify the data from the full image, hashing the data as
@@ -323,9 +365,12 @@ readifile(struct fileinfo *info)
 static int
 chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 {
+    struct chunkstate *cstate = arg;
     ndz_addr_t rstart = range->start;
     ndz_size_t rsize = range->end + 1 - rstart, sc;
     uint32_t offset, hsize;
+    size_t rbytes;
+    ssize_t cc;
     unsigned char hashbuf[HASH_MAXSIZE], *hash;
     struct ndz_range *hrange;
 
@@ -333,17 +378,18 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
     fprintf(stderr, "chunkify [%lu-%lu]:\n", range->start, range->end);
 #endif
 
-#if 0
-    if (chunkobj == NULL) {
-	chunkno = 0;
-	chunkobj = ndz_chunk_create(ndz2.ndz, chunkno);
-	chunkdatabuf = malloc(hashblksize * ndz->sectsize);
-	if (chunkobj == NULL || chunkdatabuf == NULL) {
+    if (cstate->chunkobj == NULL) {
+	cstate->chunkdatabuf = malloc(hashblksize * delta.ndz->sectsize);
+	if (cstate->chunkdatabuf == NULL) {
 	    fprintf(stderr, "could not initialize chunkify data structs\n");
 	    return 1;
 	}
+	cstate->chunkno = 0;
+	if (initnewchunk(cstate) != 0)
+	    return 1;
+	cstate->header->firstsect = rstart;
+	cstate->curregion->start = rstart;
     }
-#endif
 
     offset = rstart % hashblksize;
     while (rsize > 0) {
@@ -361,34 +407,95 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 #endif
 
 	/* XXX read/decompress data range */
-	sc = ndz_readdata(ndz2.ndz, chunkdatabuf, hsize, rstart);
+	sc = ndz_readdata(ndz2.ndz, cstate->chunkdatabuf, hsize, rstart);
+	if (sc != hsize) {
+	    fprintf(stderr, "%s: unexpected read return %ld (instead of %u)\n",
+		    ndz_filename(ndz2.ndz), (long)sc, hsize);
+	    return 1;
+	}
 
 	/*
 	 * See if we have an existing hash for the hash block
 	 */
+	rbytes = hsize * delta.ndz->sectsize;
 	hrange = ndz_rangemap_lookup(ndz2.sigmap, rstart, NULL);
 	if (hrange && hrange->data &&
 	    hrange->start == rstart && hrange->end == rstart + hsize - 1) {
 	    struct hashdata *hd = (struct hashdata *)hrange->data;
 	    hash = hd->hash;
 #ifdef CHUNKIFY_DEBUG
-	    fprintf(stderr, " found hash=%s\n",
-		    ndz_hash_dump(hash, hashlen));
+	    fprintf(stderr, "    found hash=%s\n", ndz_hash_dump(hash, hashlen));
+#endif
+#if 1
+	    /* sanity check */
+	    ndz_hash_data(delta.ndz, cstate->chunkdatabuf, rbytes, hashbuf);
+#ifdef CHUNKIFY_DEBUG
+	    fprintf(stderr, " computed hash=%s\n", ndz_hash_dump(hashbuf, hashlen));
+#endif
+	    if (memcmp(hash, hashbuf, hashlen)) {
+		fprintf(stderr, "*** [%lu-%lu]: hash does not compare!\n",
+			rstart, rstart + hsize - 1);
+	    }
 #endif
 	} else {
-	    /* XXX compute hash over data */
+	    ndz_hash_data(delta.ndz, cstate->chunkdatabuf, rbytes, hashbuf);
+	    hash = hashbuf;
 #ifdef CHUNKIFY_DEBUG
 	    fprintf(stderr, " no hash found\n");
 #endif
 	}
 
+	/*
+	 * If there is not enough room for this range in the current chunk,
+	 * write it out and start a new one.
+	 */
+	if (rbytes > ndz_chunk_left(cstate->chunkobj)) {
+#ifdef CHUNKIFY_DEBUG
+	    fprintf(stderr, " chunk %u done, starting new one\n", cstate->chunkno);
+#endif
+
+	    /* finalize the header */
+	    cstate->header->size = ndz_chunk_datasize(cstate->chunkobj);
+	    cstate->header->regioncount = (cstate->curregion - cstate->region + 1);
+	    cstate->header->lastsect = rstart;
+
+	    /* and write it */
+	    if (ndz_chunk_flush(cstate->chunkobj, 1) != 0) {
+		fprintf(stderr, "Error writing compressed data\n");
+		return 1;
+	    }
+
+	    cstate->chunkno++;
+	    if (initnewchunk(cstate) != 0)
+		return 1;
+	    cstate->header->firstsect = rstart;
+	    cstate->curregion->start = rstart;
+	}
+	assert(rbytes <= ndz_chunk_left(cstate->chunkobj));
+
+	/*
+	 * Append the hashed range to the current chunk.
+	 */
+#ifdef CHUNKIFY_DEBUG
+	fprintf(stderr, " appending to chunk %u\n", cstate->chunkno);
+#endif
+	cc = ndz_chunk_append(cstate->chunkobj, cstate->chunkdatabuf, rbytes);
+	if (cc < 0) {
+	    fprintf(stderr, "Error compressing data\n");
+	    return 1;
+	}
+	assert(cc == rbytes);
+
+	/* append to the current region or create a new one */
+	if (cstate->curregion->start + cstate->curregion->size == rstart)
+	    cstate->curregion->size += hsize;
+	else {
+	    cstate->curregion++;
+	    cstate->curregion->start = rstart;
+	    cstate->curregion->size = hsize;
+	}
+
 	/* XXX add range/hashinfo to new sigmap */
-
-	/* XXX compress/write data range */
-
-	/* XXX deal with redo logic when nearing end-of-chunk */
-
-	/* XXX deal with switching chunks */
 
 #if 0
 	/*
@@ -397,19 +504,50 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	if ((hash = rhash) == NULL) {
 	    if (hash_range(rstart, hsize, hashbuf)) {
 		fprintf(stderr, "Error hashing image data\n");
-		return -1;
+		return 1;
 	    }
 	    hash = hashbuf;
 	}
 
 	if (addhash(hinfop, rstart, hsize, hash) != 0) {
 	    fprintf(stderr, "Out of memory for new hash map\n");
-	    return -1;
+	    return 1;
 	}
 #endif
 
 	rstart += hsize;
 	rsize -= hsize;
+    }
+
+    /*
+     * If this is the last range, we have to flush the final chunk.
+     */
+    if (range->next == NULL) {
+#ifdef CHUNKIFY_DEBUG
+	fprintf(stderr, " final chunk %u done\n", cstate->chunkno);
+#endif
+
+	/* finalize the header */
+	cstate->header->size = ndz_chunk_datasize(cstate->chunkobj);
+	cstate->header->regioncount = (cstate->curregion - cstate->region + 1);
+
+	/*
+	 * XXX not right, need to use the last sector of the ndz2 map.
+	 * But I'm not sure it is set correct and it doesn't really matter
+	 * since we will never be zeroing when loading a delta image!
+	 */
+	cstate->header->lastsect = range->end + 1;
+
+	/* and write it */
+	if (ndz_chunk_flush(cstate->chunkobj, 1) != 0) {
+	    fprintf(stderr, "Error writing compressed data\n");
+	    return 1;
+	}
+
+	free(cstate->chunkdatabuf);
+
+	/* XXX for debugging */
+	memset(cstate, 0, sizeof(*cstate));
     }
 
     return 0;
@@ -460,6 +598,13 @@ main(int argc, char **argv)
 	case 'd':
 	    debug++;
 	    break;
+	case 'z':
+	    clevel = atoi(optarg);
+	    if (clevel < 0 || clevel > 9) {
+		fprintf(stderr, "Invalid compression level\n");
+		usage();
+	    }
+	    break;
 	case 'h':
 	case '?':
 	default:
@@ -492,8 +637,7 @@ main(int argc, char **argv)
     printf("==== New range ");
     ndz_rangemap_dump(ndz2.map, (debug==0), chunkfunc);
     printf("==== New hash ");
-    //    ndz_hashmap_dump(ndz2.sigmap, (debug==0));
-    ndz_hashmap_dump(ndz2.sigmap, 0);
+    ndz_hashmap_dump(ndz2.sigmap, (debug==0));
     fflush(stdout);
 #endif
 
@@ -548,10 +692,30 @@ main(int argc, char **argv)
 		argv[2]);
 	exit(1);
     }
-    if (ndz_rangemap_iterate(delta.map, chunkify, NULL) != 0) {
-	fprintf(stderr, "%s: error while creating new delta image\n",
-		argv[2]);
-	exit(1);
+
+    /*
+     * If there is anything in the resulting delta, produce an image!
+     */
+    if (ndz_rangemap_first(delta.map) != NULL) {
+	struct chunkstate *cstate = calloc(1, sizeof(*cstate));
+	assert(cstate != NULL);
+
+	delta.ndz->hashtype = hashtype;
+	delta.ndz->hashblksize = hashblksize;
+	if (ndz_rangemap_iterate(delta.map, chunkify, cstate) != 0) {
+	    fprintf(stderr, "%s: error while creating new delta image\n",
+		    argv[2]);
+	    exit(1);
+	}
+	free(cstate);
+	ndz_close(ndz2.ndz);
+	ndz_close(delta.ndz);
+    } else {
+	fprintf(stderr, "Images are identical, no delta produced!\n");
+	ndz_close(ndz2.ndz);
+	ndz_close(delta.ndz);
+	unlink(argv[2]);
+	unlink(delta.sigfile);
     }
 
     return 0;

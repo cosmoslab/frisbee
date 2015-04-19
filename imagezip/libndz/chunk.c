@@ -26,6 +26,21 @@
  *
  * Since chunks are independently compressed, we can manipulate them
  * independently.
+ *
+ * TODO:
+ *  - In _read entire chunk at once, optionally return a pointer to the
+ *    header struct. Alternatively, at least have a 1M buffer, read
+ *    incrementally, and keep a high water mark that we have read so far.
+ *
+ *  - Add a _reopen call when seeking backward in the same chunk. Still
+ *    have to reset the zlib state, but don't have to reread the compressed
+ *    data.
+ *
+ *  - In _create, return a pointer to where the header should go so caller
+ *    can fill it in. Option to _flush to say whether to write the header
+ *    out or not.
+ *
+ *  - Page-align the buffer.
  */
 
 #include <unistd.h>
@@ -40,17 +55,54 @@
 
 #include "libndz.h"
 
-#define CINPUTSIZE	(128*1024)
+//#define CHUNK_DEBUG
+
+/*
+ * Currently we use the "classic" imagezip algorithm for filling chunks.
+ *
+ * 1. Before we even try compressing data, we make sure there is at least
+ *    (request_size + 1000) bytes available, where request_size is the
+ *    UNCOMPRESSED size.
+ * 2. After a compression is done, there needs to be at least 8K left, or
+ *    we call it a day.
+ */
+#define CHUNKSLOP	1000
+#define CHUNKTHRESH	8192
 
 struct ndz_chunk {
     struct ndz_file *ndz;
     ndz_chunkno_t chunkno;
     off_t foff;
     z_stream z;
-    int cbufsize;
-    int cbufoff;
-    char *cdatabuf;
+    int clevel;
+    /* buffer stuff */
+    char *cbufbase;	/* allocated memory */
+    blockhdr_t *cbufhdr;/* (aligned) chunk header location */
+    char *cbufdata;	/* (aligned) chunk data location */
+    int cbufsize;	/* size of data portion */
+    int cbufoff;	/* high-water mark of valid data */
+    int cbufleft;	/* write: space left to fill */
 };
+
+int
+getchunkbuffer(struct ndz_chunk *chunk)
+{
+    int psize = getpagesize();
+    uintptr_t ptr;
+
+    chunk->cbufbase = malloc(CHUNKSIZE + psize);
+    if (chunk->cbufbase == NULL)
+	return -1;
+
+    ptr = (((uintptr_t)chunk->cbufbase + psize - 1) & ~(psize - 1));
+    chunk->cbufhdr = (blockhdr_t *)ptr;
+    chunk->cbufdata = (char *)(ptr + DEFAULTREGIONSIZE);
+    chunk->cbufsize = CHUNKSIZE - DEFAULTREGIONSIZE;
+    chunk->cbufoff = 0;
+    chunk->cbufleft = chunk->cbufsize;
+
+    return 0;
+}
 
 ndz_chunk_t
 ndz_chunk_open(struct ndz_file *ndz, ndz_chunkno_t chunkno)
@@ -58,13 +110,14 @@ ndz_chunk_open(struct ndz_file *ndz, ndz_chunkno_t chunkno)
     struct ndz_chunk *chunk = malloc(sizeof *chunk);
     if (chunk == NULL)
 	return NULL;
-    chunk->cdatabuf = malloc(CINPUTSIZE);
-    if (chunk->cdatabuf == NULL) {
+
+#ifdef CHUNK_DEBUG
+    fprintf(stderr, "%s: chunk_open called\n", ndz->fname);
+#endif
+    if (getchunkbuffer(chunk)) {
 	free(chunk);
 	return NULL;
     }
-    chunk->cbufsize = CINPUTSIZE;
-    chunk->cbufoff = 0;
 
     chunk->ndz = ndz;
     chunk->chunkno = chunkno;
@@ -80,7 +133,33 @@ ndz_chunk_open(struct ndz_file *ndz, ndz_chunkno_t chunkno)
     }
     chunk->foff = (off_t)chunkno * ndz->chunksize + DEFAULTREGIONSIZE;
 
+    /*
+     * XXX currently we use ndzfile::ndz_readchunkheader for read access to the
+     * chunk header. It is better for applications that don't need access to the
+     * decompressed data, since it won't drag in libz as use of functions in this
+     * file would.
+     */
+    chunk->cbufhdr = NULL;
+
     return (ndz_chunk_t)chunk;
+}
+
+int
+ndz_chunk_rewind(ndz_chunk_t chobj)
+{
+    struct ndz_chunk *chunk = (struct ndz_chunk *)chobj;
+    if (chunk == NULL || chunk->cbufbase == NULL)
+	return -1;
+
+    if (inflateReset(&chunk->z) != Z_OK) {
+	fprintf(stderr, "chunk_rewind: could not reset zlib state\n");
+	return -1;
+    }
+
+    chunk->z.next_in = (Bytef *)chunk->cbufdata;
+    chunk->z.avail_in = chunk->cbufoff;
+
+    return 0;
 }
 
 void
@@ -90,9 +169,13 @@ ndz_chunk_close(ndz_chunk_t chobj)
     if (chunk == NULL)
 	return;
 
-    /* release any cache resources */
-
+#ifdef CHUNK_DEBUG
+    fprintf(stderr, "%s: chunk_close called\n", chunk->ndz->fname);
+#endif
     inflateEnd(&chunk->z);
+
+    if (chunk->cbufbase)
+	free(chunk->cbufbase);
     free(chunk);
 }
 
@@ -104,6 +187,26 @@ ndz_chunk_chunkno(ndz_chunk_t chobj)
 	return ~0;
 
     return chunk->chunkno;
+}
+
+blockhdr_t *
+ndz_chunk_header(ndz_chunk_t chobj)
+{
+    struct ndz_chunk *chunk = (struct ndz_chunk *)chobj;
+    if (chunk == NULL)
+	return NULL;
+
+    return chunk->cbufhdr;
+}
+
+ssize_t
+ndz_chunk_datasize(ndz_chunk_t chobj)
+{
+    struct ndz_chunk *chunk = (struct ndz_chunk *)chobj;
+    if (chunk == NULL)
+	return -1;
+
+    return chunk->cbufoff;
 }
 
 /*
@@ -119,17 +222,27 @@ ndz_chunk_read(ndz_chunk_t chobj, void *buf, size_t bytes)
     if (chunk == NULL)
 	return -1;
 
+#ifdef CHUNK_DEBUG
+    fprintf(stderr, "%s: chunk_read called\n", chunk->ndz->fname);
+#endif
+
     chunk->z.next_out = (Bytef *)buf;
     chunk->z.avail_out = bytes;
     while (chunk->z.avail_out > 0) {
 	/* read more compressed data from file if necessary */
 	if (chunk->z.avail_in == 0) {
-	    cc = ndz_read(chunk->ndz, chunk->cdatabuf, chunk->cbufsize,
-			  chunk->foff);
+	    cc = ndz_read(chunk->ndz, chunk->cbufdata + chunk->cbufoff,
+			  chunk->cbufsize - chunk->cbufoff, chunk->foff);
+#ifdef CHUNK_DEBUG
+	    fprintf(stderr, "chunk_read: reading %d bytes at %lu returns %ld\n",
+		    chunk->cbufsize - chunk->cbufoff,
+		    (unsigned long)chunk->foff, cc);
+#endif
 	    if (cc <= 0)
 		return cc;
-	    chunk->z.next_in = (Bytef *)chunk->cdatabuf;
+	    chunk->z.next_in = (Bytef *)(chunk->cbufdata + chunk->cbufoff);
 	    chunk->z.avail_in = cc;
+	    chunk->cbufoff += cc;
 	    chunk->foff += cc;
 	}
 	assert(chunk->z.next_in != Z_NULL);
@@ -138,7 +251,7 @@ ndz_chunk_read(ndz_chunk_t chobj, void *buf, size_t bytes)
 	rv = inflate(&chunk->z, Z_SYNC_FLUSH);
 
 	if (rv == Z_STREAM_END) {
-#ifdef DEBUG
+#ifdef CHUNK_DEBUG
 	    fprintf(stderr, "chunk_read hit STREAM_END at foff=%ld, avail_out=%d\n",
 		    (unsigned long)chunk->foff, chunk->z.avail_out);
 #endif
@@ -160,55 +273,122 @@ ndz_chunk_read(ndz_chunk_t chobj, void *buf, size_t bytes)
  * til I decide if it is worthwhile to combine.
  */
 ndz_chunk_t
-ndz_chunk_create(struct ndz_file *ndz, ndz_chunkno_t chunkno)
+ndz_chunk_create(struct ndz_file *ndz, ndz_chunkno_t chunkno, int clevel)
 {
     struct ndz_chunk *chunk = malloc(sizeof *chunk);
     if (chunk == NULL)
 	return NULL;
 
-    /*
-     * We allocate a buffer large enough to hold the entire chunk
-     * since we need to manipulate it a bit while we are constructing it.
-     * Once finished, we flush the whole thing to the file.
-     */
-    chunk->cdatabuf = malloc(CHUNKSIZE);
-    if (chunk->cdatabuf == NULL) {
+#ifdef CHUNK_DEBUG
+    fprintf(stderr, "%s: chunk_create called\n", chunk->ndz->fname);
+#endif
+    if (getchunkbuffer(chunk)) {
 	free(chunk);
 	return NULL;
     }
-    chunk->cbufsize = CHUNKSIZE;
-    chunk->cbufoff = 0;
+    memset(chunk->cbufhdr, 0, DEFAULTREGIONSIZE);
 
+    chunk->clevel = clevel;
     chunk->ndz = ndz;
     chunk->chunkno = chunkno;
     chunk->z.zalloc = Z_NULL;
     chunk->z.zfree = Z_NULL;
     chunk->z.opaque = Z_NULL;
-    chunk->z.next_in = Z_NULL;
-    chunk->z.avail_in = 0;
-    chunk->z.next_out = Z_NULL;
-    if (inflateInit(&chunk->z) != Z_OK) {
+    if (deflateInit(&chunk->z, chunk->clevel) != Z_OK) {
 	free(chunk);
 	return NULL;
     }
-    chunk->foff = (off_t)chunkno * ndz->chunksize;
+    chunk->foff = (off_t)chunkno * ndz->chunksize + DEFAULTREGIONSIZE;
 
     return (ndz_chunk_t)chunk;
 }
 
-void
-ndz_chunk_flush(ndz_chunk_t chobj)
+int
+ndz_chunk_flush(ndz_chunk_t chobj, int withheader)
 {
     struct ndz_chunk *chunk = (struct ndz_chunk *)chobj;
+    char *buf = chunk->cbufdata;
+    size_t count = chunk->cbufsize;
+    off_t off = chunk->foff;
     ssize_t cc;
 
     if (chunk == NULL)
-	return;
+	return -1;
 
-    cc = ndz_write(chunk->ndz, chunk->cdatabuf, chunk->cbufsize, chunk->foff);
+#ifdef CHUNK_DEBUG
+    fprintf(stderr, "%s: chunk_flush called\n", chunk->ndz->fname);
+#endif
 
-    deflateEnd(&chunk->z);
+    /*
+     * XXX there can be some compressed data left even though we use Z_SYNC_FLUSH.
+     * So use Z_FINISH to clear the pipes.
+     */
+
+    /* XXX fix up cbufleft since we might have zeroed it in chunk_append */
+    chunk->cbufleft = CHUNKSIZE - DEFAULTREGIONSIZE - chunk->cbufoff;
+    assert(chunk->cbufleft > 0);
+
+    chunk->z.next_in   = 0;
+    chunk->z.avail_in  = 0;
+    chunk->z.next_out = (Bytef *)(chunk->cbufdata + chunk->cbufoff);
+    chunk->z.avail_out = chunk->cbufleft;
+
+    cc = deflate(&chunk->z, Z_FINISH);
+    if (cc != Z_STREAM_END) {
+	fprintf(stderr, "chunk_flush: deflate(FINISH) failed, rv=%ld\n", cc);
+	return -1;
+    }
+    if (chunk->z.avail_out == 0) {
+	fprintf(stderr,
+		"chunk_flush: too much data for chunk; "
+		"recompile with larger CHUNKSLOP and try again!\n");
+	return -1;
+    }
+    chunk->cbufoff += (chunk->cbufleft - chunk->z.avail_out);
+    chunk->cbufleft = chunk->z.avail_out;
+#ifdef CHUNK_DEBUG
+    fprintf(stderr, "%s: chunk_flush: %d bytes left in chunk\n",
+	    chunk->ndz->fname, chunk->cbufleft);
+#endif
+
+    /*
+     * XXX XXX horrible horrible hack alert!!!
+     * Touch up the header if we are writing it out.
+     */
+    if (withheader && chunk->cbufhdr->magic > COMPRESSED_V1)
+	chunk->cbufhdr->size = chunk->cbufoff;
+
+    /* XXX if nothing has been appended, don't write anything */
+    if (chunk->cbufoff > 0 || withheader) {
+	/* params are setup by default for no header write, adjust */
+	if (withheader) {
+	    buf = (char *)chunk->cbufhdr;
+	    count += DEFAULTREGIONSIZE;
+	    off -= DEFAULTREGIONSIZE;
+	}
+
+	/* zero the remaining portion of the chunk data buffer */
+	memset(chunk->cbufdata + chunk->cbufoff, 0, chunk->cbufleft);
+
+	cc = ndz_write(chunk->ndz, buf, count, off);
+	if (cc != count) {
+	    fprintf(stderr,
+		    "chunk_flush: failed to write entire chunk (%ld of %lu)\n",
+		    cc, count);
+	    return -1;
+	}
+    }
+
+    if (deflateEnd(&chunk->z) != Z_OK) {
+	fprintf(stderr, "chunk_flush: deflateEnd failed\n");
+	return -1;
+    }
+
+    if (chunk->cbufbase)
+	free(chunk->cbufbase);
     free(chunk);
+
+    return 0;
 }
 
 /*
@@ -223,18 +403,55 @@ ndz_chunk_left(ndz_chunk_t chobj)
     if (chunk == NULL)
 	return -1;
 
-    return chunk->cbufsize - chunk->cbufoff;
+    return chunk->cbufleft - CHUNKSLOP;
 }
 
 /*
  * Compress and append data to a chunk.
+ *
  * Writes are all-or-nothing, returns zero if the full write cannot be done.
  * It is up to the caller to use ndz_chunk_left and resize accordingly.
  */
 ssize_t
-ndz_chunk_append(ndz_chunk_t chobj, ndz_addr_t ssect, void *buf, size_t bytes)
+ndz_chunk_append(ndz_chunk_t chobj, void *buf, size_t bytes)
 {
-    return 0;
+    int rv;
+
+    struct ndz_chunk *chunk = (struct ndz_chunk *)chobj;
+    if (chunk == NULL || chunk->ndz == NULL)
+	return -1;
+
+    if ((bytes % chunk->ndz->sectsize) != 0) {
+	fprintf(stderr, "chunk_append: write not multiple of sector size\n");
+	return -1;
+    }
+
+    if (bytes == 0 || bytes > chunk->cbufleft - CHUNKSLOP)
+	return 0;
+
+    chunk->z.next_in = (Bytef *)buf;
+    chunk->z.avail_in = bytes;
+    chunk->z.next_out = (Bytef *)(chunk->cbufdata + chunk->cbufoff);
+    chunk->z.avail_out = chunk->cbufleft;
+    rv = deflate(&chunk->z, Z_SYNC_FLUSH);
+    if (rv != Z_OK) {
+	fprintf(stderr, "chunk_append: deflate failed, rv=%d\n", rv);
+	return -1;
+    }
+    if (chunk->z.avail_out == 0) {
+	fprintf(stderr,
+		"chunk_append: too much data for chunk; "
+		"recompile with larger CHUNKSLOP and try again!\n");
+	return -1;
+    }
+    assert(chunk->z.avail_in == 0);
+
+    chunk->cbufoff += (chunk->cbufleft - chunk->z.avail_out);
+    chunk->cbufleft = chunk->z.avail_out;
+    if (chunk->cbufleft < CHUNKTHRESH)
+	chunk->cbufleft = 0;
+
+    return (bytes - chunk->z.avail_in);
 }
 
 /*

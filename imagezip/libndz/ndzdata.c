@@ -31,6 +31,8 @@
 
 #include "libndz.h"
 
+//#define CHUNK_DEBUG
+
 /*
  * Find the first range for a particular chunk.
  *
@@ -100,7 +102,7 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
 #endif
     chunk = ndz->chunkobj;
     if (chunk && ndz_chunk_chunkno(chunk) == chunkno && ndz->chunksect <= ssect) {
-#ifdef DEBUG
+#ifdef CHUNK_DEBUG
 	fprintf(stderr, "%s: reusing chunk %d object, sect=%ld\n",
 		ndz->fname, chunkno, ndz->chunksect);
 #endif
@@ -120,20 +122,34 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
      * first range entry in that chunk.
      */
     else {
-	if (chunk) {
-#ifdef DEBUG
-	    fprintf(stderr, "%s: could not reuse chunk %d object, sect=%ld;"
-		    " requesting chunk %d, sect=%ld\n",
-		    ndz->fname, ndz_chunk_chunkno(chunk), ndz->chunksect,
-		    chunkno, ssect);
+	if (chunk && ndz_chunk_chunkno(chunk) == chunkno &&
+	    ndz_chunk_rewind(chunk) == 0) {
+#ifdef CHUNK_DEBUG
+	    fprintf(stderr, "%s: reopened current chunk %d object, sect=%ld;"
+		    " requesting sect=%ld\n",
+		    ndz->fname, chunkno, ndz->chunksect, ssect);
 #endif
-	    ndz_chunk_close(chunk);
+#ifdef STATS
+	    ndz->chunkreopens++;
+#endif
+	    ;
 	}
-	chunk = ndz->chunkobj = ndz_chunk_open(ndz, chunkno);
-	if (chunk == NULL) {
-	    fprintf(stderr, "%s: could not access chunk %d\n",
-		    ndz->fname, chunkno);
-	    return -1;
+	else {
+	    if (chunk) {
+#ifdef CHUNK_DEBUG
+		fprintf(stderr, "%s: could not reuse chunk %d object, sect=%ld;"
+			" requesting chunk %d, sect=%ld\n",
+			ndz->fname, ndz_chunk_chunkno(chunk), ndz->chunksect,
+			chunkno, ssect);
+#endif
+		ndz_chunk_close(chunk);
+	    }
+	    chunk = ndz->chunkobj = ndz_chunk_open(ndz, chunkno);
+	    if (chunk == NULL) {
+		fprintf(stderr, "%s: could not access chunk %d\n",
+			ndz->fname, chunkno);
+		return -1;
+	    }
 	}
 
 	/* note: chunk numbers are 1-based in range map */
@@ -143,8 +159,8 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
 	crange = fcarg.out_range;
 	assert(crange != NULL);
 	csect = ndz->chunksect = crange->start;
-#ifdef DEBUG
-	fprintf(stderr, "%s: opened chunk %d object, sect=%ld\n",
+#ifdef CHUNK_DEBUG
+	fprintf(stderr, "%s: (re)opened chunk %d object, sect=%ld\n",
 		ndz->fname, chunkno, ndz->chunksect);
 #endif
     }
@@ -183,8 +199,8 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
 	    cc = ndz_chunk_read(chunk, tossbuf, rbytes);
 	    if (cc != rbytes) {
 		fprintf(stderr,
-			"%s: unexpected return from ndz_chunk_read (%lu != %lu)\n",
-			ndz->fname, (long unsigned)cc, (long unsigned)rbytes);
+			"%s: unexpected return from ndz_chunk_read (%ld != %lu)\n",
+			ndz->fname, (long)cc, (long unsigned)rbytes);
 		ndz_chunk_close(chunk);
 		ndz->chunkobj = NULL;
 		return -1;
@@ -208,14 +224,15 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
 	cc = ndz_chunk_read(chunk, buf, rbytes);
 	if (cc != rbytes) {
 	    fprintf(stderr,
-		    "%s: unexpected return from ndz_chunk_read (%lu != %lu)\n",
-		    ndz->fname, (long unsigned)cc, (long unsigned)rbytes);
+		    "%s: unexpected return from ndz_chunk_read (%ld != %lu)\n",
+		    ndz->fname, (long)cc, (long unsigned)rbytes);
 	    ndz_chunk_close(chunk);
 	    ndz->chunkobj = NULL;
 	    return -1;
 	}
 	ndz->chunksect = resect;
 	ssect = resect;
+	buf += rbytes;
 
 	/*
 	 * Our request might span ranges and even chunks.
@@ -227,7 +244,7 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
 	     * end of contiguous data, return what we read.
 	     */
 	    if (range == NULL || range->start != ssect) {
-#ifdef DEBUG
+#ifdef CHUNK_DEBUG
 		fprintf(stderr, "%s: hit end-of-%s\n",
 			ndz->fname, range ? "contiguous-data" : "file");
 #endif
@@ -244,7 +261,7 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
 	    chunkno--;
 	    if (chunkno != lchunkno) {
 		assert(chunkno == lchunkno + 1);
-#ifdef DEBUG
+#ifdef CHUNK_DEBUG
 		fprintf(stderr, "%s: finished chunk %d, opening chunk %d, sect=%ld\n",
 			ndz->fname, lchunkno, chunkno, range->start);
 #endif
@@ -295,11 +312,11 @@ readrange(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
 	rsize = sizeof(dbuf) / ndz->sectsize;
     exsc = rsize;
     sc = ndz_readdata(ndz, dbuf, rsize, ssect);
-#if 0
+#if 1
     fprintf(stderr,
-	    "  read [%lu-%lu] from [%d:%lu-%lu] returned %lu of %lu sectors\n",
+	    "  read [%lu-%lu] from [%d:%lu-%lu] returned %ld of %lu sectors\n",
 	    ssect, ssect+rsize-1, (int)range->data, range->start, range->end,
-	    sc, exsc);
+	    (long)sc, exsc);
 #endif
     if (sc != exsc) {
 	fprintf(stderr, "*** short read!\n");
@@ -362,9 +379,11 @@ main(int argc, char **argv)
 	fprintf(stderr, "%s: FAILED\n", argv[1]);
 
 #ifdef STATS
-    fprintf(stderr, "Chunk object uses %u, hits %u (%.2f%%)\n",
+    fprintf(stderr, "Chunk object uses %u, hits %u (%.2f%%), reopens %u (%.2f%%)\n",
 	    ndz->chunkuses, ndz->chunkhits,
-	    (double)ndz->chunkhits / (ndz->chunkuses ?: 1) * 100);
+	    (double)ndz->chunkhits / (ndz->chunkuses ?: 1) * 100,
+	    ndz->chunkreopens,
+	    (double)ndz->chunkreopens / (ndz->chunkuses ?: 1) * 100);
 #endif
     if (ndz->chunkobj)
 	ndz_chunk_close(ndz->chunkobj);
