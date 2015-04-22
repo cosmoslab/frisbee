@@ -486,8 +486,8 @@ ndz_rangemap_dump(struct ndz_rangemap *map, int summaryonly,
     ndz_rangemap_dumpstats(map);
     for (range = map->head.next; range; range = range->next) {
 	if (!summaryonly) {
-	    printf("\t%p: %c[%lu - %lu]",
-		   range, *map->hint == range ? '*' : ' ',
+	    printf("\t%c[%lu - %lu]",
+		   *map->hint == range ? '*' : ' ',
 		   (unsigned long)range->start, (unsigned long)range->end);
 	    if (range->data) {
 		printf(", ");

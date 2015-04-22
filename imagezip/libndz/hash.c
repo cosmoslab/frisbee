@@ -38,6 +38,8 @@
 
 #include "libndz.h"
 
+#define COMPDELTA_DEBUG
+
 char *
 ndz_hash_dump(unsigned char *h, int hlen)
 {
@@ -349,8 +351,22 @@ struct deltainfo {
     int omapdone;
 };
 
+/*
+ * Compute a "reasonably accurate" delta given the hash maps of two
+ * images. Where hash ranges of the two maps exactly overlap, we can
+ * use the hashes to determine whether to include the range. Otherwise,
+ * if they partially overlap, we just include the entirety of the new
+ * range, rather than determining the exact sets of overlaps and computing
+ * hashes on those.
+ *
+ * Why is this "reasonably accurate"? Since these are hash maps, no range
+ * is larger than hashblksize sectors (typically 128 sectors), so any single
+ * partial overlap will be contained in a small area. Worst case scenario
+ * is that one sector has been added or removed from each hashblksize range.
+ * This would cause us to create a full image. 
+ */
 static int
-compdelta(struct ndz_rangemap *nmap, struct ndz_range *range, void *arg)
+compfastdelta(struct ndz_rangemap *nmap, struct ndz_range *range, void *arg)
 {
     struct deltainfo *dinfo = arg;
     struct ndz_rangemap *omap = dinfo->omap;
@@ -476,7 +492,36 @@ ndz_compute_delta(struct ndz_rangemap *omap, struct ndz_rangemap *nmap)
     dinfo.omap = omap;
     dinfo.dmap = dmap;
     dinfo.omapdone = 0;
+#if 0
     (void) ndz_rangemap_iterate(nmap, compdelta, &dinfo);
+#endif
+
+    return dmap;
+}
+
+/*
+ * This is much easier as we don't need to hash anything or worry about
+ * computing hash alignments.
+ */
+struct ndz_rangemap *
+ndz_compute_delta_sigmap(struct ndz_rangemap *omap, struct ndz_rangemap *nmap)
+{
+    struct ndz_rangemap *dmap;
+    struct deltainfo dinfo;
+
+    if (omap == NULL || nmap == NULL)
+	return NULL;
+
+    dmap = ndz_rangemap_init(nmap->loaddr, nmap->hiaddr);
+    if (dmap == NULL) {
+	fprintf(stderr, "Could not allocate delta map\n");
+	return NULL;
+    }
+
+    dinfo.omap = omap;
+    dinfo.dmap = dmap;
+    dinfo.omapdone = 0;
+    (void) ndz_rangemap_iterate(nmap, compfastdelta, &dinfo);
 
     return dmap;
 }

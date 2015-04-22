@@ -111,6 +111,8 @@ char *ndz_hash_dump(unsigned char *h, int hlen);
 void ndz_hashmap_dump(struct ndz_rangemap *map, int summaryonly);
 struct ndz_rangemap *ndz_compute_delta(struct ndz_rangemap *omap,
 				       struct ndz_rangemap *nmap);
+struct ndz_rangemap *ndz_compute_delta_sigmap(struct ndz_rangemap *omap,
+					      struct ndz_rangemap *nmap);
 
 #endif /* _LIBNDZ_H_ */
 

@@ -752,16 +752,7 @@ main(int argc, char **argv)
 		    argv[1], ndz2.ndz->hashtype, ndz2.ndz->hashblksize);
 	    exit(1);
 	}
-#if 1
-	/* XXX just duplicate image 2 */
-	{
-	    struct ndz_rangemap *foo;
-	    foo = ndz_rangemap_init(NDZ_LOADDR, NDZ_HIADDR-NDZ_LOADDR);
-	    delta.map = ndz_compute_delta(foo, ndz2.sigmap);
-	}
-#else
-	delta.map = ndz_compute_delta(ndz1.sigmap, ndz2.sigmap);
-#endif
+	delta.map = ndz_compute_delta_sigmap(ndz1.sigmap, ndz2.sigmap);
 	if (delta.map == NULL) {
 	    fprintf(stderr, "Could not compute delta for %s and %s\n",
 		    argv[0], argv[1]);
@@ -784,8 +775,34 @@ main(int argc, char **argv)
 	fflush(stdout);
 #endif
     }
+    /*
+     * Compute a delta map from the images themselves.
+     * Same deal, but construct the delta map from the ranges maps.
+     */
     else {
-	fprintf(stderr, "No can do without sigfiles right now!\n");
+	delta.map = ndz_compute_delta(ndz1.map, ndz2.map);
+	if (delta.map == NULL) {
+	    fprintf(stderr, "Could not compute delta for %s and %s\n",
+		    argv[0], argv[1]);
+	    exit(1);
+	}
+
+	/*
+	 * Delta map has same range as full image.
+	 * XXX doesn't belong here.
+	 */
+	delta.ndz->maplo = ndz2.ndz->maplo;
+	delta.ndz->maphi = ndz2.ndz->maphi;
+
+#if 1
+	printf("==== Delta map ");
+	ndz_hashmap_dump(delta.map, (debug==0));
+	printf("==== Old map stats:");
+	ndz_rangemap_dumpstats(ndz1.map);
+	printf("==== New map stats:");
+	ndz_rangemap_dumpstats(ndz2.map);
+	fflush(stdout);
+#endif
 	exit(2);
     }
 

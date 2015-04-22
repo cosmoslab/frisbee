@@ -26,21 +26,6 @@
  *
  * Since chunks are independently compressed, we can manipulate them
  * independently.
- *
- * TODO:
- *  - In _read entire chunk at once, optionally return a pointer to the
- *    header struct. Alternatively, at least have a 1M buffer, read
- *    incrementally, and keep a high water mark that we have read so far.
- *
- *  - Add a _reopen call when seeking backward in the same chunk. Still
- *    have to reset the zlib state, but don't have to reread the compressed
- *    data.
- *
- *  - In _create, return a pointer to where the header should go so caller
- *    can fill it in. Option to _flush to say whether to write the header
- *    out or not.
- *
- *  - Page-align the buffer.
  */
 
 #include <unistd.h>
