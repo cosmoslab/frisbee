@@ -51,6 +51,7 @@
 #include "imagehash.h"
 #include "queue.h"
 
+#define TERSE_DUMP_OUTPUT
 #define HANDLE_SPLIT_HASH
 
 #ifndef linux
@@ -84,9 +85,9 @@ static char *imagename;
 static char *fileid = NULL;
 static char *sigfile = NULL;
 static int sanity = 0;
+#ifdef HANDLE_SPLIT_HASH
 static int splithash = 0;
-static int quiet = 0;
-static int terse = 0;
+#endif
 
 static char chunkbuf[CHUNKSIZE];
 
@@ -129,7 +130,7 @@ main(int argc, char **argv)
 	extern char build_info[];
 	struct hashinfo *hashinfo = 0;
 
-	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:SXqT")) != -1)
+	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:SX")) != -1)
 		switch(ch) {
 		case 'b':
 			hashblksize = atol(optarg);
@@ -192,17 +193,7 @@ main(int argc, char **argv)
 			sanity = 1;
 			break;
 		case 'X':
-#ifdef HANDLE_SPLIT_HASH
 			splithash = 1;
-#else
-			fprintf(stderr, "-X not supported, ignored\n");
-#endif
-			break;
-		case 'q':
-			quiet = 1;
-			break;
-		case 'T':
-			terse = 1;
 			break;
 		case 'h':
 		case '?':
@@ -518,30 +509,30 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 	struct hashregion *reg;
 
 	if (detail > 1) {
-		if (!terse) {
-			switch (hinfo->version) {
-			case HASH_VERSION_1:
-				printf("sig version 1, blksize=%d sectors:\n",
-				       bytestosec(HASHBLK_SIZE));
-				break;
-			case HASH_VERSION_2:
-				printf("sig version 2, blksize=%d sectors:\n",
-				       hinfo->blksize);
-				break;
-			default:
-				printf("unknown signature version (%x), "
-				       "expect garbage:\n", hinfo->version);
-				break;
-			}
+#ifdef TERSE_DUMP_OUTPUT
+#else
+		switch (hinfo->version) {
+		case HASH_VERSION_1:
+			printf("sig version 1, blksize=%d sectors:\n",
+			       bytestosec(HASHBLK_SIZE));
+			break;
+		case HASH_VERSION_2:
+			printf("sig version 2, blksize=%d sectors:\n",
+			       hinfo->blksize);
+			break;
+		default:
+			printf("unknown signature version (%x), "
+			      "expect garbage:\n", hinfo->version);
+			break;
 		}
+#endif
 		for (i = 0; i < hinfo->nregions; i++) {
 			reg = &hinfo->regions[i];
-			if (terse) {
-				printf("%s\t%d\t%d\n",
-				       spewhash(reg->hash, hashlen),
-				       reg->region.start, reg->region.size);
-				continue;
-			}
+#ifdef TERSE_DUMP_OUTPUT
+			printf("%s\t%d\t%d\n",
+			       spewhash(reg->hash, hashlen),
+			       reg->region.start, reg->region.size);
+#else
 			printf("[%u-%u] (%d): ",
 			       reg->region.start,
 			       reg->region.start + reg->region.size-1,
@@ -560,6 +551,7 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 			} else if (HASH_CHUNKDOESSPAN(reg->chunkno))
 				nsplithashes++;
 			printf("hash %s\n", spewhash(reg->hash, hashlen));
+#endif
 		}
 	}
 	if (nsplithashes)
@@ -694,9 +686,8 @@ comparehashinfo(struct hashinfo *siginfo, struct hashinfo *imageinfo)
 	if (siginfo->nregions != imageinfo->nregions) {
 		fprintf(stderr,
 			"Sig/image have different number of hash regions "
-			"(%d != %d); original may %shave split-chunk ranges\n",
-			siginfo->nregions, imageinfo->nregions,
-			splithash ? "" : "not ");
+			"(%d != %d)\n",
+			siginfo->nregions, imageinfo->nregions);
 		i++;
 	}
 	if (i)
@@ -1298,8 +1289,7 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 					       bytes);
 					(void)(*hashfunc)(ldata, spanoff+bytes,
 							  hash);
-					lhash.chunkno =
-						HASH_CHUNKSETSPAN(lhash.chunkno);
+					HASH_CHUNKSETSPAN(lhash.chunkno);
 					addhash(hinfop, lhash.chunkno,
 						lreg->start, lreg->size+hsize,
 						hash);
@@ -1320,17 +1310,16 @@ fprintf(stderr, "HACK: failed: [%u-%u][%u-%u]\n", lreg->start, lreg->start+lreg-
 			}
 			/*
 			 * If this is the last piece of the last region
-			 * in a chunk and it does not end on a hashblksize
-			 * boundary, then stash it to see if it is a range
-			 * that spans chunks.
+			 * in a chunk and it is not a full hashblksize piece,
+			 * then stash it to see if it is a range that spans
+			 * chunks.
 			 */
-			if (rsize == hsize &&
-			    nreg + 1 == blockhdr->regioncount &&
-			    ((rstart + rsize) % hashblksizeinsec) != 0) {
+			if (hsize < hashblksize && rsize == hsize &&
+			    nreg + 1 == blockhdr->regioncount) {
 				size_t bytes = sectobytes(hsize);
 
 				lhash.region.start = rstart;
-				lhash.region.size = rsize;
+				lhash.region.size = hsize;
 				lhash.chunkno = chunkno;
 				(void)(*hashfunc)(rbuf->data, bytes,
 						  lhash.hash);

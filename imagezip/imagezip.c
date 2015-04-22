@@ -1333,14 +1333,14 @@ addskip(uint32_t start, uint32_t size)
 	skip->next  = skips;
 	skips       = skip;
 	numskips++;
-#if 1
+#if 0
 	{
 		static FILE *sd;
 		if (sd == NULL) {
 			sd = fopen("/tmp/skips", "w");
 			fprintf(sd, "%lu %lu\n", inputminsec, inputmaxsec);
 		}
-		fprintf(sd, "d %lu %lu\n", start, start + size - 1);
+		fprintf(sd, "d %u %u\n", start, start + size - 1);
 	}
 #endif
 }

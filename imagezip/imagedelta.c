@@ -486,11 +486,11 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 
 	/*
 	 * At this point we have a range of data ([hstart - hstart+hsize-1])
-	 * of a specific size (hsize or hbytes) which we have hashed
-	 * (hdata->hash). Now we compress and write it out to the new image
-	 * file. This is complicated significantly by the fact that it might
-	 * not all fit in the current chunk. If there is not enough room for
-	 * this range in the current chunk, we split it and write what we can.
+	 * of a specific size (hsize) which we have hashed (hdata->hash).
+	 * Now we compress and write it out to the new image file. This is
+	 * complicated significantly by the fact that it might not all fit
+	 * in the current chunk. If there is not enough room for this range
+	 * in the current chunk, we split it and write what we can.
 	 *
 	 * This is complicated even further by our conservative algorithm
 	 * for filling chunks, which is basically: if the amount of

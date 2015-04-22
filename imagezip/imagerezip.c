@@ -520,7 +520,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		    spanschunk++;
 
 		chunkremaining = ndz_chunk_left(cstate->chunkobj);
-		assert(psize <= (chunkremaining/new.ndz->sectsize));
+		assert(psize <= chunkremaining / new.ndz->sectsize);
 	    }
 
 	    /* write up to chunkremaining (truncated to sectorsize) bytes */
