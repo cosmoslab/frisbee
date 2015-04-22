@@ -61,7 +61,7 @@ struct ndz_rangemap {
 #endif
 };
 
-struct ndz_rangemap *ndz_rangemap_init(ndz_addr_t off, ndz_size_t size);
+struct ndz_rangemap *ndz_rangemap_init(ndz_addr_t loaddr, ndz_addr_t hiaddr);
 void ndz_rangemap_deinit(struct ndz_rangemap *map);
 int ndz_rangemap_alloc(struct ndz_rangemap *map,
 		       ndz_addr_t addr, ndz_size_t size, void *data);
@@ -73,6 +73,8 @@ int ndz_rangemap_iterate(struct ndz_rangemap *map,
 				      void *),
 			 void *arg);
 struct ndz_range *ndz_rangemap_first(struct ndz_rangemap *map);
+struct ndz_range *ndz_rangemap_last(struct ndz_rangemap *map);
+int ndz_rangemap_count(struct ndz_rangemap *map);
 struct ndz_range *ndz_rangemap_lookup(struct ndz_rangemap *map,
 				      ndz_addr_t addr,
 				      struct ndz_range **prev);

@@ -200,6 +200,7 @@ ndz_readranges(struct ndz_file *ndz)
     struct region *reg;
     int rv, i;
     ndz_chunkno_t chunkno;
+    ndz_addr_t first = 0, last = 0;
 
     if (ndz == NULL || (ndz->flags & NDZ_FILE_WRITE) != 0)
 	return NULL;
@@ -225,9 +226,20 @@ ndz_readranges(struct ndz_file *ndz)
 	if ((hdr = head.header) == NULL)
 	    break;
 
+	if (hdr->magic != COMPRESSED_V1) {
+	    if (chunkno == 0)
+		first = hdr->firstsect;
+	    last = hdr->lastsect;
+	}
+
 	reg = head.region;
 	assert(reg != NULL || hdr->regioncount == 0);
 	for (i = 0; i < hdr->regioncount; i++) {
+	    if (hdr->magic == COMPRESSED_V1) {
+		if (chunkno == 0)
+		    first = (ndz_addr_t)reg->start;
+		last = (ndz_addr_t)reg->start + (ndz_size_t)reg->size - 1;
+	    }
 	    rv = ndz_rangemap_alloc(map,
 				    (ndz_addr_t)reg->start,
 				    (ndz_size_t)reg->size,
@@ -244,6 +256,8 @@ ndz_readranges(struct ndz_file *ndz)
 	}
     }
 
+    ndz->maplo = first;
+    ndz->maphi = last;
     ndz->rangemap = map;
     return map;
 }

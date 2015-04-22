@@ -25,18 +25,18 @@
 #define	_LIBNDZ_H_
 
 #include "imagehdr.h"
+#include "imagehash.h"
 #include "rangemap.h"
 
 typedef uint32_t ndz_chunkno_t;
 /* XXX keep this opaque so we don't create dependencies on zlib */
 typedef void * ndz_chunk_t;
 
-#ifdef maybenotneeded
-struct ndz_chunkmap {
-    ndz_addr_t start;
-    ndz_addr_t end;
+struct ndz_hashdata {
+    ndz_chunkno_t chunkno;
+    uint32_t hashlen;
+    uint8_t hash[HASH_MAXSIZE];
 };
-#endif
 
 struct ndz_file {
     int fd;
@@ -46,15 +46,20 @@ struct ndz_file {
     int sectsize;
     int chunksize;
     ndz_chunkno_t nchunks;
+    ndz_addr_t maplo, maphi;
+    struct ndz_rangemap *rangemap;
+    /* chunk object info */
     ndz_chunk_t chunkobj;
     ndz_addr_t chunksect;
     unsigned chunkuses;
     unsigned chunkhits;
     unsigned chunkreopens;
-    struct ndz_rangemap *rangemap;
+    /* hash (signature) info */
     unsigned hashtype;
     unsigned hashblksize;
-    void *hashdata;
+    unsigned hashentries;
+    unsigned hashcurentry;
+    struct ndz_hashdata *hashdata;
     struct ndz_rangemap *hashmap;
     /* per-chunk info to verify */
     /* readahead cache stuff */
@@ -99,8 +104,9 @@ ssize_t ndz_chunk_left(ndz_chunk_t chobj);
 ssize_t ndz_chunk_append(ndz_chunk_t chobj, void *buf, size_t bytes);
 
 struct ndz_rangemap *ndz_readhashinfo(struct ndz_file *ndz, char *sigfile);
-void ndz_hash_data(struct ndz_file *ndz, unsigned char *data, unsigned long count,
-		   unsigned char *hash);
+int ndz_writehashinfo(struct ndz_file *ndz, char *sigfile);
+void ndz_hash_data(struct ndz_file *ndz, unsigned char *data,
+		   unsigned long count, unsigned char *hash);
 char *ndz_hash_dump(unsigned char *h, int hlen);
 void ndz_hashmap_dump(struct ndz_rangemap *map, int summaryonly);
 struct ndz_rangemap *ndz_compute_delta(struct ndz_rangemap *omap,

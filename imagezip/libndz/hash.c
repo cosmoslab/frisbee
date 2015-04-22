@@ -37,13 +37,6 @@
 #include <openssl/sha.h>
 
 #include "libndz.h"
-#include "imagehash.h"
-
-struct hashdata {
-    ndz_chunkno_t chunkno;
-    uint32_t hashlen;
-    uint8_t hash[HASH_MAXSIZE];
-};
 
 char *
 ndz_hash_dump(unsigned char *h, int hlen)
@@ -63,7 +56,7 @@ ndz_hash_dump(unsigned char *h, int hlen)
 static void
 printhashdata(struct ndz_rangemap *map, void *ptr)
 {
-    struct hashdata *h = ptr;
+    struct ndz_hashdata *h = ptr;
 
     /* upper bit of chunkno indicates chunkrange */
     if (HASH_CHUNKDOESSPAN(h->chunkno)) {
@@ -107,9 +100,11 @@ ndz_readhashinfo(struct ndz_file *ndz, char *sigfile)
     int fd, cc, rv, i;
     unsigned hashlen, blksize, hashtype;
     struct ndz_rangemap *map;
-    struct hashdata *hashdata = NULL;
-
-    unsigned lhblock,lstart,lsize;
+    struct ndz_hashdata *hashdata = NULL;
+    unsigned lhblock;
+#if 0
+    unsigned lstart, lsize;
+#endif
 
     if (ndz == NULL)
 	return NULL;
@@ -147,7 +142,7 @@ ndz_readhashinfo(struct ndz_file *ndz, char *sigfile)
 
     /* allocate the hash data elements all in one piece for convienience */
     if (hi.nregions) {
-	hashdata = malloc(hi.nregions * sizeof(struct hashdata));
+	hashdata = malloc(hi.nregions * sizeof(struct ndz_hashdata));
 	if (hashdata == NULL) {
 	    fprintf(stderr, "%s: could not allocate hashmap data\n",
 		    ndz->fname);
@@ -210,21 +205,127 @@ ndz_readhashinfo(struct ndz_file *ndz, char *sigfile)
     close(fd);
 
     ndz->hashmap = map;
+    ndz->hashentries = hi.nregions;
+    ndz->hashcurentry = ndz->hashentries;
     ndz->hashdata = hashdata;
     ndz->hashblksize = blksize;
     ndz->hashtype = hashtype;
 
-#if 0
-    /* Compensate for partition offset */
-    for (i = 0; i < hinfo->nregions; i++) {
-	struct hashregion *hreg = &hinfo->regions[i];
-	assert(hreg->region.size <= hashblksize);
-
-	hreg->region.start += poffset;
-    }
-#endif
-
     return map;
+}
+
+static int
+writehinfo(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
+{
+    struct hashregion hr;
+    struct ndz_hashdata *hd = range->data;
+    int ofd = (int)arg;
+
+    if (hd == NULL) {
+	fprintf(stderr, "no hash info for range [%lu-%lu]\n",
+		range->start, range->end);
+	return 1;
+    }
+    assert(hd->hashlen <= HASH_MAXSIZE);
+
+    hr.region.start = range->start;
+    hr.region.size = range->end - range->start + 1;
+    hr.chunkno = hd->chunkno;
+    memcpy(hr.hash, hd->hash, hd->hashlen);
+    if (hd->hashlen < HASH_MAXSIZE)
+	memset(&hr.hash[hd->hashlen], 0, HASH_MAXSIZE - hd->hashlen);
+    if (write(ofd, &hr, sizeof(hr)) != sizeof(hr))
+	return 1;
+
+    return 0;
+}
+
+/*
+ * Write out hash (signature) info associated with the named image.
+ */
+int
+ndz_writehashinfo(struct ndz_file *ndz, char *sigfile)
+{
+    int ofd, cc;
+    struct hashinfo hi;
+    char *iname;
+
+    if (ndz == NULL || ndz->hashmap == NULL || sigfile == NULL)
+	return -1;
+
+    ofd = open(sigfile, O_RDWR|O_CREAT|O_TRUNC, 0666);
+    if (ofd < 0) {
+	perror(sigfile);
+	return -1;
+    }
+
+    iname = ndz->fname;
+
+    memset(&hi, 0, sizeof(hi));
+    strcpy((char *)hi.magic, HASH_MAGIC);
+    hi.version = HASH_VERSION_2;
+    hi.hashtype = ndz->hashtype;
+    hi.nregions = ndz->hashentries;
+    hi.blksize = ndz->hashblksize;
+
+    cc = write(ofd, &hi, sizeof(hi));
+    if (cc != sizeof(hi)) {
+	if (cc < 0)
+	    perror(sigfile);
+	else
+	    fprintf(stderr,
+		    "%s: incomplete write (%d) to sigfile %s\n",
+		    iname, cc, sigfile);
+	close(ofd);
+	unlink(sigfile);
+	return -1;
+    }
+
+    /*
+     * Iterate over the sigmap writing out the entries
+     */
+    if (ndz_rangemap_iterate(ndz->hashmap, writehinfo,
+			     (void *)(uintptr_t)ofd) != 0) {
+	fprintf(stderr,
+		"%s: could not write one or more hash entries to sigfile %s\n",
+		ndz->fname, sigfile);
+	close(ofd);
+	unlink(sigfile);
+	return -1;
+    }
+
+    close(ofd);
+
+    /*
+     * Set the modtime of the hash file to match that of the image.
+     * This is a crude (but fast!) method for matching images with
+     * signatures.
+     */
+    if (strcmp(iname, "-") != 0) {
+	struct stat sb;
+	struct timeval tm[2];
+
+	cc = stat(iname, &sb);
+	if (cc >= 0) {
+#ifdef linux
+	    tm[0].tv_sec = sb.st_atime;
+	    tm[0].tv_usec = 0;
+	    tm[1].tv_sec = sb.st_mtime;
+	    tm[1].tv_usec = 0;
+#else
+	    TIMESPEC_TO_TIMEVAL(&tm[0], &sb.st_atimespec);
+	    TIMESPEC_TO_TIMEVAL(&tm[1], &sb.st_mtimespec);
+#endif
+	    cc = utimes(sigfile, tm);
+	}
+	if (cc < 0)
+	    fprintf(stderr,
+		    "%s: WARNING: could not set mtime (%s)\n",
+		    sigfile, strerror(errno));
+    }
+
+    fprintf(stderr, "%s: new signature written to %s\n", iname, sigfile);
+    return 0;
 }
 
 void
@@ -237,6 +338,7 @@ ndz_freehashmap(struct ndz_file *ndz)
     if (ndz->hashdata) {
 	free(ndz->hashdata);
 	ndz->hashdata = NULL;
+	ndz->hashentries = 0;
     }
     ndz->hashblksize = 0;
 }
@@ -255,7 +357,7 @@ compdelta(struct ndz_rangemap *nmap, struct ndz_range *range, void *arg)
     struct ndz_rangemap *dmap = dinfo->dmap;
     ndz_addr_t addr, eaddr;
     struct ndz_range *orange, *oprev;
-    struct hashdata *odata, *ndata;
+    struct ndz_hashdata *odata, *ndata;
     int rv;
 
     addr = range->start;

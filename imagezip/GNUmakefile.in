@@ -127,7 +127,7 @@ endif
 # Necessary sometimes.
 #PTHREADCFLAGS	+= -DCONDVARS_WORK
 
-PROGS		= imagezip imageunzip imagedump imagedelta
+PROGS		= imagezip imageunzip imagedump imagedelta imagerezip
 CFLAGS		= $(SUBDIRCFLAGS) -I$(SRCDIR) $(LDSTATIC)
 LIBS 		= -lz
 ZIPCFLAGS	= $(CFLAGS) -Wall
@@ -266,6 +266,12 @@ imagedelta: imagedelta.o version.o $(NDZLIBS)
 imagedelta.o:	imagedelta.c
 	$(CC) -c $(CFLAGS) -o imagedelta.o $<
 
+imagerezip: imagerezip.o version.o $(NDZLIBS)
+	$(CC) $(CFLAGS) imagerezip.o version.o $(NDZLIBS) -o imagerezip
+
+imagerezip.o:	imagerezip.c
+	$(CC) -c $(CFLAGS) -o imagerezip.o $<
+
 sizetest: disksize.c
 	$(CC) -DTEST $< -o sizetest
 
@@ -284,9 +290,10 @@ endif
 imagezip.o: sliceinfo.h imagehdr.h global.h range.h hashmap/hashmap.h
 imageunzip.o: imagehdr.h
 imagehash.o: imagehdr.h imagehash.h
-imagedelta.o: imagehdr.h libndz/libndz.h
+imagedelta.o: imagehdr.h imagehash.h libndz/libndz.h
+imagerezip.o: imagehdr.h imagehash.h libndz/libndz.h
 
-version.c: imagezip.c imageunzip.c imagedump.c imagedelta.c
+version.c: imagezip.c imageunzip.c imagedump.c imagedelta.c imagerezip.c
 	echo >$@ "char build_info[] = \"Built `date +%d-%b-%Y` by `id -nu`@`hostname | sed 's/\..*//'`:`pwd`\";"
 
 install: $(addprefix $(INSTALL_BINDIR)/, $(PROGS))

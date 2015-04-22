@@ -311,6 +311,48 @@ ndz_rangemap_first(struct ndz_rangemap *map)
 }
 
 /*
+ * Return a pointer to the last entry in the map.
+ * Returns NULL if map is empty.
+ */
+struct ndz_range *
+ndz_rangemap_last(struct ndz_rangemap *map)
+{
+    struct ndz_range *range;
+
+    /* start at the hint which is probably closer to the end */
+    assert(map->hint != NULL);
+    range = *map->hint;
+    if (range == NULL)
+	range = map->head.next;
+
+    /* empty list */
+    if (range == NULL)
+	return NULL;
+
+    while (range->next)
+	range = range->next;
+
+    return range;
+}
+
+/*
+ * Return the number of entries in the map.
+ */
+int
+ndz_rangemap_count(struct ndz_rangemap *map)
+{
+    struct ndz_range *range;
+    int count = 0;
+
+    assert(map);
+
+    for (range = map->head.next; range; range = range->next)
+	count++;
+
+    return count;
+}
+
+/*
  * Locate the indicated address in the map.
  * Returns the range containing the address if it is allocated, NULL ow.
  * If prev is non-NULL, it also returns a pointer to the entry preceeding

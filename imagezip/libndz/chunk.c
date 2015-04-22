@@ -399,11 +399,14 @@ ndz_chunk_flush(ndz_chunk_t chobj, int withheader)
 ssize_t
 ndz_chunk_left(ndz_chunk_t chobj)
 {
+    ssize_t remain;
+
     struct ndz_chunk *chunk = (struct ndz_chunk *)chobj;
     if (chunk == NULL)
 	return -1;
 
-    return chunk->cbufleft - CHUNKSLOP;
+    remain = chunk->cbufleft - CHUNKSLOP;
+    return (remain > 0 ? remain : 0);
 }
 
 /*

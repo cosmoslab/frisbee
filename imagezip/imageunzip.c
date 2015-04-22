@@ -120,6 +120,7 @@ static int	 imageversion = 1;
 static int	 dots   = 0;
 static int	 dotcol;
 static int	 directio = 0;
+static int	 ignoreskips = 0;
 static struct timeval stamp;
 #ifndef FRISBEE
 static int	 infd;
@@ -598,7 +599,7 @@ main(int argc, char *argv[])
 #ifdef NOTHREADS
 	nothreads = 1;
 #endif
-	while ((ch = getopt(argc, argv, "vdhs:zp:oOnFD:W:Cr:Na:ck:eu:f")) != -1)
+	while ((ch = getopt(argc, argv, "vdhs:zp:oOnFD:W:Cr:Na:ck:eu:fI")) != -1)
 		switch(ch) {
 #ifdef FAKEFRISBEE
 		case 'F':
@@ -722,6 +723,11 @@ main(int argc, char *argv[])
 			has_id = 1;
 			break;
 
+		/* ignore skipped ranges on output (which must be stdout) */
+		case 'I':
+			ignoreskips++;
+			break;
+
 		case 'h':
 		case '?':
 		default:
@@ -768,6 +774,19 @@ main(int argc, char *argv[])
 		outfd = -1;
 	else if (argc == 2 && strcmp(argv[1], "-")) {
 		int flags;
+
+		/*
+		 * This option is really a hack so we can compare the
+		 * content of two images regardless of how they got split
+		 * into chunks; i.e., for cases where we cannot just compare
+		 * the image files directly. So we force them to use stdout
+		 * to make it painfully obvious that this is not a useful
+		 * option!
+		 */
+		if (ignoreskips) {
+			fprintf(stderr, "Must output to stdout with -I\n");
+			exit(1);
+		}
 
 		/*
 		 * XXX perform seek and MBR checks before we truncate
@@ -824,7 +843,10 @@ main(int argc, char *argv[])
 	 * we cannot really handle slice mode, we must always zero fill
 	 * (cannot skip free space) and we cannot use pwrite.
 	 */
-	if (lseek(outfd, (off_t)0, SEEK_SET) < 0) {
+	if (ignoreskips) {
+		dofill = 0;
+		seekable = 0;
+	} else if (lseek(outfd, (off_t)0, SEEK_SET) < 0) {
 		if (slice) {
 			fprintf(stderr, "Output file is not seekable, "
 				"cannot specify a slice\n");
@@ -1850,7 +1872,7 @@ writedata(off_t offset, size_t size, void *buf)
 #endif
 	if (seekable) {
 		cc = pwrite(outfd, buf, size, offset);
-	} else if (offset == nextwriteoffset) {
+	} else if (offset == nextwriteoffset || ignoreskips) {
 		cc = write(outfd, buf, size);
 	} else {
 		fprintf(stderr, "Non-contiguous write @ %lld (should be %lld)\n",

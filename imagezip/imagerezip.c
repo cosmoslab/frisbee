@@ -24,45 +24,15 @@
 #define CHUNKIFY_DEBUG
 
 /*
- * imagedelta [ -S -f ] image1.ndz image2.ndz delta1to2.ndz
+ * imagerezip [-S] Oimage.ndz Nimage.ndz
  *
- * Take two images (image1, image2) and produce a delta (delta1to2)
- * based on the differences. The -S option says to use the signature
- * files: image1.ndz.sig and image2.ndz.sig, if possible to determine
- * differences between the images. Signature files will be rejected
- * unless they can be positively matched with the image (right now,
- * via the modtime!) Using -f will force it to use a questionable
- * signature file.
+ * Read the data of the old image (Oimage.ndz) and create a new image
+ * (Nimage.ndz) from it. With -S, it will create a new signature file
+ * as well.
  *
- * Without signature files, we compare the corresponding areas of both
- * images to determine if they are different.
- *
- * Note that order matters here! We are generating a delta to get from
- * "image1" to "image2"; i.e., doing:
- *
- *  imageunzip image1.ndz /dev/da0
- *  imageunzip delta1to2.ndz /dev/da0
- *
- * would be identical to:
- *
- *  imageunzip image2.ndz /dev/da0
- *
- * Approach:
- *
- * We scan the chunks headers of both images (image1, image2) to produce
- * allocated range lists for both (R1, R2). We use these to produce a
- * range list for the delta (RD) as follows.
- *
- * - Anything that is in R1 but not R2 does not go in RD.
- * - Anything in R2 but not in R1 must go into RD.
- * - For overlapping areas, we read and hash or compare both and,
- *   if different, include in RD.
- * - Using RD, select data from image2 that need to be read, decompressed
- *   and then recompressed into the new image.
- *
- * There is the usual issue of dealing with the difference in granularity
- * and alignment of ranges (arbitrary multiples of 512 byte) vs. hash
- * blocks (64K byte), but that logic exists in imagezip today.
+ * Currently this is just a testing tool for the new libraries. At some
+ * point it might be used to rechunk or rehash existing images, or compress
+ * them with a different level.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -88,27 +58,27 @@ struct fileinfo {
     struct ndz_file *ndz;
     char *sigfile;
     struct ndz_rangemap *map, *sigmap;
-} ndz1, ndz2, delta;
+} old, new;
 
-static int usesigfiles = 0;
+static int gensigfile = 0;
 static int forcesig = 0;
 static int debug = 0;
 static int verify = 0;
+static int sanitycheck = 1;
 static int clevel = 4;
 static int hashtype = HASH_TYPE_SHA1;
 static int hashlen = 20;
-static long hashblksize = HASHBLK_SIZE / 512;
+static long hashblksize = -1;
 
 void
 usage(void)
 {
     fprintf(stderr,
-	    "Usage: imagedelta [-SVfd] [-b blksize] [-D hashfunc] [-z level] image1.ndz image2.ndz delta1to2.ndz\n"
+	    "Usage: imagerezip [-SVfd] [-b blksize] [-D hashfunc] [-z level] Oimage1.ndz Nimage.ndz\n"
 	    "\n"
-	    "Produce a delta image (delta1to2) containing the changes\n"
-	    "necessary to get from image1 to image2.\n"
+	    "Produce a new image that is a copy of the old image.\n"
 	    "\n"
-	    "-S         Use signature files when computing differences.\n"
+	    "-S         Generate a new signature.\n"
 	    "-V         Verify consistency of image and signature.\n"
 	    "-f         Force imagedelta to use a questionable sigfile.\n"
 	    "-d         Enable debugging.\n"
@@ -195,7 +165,7 @@ verifyfunc(struct ndz_rangemap *imap, struct ndz_range *range, void *arg)
 
 /*
  * File must exist and be readable.
- * If usesigfiles is set, signature file must exist as well.
+ * If verify is set, signature file must exist as well.
  * Reads in the range map and signature as well.
  */
 void
@@ -210,7 +180,7 @@ openifile(char *file, struct fileinfo *info)
 	exit(1);
     }
 
-    if (usesigfiles) {
+    if (verify) {
 	struct stat sb1, sb2;
 
 	info->sigfile = malloc(strlen(file) + 5);
@@ -278,14 +248,14 @@ readifile(struct fileinfo *info)
     }
 
     /* read signature info */
-    if (usesigfiles) {
+    if (verify) {
 	info->sigmap = ndz_readhashinfo(info->ndz, info->sigfile);
 	if (info->sigmap == NULL) {
 	    fprintf(stderr, "%s: could not read signature info\n",
 		    ndz_filename(info->ndz));
 	    exit(1);
 	}
-	if (verify) {
+	if (sanitycheck) {
 	    struct ndz_range *next = ndz_rangemap_first(info->sigmap);
 	    int rv;
 
@@ -329,7 +299,7 @@ initnewchunk(struct chunkstate *cstate)
 {
     struct blockhdr_V2 *hdr;
 
-    cstate->chunkobj = ndz_chunk_create(delta.ndz, cstate->chunkno, clevel);
+    cstate->chunkobj = ndz_chunk_create(new.ndz, cstate->chunkno, clevel);
     if (cstate->chunkobj == NULL) {
 	fprintf(stderr, "Error creating chunk %u\n", cstate->chunkno);
 	return 1;
@@ -390,7 +360,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
      * with us via the iterator argument.
      */
     if (cstate->chunkobj == NULL) {
-	cstate->chunkdatabuf = malloc(hashblksize * delta.ndz->sectsize);
+	cstate->chunkdatabuf = malloc(hashblksize * new.ndz->sectsize);
 	if (cstate->chunkdatabuf == NULL) {
 	    fprintf(stderr, "could not initialize chunkify data structs\n");
 	    return 1;
@@ -403,19 +373,13 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
     }
 
     /*
-     * Process the range in units of the hash blocksize.
-     *
-     * We always break image data ranges at hash blocksize boundaries but
-     * note that data ranges and hash block ranges don't necessarily align.
-     * A data range might span multiple hash ranges or there might be
-     * multiple data ranges in the same hash range. In the latter case,
-     * we could simplify things by joining data ranges within the same hash
-     * range with zero-filled extra blocks so that we always had full hash
-     * ranges, but that would make images larger and result in writing
-     * extra data we don't have to when the image is deployed. Instead,
-     * we just create small hash ranges covering only the data itself.
+     * Process the range, reading the old and producing the new.
+     * When hashing, we also must respect hash block alignment.
      */
-    roffset = rstart % hashblksize;
+    if (verify || gensigfile)
+	roffset = rstart % hashblksize;
+    else
+	roffset = 0;
     while (rsize > 0) {
 	uint32_t pstart, psize;
 	int spanschunk;
@@ -436,61 +400,74 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 #endif
 
 	/* XXX read/decompress data range */
-	sc = ndz_readdata(ndz2.ndz, cstate->chunkdatabuf, hsize, hstart);
+	sc = ndz_readdata(old.ndz, cstate->chunkdatabuf, hsize, hstart);
 	if (sc != hsize) {
 	    fprintf(stderr, "%s: unexpected read return %ld (instead of %u)\n",
-		    ndz_filename(ndz2.ndz), (long)sc, hsize);
+		    ndz_filename(old.ndz), (long)sc, hsize);
 	    return 1;
 	}
 
 	/*
-	 * Fetch or compute the hash value.
+	 * Fetch and/or compute the hash value.
 	 */
-	assert(delta.ndz->hashcurentry < delta.ndz->hashentries);
-	hdata = &delta.ndz->hashdata[delta.ndz->hashcurentry++];
-	hdata->hashlen = hashlen;
+	hbytes = hsize * new.ndz->sectsize;
+	if (verify || gensigfile) {
+	    unsigned char hbuf[HASH_MAXSIZE];
 
-	hbytes = hsize * delta.ndz->sectsize;
-	hrange = ndz_rangemap_lookup(ndz2.sigmap, hstart, NULL);
-	if (hrange && hrange->data &&
-	    hrange->start == hstart && hrange->end == hstart + hsize - 1) {
-	    struct ndz_hashdata *hd = (struct ndz_hashdata *)hrange->data;
-	    memcpy(hdata->hash, hd->hash, hashlen);
+	    /* compute the hash */
+	    ndz_hash_data(new.ndz, cstate->chunkdatabuf, hbytes, hbuf);
 #ifdef CHUNKIFY_DEBUG
-	    fprintf(stderr, " found hash=%s\n",
-		    ndz_hash_dump(hdata->hash, hashlen));
+	    fprintf(stderr, "computed hash=%s\n",
+		    ndz_hash_dump(hbuf, hashlen));
 #endif
-#if 1
-	    /* sanity check */
-	    {
-		unsigned char hbuf[HASH_MAXSIZE];
 
-		ndz_hash_data(delta.ndz, cstate->chunkdatabuf, hbytes, hbuf);
-#ifdef CHUNKIFY_DEBUG
-		fprintf(stderr, "    computed hash=%s\n",
-			ndz_hash_dump(hbuf, hashlen));
-#endif
-		if (memcmp(hdata->hash, hbuf, hashlen)) {
-		    fprintf(stderr, "*** [%u-%u]: hash does not compare!\n",
+	    if (gensigfile) {
+		assert(new.ndz->hashcurentry < new.ndz->hashentries);
+		hdata = &new.ndz->hashdata[new.ndz->hashcurentry++];
+		hdata->hashlen = hashlen;
+		memcpy(hdata->hash, hbuf, hashlen);
+	    }
+
+	    if (verify) {
+		hrange = ndz_rangemap_lookup(old.sigmap, hstart, NULL);
+		if (hrange && hrange->data &&
+		    hrange->start == hstart &&
+		    hrange->end == hstart + hsize - 1) {
+		    struct ndz_hashdata *hd =
+			(struct ndz_hashdata *)hrange->data;
+		    if (memcmp(hd->hash, hbuf, hashlen)) {
+			fprintf(stderr,
+				"*** [%u-%u]: hash=%s does not compare!\n",
+				hstart, hstart + hsize - 1,
+				ndz_hash_dump(hd->hash, hashlen));
+			return 1;
+		    }
+		} else {
+		    fprintf(stderr, "*** [%u-%u]: ",
 			    hstart, hstart + hsize - 1);
+		    if (hrange == NULL)
+			fprintf(stderr, "range start not found!\n");
+		    else if (hrange->data == NULL)
+			fprintf(stderr, "no hash data found!\n");
+		    else
+			fprintf(stderr, "range mismatch [%lu-%lu]!\n",
+				hrange->start, hrange->end);
+		    return 1;
 		}
 	    }
-#endif
-	} else {
-	    ndz_hash_data(delta.ndz, cstate->chunkdatabuf, hbytes,
-			  hdata->hash);
-#ifdef CHUNKIFY_DEBUG
-	    fprintf(stderr, " no hash found\n");
-#endif
 	}
+#ifdef CHUNKIFY_DEBUG
+	else
+	    fprintf(stderr, "no hash computed\n");
+#endif
 
 	/*
 	 * At this point we have a range of data ([hstart - hstart+hsize-1])
-	 * of a specific size (hsize or hbytes) which we have hashed
-	 * (hdata->hash). Now we compress and write it out to the new image
-	 * file. This is complicated significantly by the fact that it might
-	 * not all fit in the current chunk. If there is not enough room for
-	 * this range in the current chunk, we split it and write what we can.
+	 * of a specific size (hsize) which we have hashed (hdata->hash).
+	 * Now we compress and write it out to the new image file. This is
+	 * complicated significantly by the fact that it might not all fit
+	 * in the current chunk. If there is not enough room for this range
+	 * in the current chunk, we split it and write what we can.
 	 *
 	 * This is complicated even further by our conservative algorithm
 	 * for filling chunks, which is basically: if the amount of
@@ -509,7 +486,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	    size_t wbytes, chunkremaining;
 
 	    chunkremaining = ndz_chunk_left(cstate->chunkobj);
-	    if (chunkremaining < delta.ndz->sectsize) {
+	    if (chunkremaining < new.ndz->sectsize) {
 		/* switch to new chunk */
 #ifdef CHUNKIFY_DEBUG
 		fprintf(stderr, "    chunk %u full (%lu bytes), writing...\n",
@@ -543,15 +520,15 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		    spanschunk++;
 
 		chunkremaining = ndz_chunk_left(cstate->chunkobj);
-		assert(psize <= chunkremaining / delta.ndz->sectsize);
+		assert(psize <= (chunkremaining/new.ndz->sectsize));
 	    }
 
 	    /* write up to chunkremaining (truncated to sectorsize) bytes */
 	    wsize = psize;
-	    wbytes = wsize * delta.ndz->sectsize;
+	    wbytes = wsize * new.ndz->sectsize;
 	    if (wbytes > chunkremaining) {
-		wsize = (chunkremaining / delta.ndz->sectsize);
-		wbytes = wsize * delta.ndz->sectsize;
+		wsize = (chunkremaining / new.ndz->sectsize);
+		wbytes = wsize * new.ndz->sectsize;
 	    }
 	    assert(wsize > 0);
 
@@ -595,24 +572,27 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	}
  
 	/*
-	 * At this point we have written out the entire hash range.
-	 * Add it to the hash map, recording the chunk(s) that it belongs to.
+	 * At this point we have written out the entire range. If creating
+	 * a signature file, add it to the hash map, recording the chunk(s)
+	 * that it belongs to.
 	 */
-	if (spanschunk)
-	    hdata->chunkno = HASH_CHUNKSETSPAN(cstate->chunkno-1);
-	else
-	    hdata->chunkno = cstate->chunkno;
+	if (gensigfile) {
+	    if (spanschunk)
+		hdata->chunkno = HASH_CHUNKSETSPAN(cstate->chunkno-1);
+	    else
+		hdata->chunkno = cstate->chunkno;
 #ifdef CHUNKIFY_DEBUG
-	fprintf(stderr, "    write hash entry [%u-%u], chunk %u",
-		hstart, hstart + hsize - 1, HASH_CHUNKNO(hdata->chunkno));
-	if (HASH_CHUNKDOESSPAN(hdata->chunkno))
-	    fprintf(stderr, "-%u", HASH_CHUNKNO(hdata->chunkno) + 1);
-	fprintf(stderr, "\n");
+	    fprintf(stderr, "    write hash entry [%u-%u], chunk %u",
+		    hstart, hstart + hsize - 1, HASH_CHUNKNO(hdata->chunkno));
+	    if (HASH_CHUNKDOESSPAN(hdata->chunkno))
+		fprintf(stderr, "-%u", HASH_CHUNKNO(hdata->chunkno) + 1);
+	    fprintf(stderr, "\n");
 #endif
-	cc = ndz_rangemap_alloc(delta.sigmap, hstart, hsize, (void *)hdata);
-	if (cc) {
-	    fprintf(stderr, "Could not add hashmap entry\n");
-	    return 1;
+	    cc = ndz_rangemap_alloc(new.sigmap, hstart, hsize, (void *)hdata);
+	    if (cc) {
+		fprintf(stderr, "Could not add hashmap entry\n");
+		return 1;
+	    }
 	}
 
 	rstart += hsize;
@@ -634,7 +614,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	cstate->header->regioncount = (cstate->curregion - cstate->region + 1);
 
 	/* XXX */
-	cstate->header->lastsect = delta.ndz->maphi;
+	cstate->header->lastsect = new.ndz->maphi;
 
 	/* and write it */
 	if (ndz_chunk_flush(cstate->chunkobj, 1) != 0) {
@@ -646,6 +626,22 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 
 	/* XXX for debugging */
 	memset(cstate, 0, sizeof(*cstate));
+    }
+
+    return 0;
+}
+
+static int
+unchunkify(struct ndz_rangemap *omap, struct ndz_range *range, void *arg)
+{
+    struct ndz_rangemap *nmap = arg;
+    ndz_addr_t size = range->end - range->start + 1;
+
+    assert(nmap);
+    if (ndz_rangemap_alloc(nmap, range->start, size, 0)) {
+	fprintf(stderr, "could not create map entry for [%lu-%lu]\n",
+		range->start, range->end);
+	return 1;
     }
 
     return 0;
@@ -666,7 +662,7 @@ main(int argc, char **argv)
     while ((ch = getopt(argc, argv, "SfdVb:D:")) != -1)
 	switch(ch) {
 	case 'S':
-	    usesigfiles = 1;
+	    gensigfile = 1;
 	    break;
 	case 'b':
 	    hashblksize = atol(optarg);
@@ -712,147 +708,115 @@ main(int argc, char **argv)
     argc -= optind;
     argv += optind;
 
-    if (argc < 3)
+    if (argc < 2)
 	usage();
+
+    /*
+     * Set a reasonable default blocksize whether hashing or not.
+     */
+    if (hashblksize == -1) {
+	if (verify || gensigfile)
+	    hashblksize = HASHBLK_SIZE / 512;
+	else
+	    hashblksize = (128 * 1024) / 512;
+    }
 
     /*
      * Make sure we can open all the files
      */
-    openifile(argv[0], &ndz1);
-    openifile(argv[1], &ndz2);
-    openofile(argv[2], &delta);
+    openifile(argv[0], &old);
+    openofile(argv[1], &new);
 
     /*
      * Read in the range and signature info.
      */
-    readifile(&ndz1);
-    readifile(&ndz2);
+    readifile(&old);
 
 #if 1
     printf("==== Old range ");
-    ndz_rangemap_dump(ndz1.map, (debug==0), chunkfunc);
+    ndz_rangemap_dump(old.map, (debug==0), chunkfunc);
     printf("==== Old hash ");
-    ndz_hashmap_dump(ndz1.sigmap, (debug==0));
-    printf("==== New range ");
-    ndz_rangemap_dump(ndz2.map, (debug==0), chunkfunc);
-    printf("==== New hash ");
-    ndz_hashmap_dump(ndz2.sigmap, (debug==0));
+    ndz_hashmap_dump(old.sigmap, (debug==0));
     fflush(stdout);
 #endif
 
     /*
-     * Compute a delta map from the image signature maps.
-     * First make sure the hash block size and function are consistent.
+     * If we are checking and producing signatures, make sure the
+     * hashtype and block size are the same.
      */
-    if (usesigfiles) {
-	if (ndz1.ndz->hashtype != ndz2.ndz->hashtype ||
-	    ndz1.ndz->hashblksize != ndz2.ndz->hashblksize) {
-	    fprintf(stderr, "Incomparible signature files for %s (%u/%u) and %s (%u/%u)\n",
-		    argv[0], ndz1.ndz->hashtype, ndz1.ndz->hashblksize,
-		    argv[1], ndz2.ndz->hashtype, ndz2.ndz->hashblksize);
-	    exit(1);
+    if (verify && gensigfile) {
+	if (old.ndz->hashtype != hashtype ||
+	    old.ndz->hashblksize != hashblksize) {
+	    fprintf(stderr, "%s: incompatible hash values\n", argv[0]);
+	    exit(1); 
 	}
-#if 1
-	/* XXX just duplicate image 2 */
-	{
-	    struct ndz_rangemap *foo;
-	    foo = ndz_rangemap_init(NDZ_LOADDR, NDZ_HIADDR-NDZ_LOADDR);
-	    delta.map = ndz_compute_delta(foo, ndz2.sigmap);
-	}
-#else
-	delta.map = ndz_compute_delta(ndz1.sigmap, ndz2.sigmap);
-#endif
-	if (delta.map == NULL) {
-	    fprintf(stderr, "Could not compute delta for %s and %s\n",
-		    argv[0], argv[1]);
-	    exit(1);
-	}
-
-	/*
-	 * Delta map has same range as full image.
-	 * XXX doesn't belong here.
-	 */
-	delta.ndz->maplo = ndz2.ndz->maplo;
-	delta.ndz->maphi = ndz2.ndz->maphi;
-#if 1
-	printf("==== Delta hash ");
-	ndz_hashmap_dump(delta.map, (debug==0));
-	printf("==== Old hashmap stats:");
-	ndz_rangemap_dumpstats(ndz1.sigmap);
-	printf("==== New hashmap stats:");
-	ndz_rangemap_dumpstats(ndz2.sigmap);
-	fflush(stdout);
-#endif
-    }
-    else {
-	fprintf(stderr, "No can do without sigfiles right now!\n");
-	exit(2);
     }
 
     /*
-     * Done with the old file.
+     * Copy the old map to the new map removing any artificial chunk
+     * boundaries.
      */
-    ndz_close(ndz1.ndz);
-    ndz1.sigmap = NULL;
-    ndz1.map = NULL;
-    ndz1.ndz = NULL;
-
-    /*
-     * Iterate through the produced map hashing (if necessary) and
-     * chunking the data.
-     */
-    delta.sigmap = ndz_rangemap_init(NDZ_LOADDR, NDZ_HIADDR-NDZ_LOADDR);
-    if (delta.sigmap == NULL) {
-	fprintf(stderr, "%s: could not create signature map for delta image\n",
-		argv[2]);
+    new.map = ndz_rangemap_init(NDZ_LOADDR, NDZ_HIADDR-NDZ_LOADDR);
+    if (ndz_rangemap_iterate(old.map, unchunkify, new.map)) {
+	fprintf(stderr, "%s: could not create new map\n", argv[0]);
 	exit(1);
     }
 
     /*
-     * Initialize signature file info for delta map.
+     * New map has same range as old image.
      * XXX doesn't belong here.
      */
-    delta.ndz->hashmap = delta.sigmap;
-    delta.ndz->hashdata = calloc(ndz2.ndz->hashentries,
-				 sizeof(struct ndz_hashdata));
-    if (delta.ndz->hashdata == NULL) {
-	fprintf(stderr, "%s: could not allocate hashdata for delta image\n",
-		argv[2]);
-	exit(1);
-    }
-    delta.ndz->hashtype = hashtype;
-    delta.ndz->hashblksize = hashblksize;
-    delta.ndz->hashentries = ndz2.ndz->hashentries;
-    delta.ndz->hashcurentry = 0;
+    new.ndz->maplo = old.ndz->maplo;
+    new.ndz->maphi = old.ndz->maphi;
 
     /*
-     * If there is anything in the resulting delta, produce an image!
+     * Iterate through the map hashing (if necessary) and chunking the data.
      */
-    if (ndz_rangemap_first(delta.map) != NULL) {
+    new.sigmap = ndz_rangemap_init(NDZ_LOADDR, NDZ_HIADDR-NDZ_LOADDR);
+    if (new.sigmap == NULL) {
+	fprintf(stderr, "%s: could not create signature map for new image\n",
+		argv[1]);
+	exit(1);
+    }
+
+    /*
+     * Initialize signature file info for new map.
+     * XXX doesn't belong here.
+     */
+    new.ndz->hashmap = new.sigmap;
+    new.ndz->hashdata = calloc(old.ndz->hashentries,
+			       sizeof(struct ndz_hashdata));
+    if (new.ndz->hashdata == NULL) {
+	fprintf(stderr, "%s: could not allocate hashdata for new image\n",
+		argv[1]);
+	exit(1);
+    }
+    new.ndz->hashtype = hashtype;
+    new.ndz->hashblksize = hashblksize;
+    new.ndz->hashentries = old.ndz->hashentries;
+    new.ndz->hashcurentry = 0;
+
+    /*
+     * If there is anything in the old image, produce a new image!
+     */
+    if (ndz_rangemap_first(new.map) != NULL) {
 	struct chunkstate *cstate = calloc(1, sizeof(*cstate));
 	assert(cstate != NULL);
 
-	if (ndz_rangemap_iterate(delta.map, chunkify, cstate) != 0) {
-	    fprintf(stderr, "%s: error while creating new delta image\n",
-		    argv[2]);
+	if (ndz_rangemap_iterate(new.map, chunkify, cstate) != 0) {
+	    fprintf(stderr, "%s: error while creating new image\n",
+		    argv[1]);
 	    exit(1);
 	}
 	free(cstate);
 
 	/* write the new sigfile */
-	if (ndz_writehashinfo(delta.ndz, delta.sigfile) != 0) {
-	    fprintf(stderr, "%s: could not write signature file %s\n",
-		    argv[2], delta.sigfile);
+	if (gensigfile) {
+	    if (ndz_writehashinfo(new.ndz, new.sigfile) != 0) {
+		fprintf(stderr, "%s: could not write signature file %s\n",
+			argv[1], new.sigfile);
+	    }
 	}
-	
-	ndz_close(ndz2.ndz);
-	ndz_close(delta.ndz);
-    } else {
-	fprintf(stderr, "Images are identical, no delta produced!\n");
-	ndz_close(ndz2.ndz);
-	ndz_close(delta.ndz);
-	unlink(argv[2]);
-	unlink(delta.sigfile);
     }
 
     return 0;
