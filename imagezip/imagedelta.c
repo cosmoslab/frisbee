@@ -21,7 +21,7 @@
  * }}}
  */
 
-#define CHUNKIFY_DEBUG
+//#define CHUNKIFY_DEBUG
 
 /*
  * imagedelta [ -S -f ] image1.ndz image2.ndz delta1to2.ndz
@@ -303,7 +303,7 @@ readifile(struct fileinfo *info)
 			    next->start, next->end);
 		fprintf(stderr, "%s: error while validating range/hash maps\n",
 			ndz_filename(info->ndz));
-#if 1
+#if 0
 		printf("==== Image ");
 		ndz_rangemap_dump(info->map, (debug==0), NULL);
 		printf("==== Hash ");
@@ -462,7 +462,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	    fprintf(stderr, " found hash=%s\n",
 		    ndz_hash_dump(hdata->hash, hashlen));
 #endif
-#if 1
+#if 0
 	    /* sanity check */
 	    {
 		unsigned char hbuf[HASH_MAXSIZE];
@@ -733,7 +733,7 @@ main(int argc, char **argv)
     readifile(&ndz1);
     readifile(&ndz2);
 
-#if 1
+#if 0
     printf("==== Old range ");
     ndz_rangemap_dump(ndz1.map, (debug==0), chunkfunc);
     printf("==== Old hash ");
@@ -770,7 +770,7 @@ main(int argc, char **argv)
 	 */
 	delta.ndz->maplo = ndz2.ndz->maplo;
 	delta.ndz->maphi = ndz2.ndz->maphi;
-#if 1
+#if 0
 	printf("==== Delta hash ");
 	ndz_hashmap_dump(delta.map, (debug==0));
 	printf("==== Old hashmap stats:");
@@ -799,7 +799,7 @@ main(int argc, char **argv)
 	delta.ndz->maplo = ndz2.ndz->maplo;
 	delta.ndz->maphi = ndz2.ndz->maphi;
 
-#if 1
+#if 0
 	printf("==== Delta map ");
 	ndz_hashmap_dump(delta.map, (debug==0));
 	printf("==== Old map stats:");
@@ -862,7 +862,8 @@ main(int argc, char **argv)
 	free(cstate);
 
 	/* readjust to reflect the actual number of hash entries */
-	delta.ndz->hashentries = delta.ndz->hashcurentry;
+	if (!fullsig)
+	    delta.ndz->hashentries = delta.ndz->hashcurentry;
 
 	/* write the new sigfile */
 	if (ndz_writehashinfo(fullsig ? ndz2.ndz : delta.ndz,

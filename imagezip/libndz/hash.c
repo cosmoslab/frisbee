@@ -38,7 +38,7 @@
 
 #include "libndz.h"
 
-#define COMPDELTA_DEBUG
+//#define COMPDELTA_DEBUG
 
 char *
 ndz_hash_dump(unsigned char *h, int hlen)
