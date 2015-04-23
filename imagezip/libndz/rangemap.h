@@ -78,6 +78,8 @@ int ndz_rangemap_count(struct ndz_rangemap *map);
 struct ndz_range *ndz_rangemap_lookup(struct ndz_rangemap *map,
 				      ndz_addr_t addr,
 				      struct ndz_range **prev);
+struct ndz_range *ndz_rangemap_overlap(struct ndz_rangemap *map,
+				       ndz_addr_t addr, ndz_size_t);
 void ndz_rangemap_dump(struct ndz_rangemap *map, int summaryonly,
 		       void (*dfunc)(struct ndz_rangemap *, void *));
 void ndz_rangemap_dumpstats(struct ndz_rangemap *map);

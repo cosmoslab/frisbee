@@ -528,6 +528,18 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		    cstate->header->firstsect = 0;
 		cstate->header->lastsect = pstart;
 
+		/* include any relocations */
+		if (ndz2.ndz->relocmap) {
+		    void *buf = (cstate->curregion + 1);
+		    delta.ndz->relocmap = ndz2.ndz->relocmap; /* XXX */
+		    if (ndz_reloc_put(delta.ndz, cstate->header, buf) != 0) {
+			delta.ndz->relocmap = NULL; /* XXX */
+			fprintf(stderr, "Error writing relocation info\n");
+			return 1;
+		    }
+		    delta.ndz->relocmap = NULL; /* XXX */
+		}
+
 		/* and write it */
 		if (ndz_chunk_flush(cstate->chunkobj, 1) != 0) {
 		    fprintf(stderr, "Error writing compressed data\n");
@@ -634,9 +646,22 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	/* finalize the header */
 	cstate->header->size = ndz_chunk_datasize(cstate->chunkobj);
 	cstate->header->regioncount = (cstate->curregion - cstate->region + 1);
-
-	/* XXX */
+	/* XXX should always be zero */
+	if (cstate->chunkno == 0)
+	    cstate->header->firstsect = 0;
 	cstate->header->lastsect = delta.ndz->maphi;
+
+	/* include any relocations */
+	if (ndz2.ndz->relocmap) {
+	    void *buf = (cstate->curregion + 1);
+	    delta.ndz->relocmap = ndz2.ndz->relocmap; /* XXX */
+	    if (ndz_reloc_put(delta.ndz, cstate->header, buf) != 0) {
+		delta.ndz->relocmap = NULL; /* XXX */
+		fprintf(stderr, "Error writing relocation info\n");
+		return 1;
+	    }
+	    delta.ndz->relocmap = NULL; /* XXX */
+	}
 
 	/* and write it */
 	if (ndz_chunk_flush(cstate->chunkobj, 1) != 0) {
@@ -757,7 +782,7 @@ main(int argc, char **argv)
 		    argv[1], ndz2.ndz->hashtype, ndz2.ndz->hashblksize);
 	    exit(1);
 	}
-	delta.map = ndz_compute_delta_sigmap(ndz1.sigmap, ndz2.sigmap);
+	delta.map = ndz_compute_delta_sigmap(ndz1.ndz, ndz2.ndz);
 	if (delta.map == NULL) {
 	    fprintf(stderr, "Could not compute delta for %s and %s\n",
 		    argv[0], argv[1]);
@@ -785,7 +810,7 @@ main(int argc, char **argv)
      * Same deal, but construct the delta map from the ranges maps.
      */
     else {
-	delta.map = ndz_compute_delta(ndz1.map, ndz2.map);
+	delta.map = ndz_compute_delta(ndz1.ndz, ndz2.ndz);
 	if (delta.map == NULL) {
 	    fprintf(stderr, "Could not compute delta for %s and %s\n",
 		    argv[0], argv[1]);
@@ -862,8 +887,7 @@ main(int argc, char **argv)
 	free(cstate);
 
 	/* readjust to reflect the actual number of hash entries */
-	if (!fullsig)
-	    delta.ndz->hashentries = delta.ndz->hashcurentry;
+	delta.ndz->hashentries = delta.ndz->hashcurentry;
 
 	/* write the new sigfile */
 	if (ndz_writehashinfo(fullsig ? ndz2.ndz : delta.ndz,
@@ -875,7 +899,8 @@ main(int argc, char **argv)
 	ndz_close(ndz2.ndz);
 	ndz_close(delta.ndz);
     } else {
-	fprintf(stderr, "Images are identical, no delta produced!\n");
+	fprintf(stderr, "Images %s and %s are identical, no delta produced!\n",
+		argv[0], argv[1]);
 	ndz_close(ndz2.ndz);
 	ndz_close(delta.ndz);
 	unlink(argv[2]);

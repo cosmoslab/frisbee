@@ -134,6 +134,33 @@ struct blockhdr_V4 {
 };
 
 /*
+ * Coming soon in V5:
+ *
+ * 64-bit support.
+ *   Grow blockindex, firstsect, lastsect, region descriptors, may need to
+ *   grow DEFAULTREGIONSIZE to accomodate the doubling in size of regions.
+ *
+ * Flag field?
+ *   For example, to indicate a delta image. Would probably take over the
+ *   otherwise unused blocktotal field.
+ *
+ * Sectorsize field?
+ *   To make explicit the units of sector fields; e.g., 512 vs 4096.
+ *
+ * Chunksize field?
+ *   To support different chunksizes.
+ *
+ * Mandate little-endian on-disk data.
+ *   Code changes only to use appropriate endian macros when reading/writing
+ *   data. No data struct changes needed.
+ *
+ * Support for SHA256 and SHA512 checksums.
+ *   Just some constants here, as checksum is already 64 bytes.
+ *   Will need to grow the imagehash header to accomodate these checksums
+ *   for signatures, but that is separately versioned.
+ */
+
+/*
  * Checksum types supported
  */
 #define CSUM_NONE		0  /* must be zero */

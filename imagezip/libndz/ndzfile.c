@@ -115,6 +115,7 @@ ndz_close(struct ndz_file *ndz)
 
     rv = close(ndz->fd);
     if (rv == 0) {
+	ndz_reloc_free(ndz);
 	if (ndz->hashmap)
 	    ndz_rangemap_deinit(ndz->hashmap);
 	if (ndz->rangemap)
@@ -232,6 +233,7 @@ ndz_readranges(struct ndz_file *ndz)
 	    last = hdr->lastsect;
 	}
 
+	/* get the regions */
 	reg = head.region;
 	assert(reg != NULL || hdr->regioncount == 0);
 	for (i = 0; i < hdr->regioncount; i++) {
@@ -253,6 +255,26 @@ ndz_readranges(struct ndz_file *ndz)
 		return NULL;
 	    }
 	    reg++;
+	}
+
+	/* get the relocations */
+	if (head.reloc) {
+	    if (ndz->relocmap == NULL) {
+		ndz->relocmap =
+		    ndz_rangemap_init(NDZ_LOADDR, NDZ_HIADDR-NDZ_LOADDR);
+		if (ndz->relocmap == NULL) {
+		    fprintf(stderr, "%s: could not allocate relocmap\n",
+			    ndz->fname);
+		    ndz_rangemap_deinit(map);
+		    return NULL;
+		}
+	    }
+	    if (ndz_reloc_get(ndz, head.header, head.reloc) != 0) {
+		fprintf(stderr, "%s: could not add relocations\n",
+			ndz->fname);
+		ndz_rangemap_deinit(map);
+		return NULL;
+	    }
 	}
     }
 

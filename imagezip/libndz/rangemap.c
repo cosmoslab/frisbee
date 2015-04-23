@@ -303,6 +303,8 @@ ndz_rangemap_iterate(struct ndz_rangemap *map,
 /*
  * Return a pointer to the first entry in the map.
  * Returns NULL if map is empty.
+ *
+ * Does not affect the map hint.
  */
 struct ndz_range *
 ndz_rangemap_first(struct ndz_rangemap *map)
@@ -313,6 +315,8 @@ ndz_rangemap_first(struct ndz_rangemap *map)
 /*
  * Return a pointer to the last entry in the map.
  * Returns NULL if map is empty.
+ *
+ * Does not affect the map hint.
  */
 struct ndz_range *
 ndz_rangemap_last(struct ndz_rangemap *map)
@@ -337,6 +341,8 @@ ndz_rangemap_last(struct ndz_rangemap *map)
 
 /*
  * Return the number of entries in the map.
+ *
+ * Does not affect the map hint.
  */
 int
 ndz_rangemap_count(struct ndz_rangemap *map)
@@ -461,6 +467,52 @@ ndz_rangemap_lookup(struct ndz_rangemap *map, ndz_addr_t addr,
 
     if (prevp)
 	*prevp = prev;
+    return range;
+}
+
+/*
+ * Determine if the indicated range [addr - addr+size-1] overlaps with
+ * any entry in the given map. Returns a pointer to the first map entry
+ * that overlaps, or NULL if there is no overlap.
+ *
+ * Resulting map hint values:
+ *   if range is found, hint points to it.
+ *   if range is not found, hint is unaffected.
+ */
+struct ndz_range *
+ndz_rangemap_overlap(struct ndz_rangemap *map, ndz_addr_t addr,
+		     ndz_size_t size)
+{
+    struct ndz_range *range, *prev;
+    ndz_addr_t eaddr = addr + size - 1;
+
+    /*
+     * Lookup the first address in the range.
+     * If it falls within a range in the map, we are done.
+     * Otherwise look for overlap with the following map entry.
+     */
+    range = ndz_rangemap_lookup(map, addr, &prev);
+    if (range == NULL) {
+	/* if prev is null we are at the beginning */
+	if (prev == NULL)
+	    range = map->head.next;
+	else
+	    range = prev->next;
+
+	/*
+	 * At the end of the map, there can be no overlap.
+	 */
+	if (range == NULL)
+	    return NULL;
+
+	/*
+	 * If our range ends before the next element in the list,
+	 * there is no overlap.
+	 */
+	if (eaddr < range->start)
+	    return NULL;
+    }
+
     return range;
 }
 

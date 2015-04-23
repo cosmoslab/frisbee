@@ -21,7 +21,7 @@
  * }}}
  */
 
-#define CHUNKIFY_DEBUG
+//#define CHUNKIFY_DEBUG
 
 /*
  * imagerezip [-S] Oimage.ndz Nimage.ndz
@@ -271,7 +271,7 @@ readifile(struct fileinfo *info)
 			    next->start, next->end);
 		fprintf(stderr, "%s: error while validating range/hash maps\n",
 			ndz_filename(info->ndz));
-#if 1
+#if 0
 		printf("==== Image ");
 		ndz_rangemap_dump(info->map, (debug==0), NULL);
 		printf("==== Hash ");
@@ -503,6 +503,18 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		    cstate->header->firstsect = 0;
 		cstate->header->lastsect = pstart;
 
+		/* include any relocations */
+		if (old.ndz->relocmap) {
+		    void *buf = (cstate->curregion + 1);
+		    new.ndz->relocmap = old.ndz->relocmap; /* XXX */
+		    if (ndz_reloc_put(new.ndz, cstate->header, buf) != 0) {
+			new.ndz->relocmap = NULL; /* XXX */
+			fprintf(stderr, "Error writing relocation info\n");
+			return 1;
+		    }
+		    new.ndz->relocmap = NULL; /* XXX */
+		}
+
 		/* and write it */
 		if (ndz_chunk_flush(cstate->chunkobj, 1) != 0) {
 		    fprintf(stderr, "Error writing compressed data\n");
@@ -612,9 +624,22 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	/* finalize the header */
 	cstate->header->size = ndz_chunk_datasize(cstate->chunkobj);
 	cstate->header->regioncount = (cstate->curregion - cstate->region + 1);
-
-	/* XXX */
+	/* XXX should always be zero */
+	if (cstate->chunkno == 0)
+	    cstate->header->firstsect = 0;
 	cstate->header->lastsect = new.ndz->maphi;
+
+	/* include any relocations */
+	if (old.ndz->relocmap) {
+	    void *buf = (cstate->curregion + 1);
+	    new.ndz->relocmap = old.ndz->relocmap; /* XXX */
+	    if (ndz_reloc_put(new.ndz, cstate->header, buf) != 0) {
+		new.ndz->relocmap = NULL; /* XXX */
+		fprintf(stderr, "Error writing relocation info\n");
+		return 1;
+	    }
+	    new.ndz->relocmap = NULL; /* XXX */
+	}
 
 	/* and write it */
 	if (ndz_chunk_flush(cstate->chunkobj, 1) != 0) {
@@ -732,11 +757,13 @@ main(int argc, char **argv)
      */
     readifile(&old);
 
-#if 1
+#if 0
     printf("==== Old range ");
     ndz_rangemap_dump(old.map, (debug==0), chunkfunc);
-    printf("==== Old hash ");
-    ndz_hashmap_dump(old.sigmap, (debug==0));
+    if (old.sigmap) {
+	printf("==== Old hash ");
+	ndz_hashmap_dump(old.sigmap, (debug==0));
+    }
     fflush(stdout);
 #endif
 

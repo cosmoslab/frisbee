@@ -54,6 +54,10 @@ struct ndz_file {
     unsigned chunkuses;
     unsigned chunkhits;
     unsigned chunkreopens;
+    /* relocation information */
+    unsigned relocentries;
+    void *relocdata;
+    struct ndz_rangemap *relocmap;
     /* hash (signature) info */
     unsigned hashtype;
     unsigned hashblksize;
@@ -103,16 +107,20 @@ int ndz_chunk_flush(ndz_chunk_t chobj, int withheader);
 ssize_t ndz_chunk_left(ndz_chunk_t chobj);
 ssize_t ndz_chunk_append(ndz_chunk_t chobj, void *buf, size_t bytes);
 
+int ndz_reloc_get(struct ndz_file *ndz, blockhdr_t *hdr, void *buf);
+int ndz_reloc_put(struct ndz_file *ndz, blockhdr_t *hdr, void *buf);
+void ndz_reloc_free(struct ndz_file *ndz);
+
 struct ndz_rangemap *ndz_readhashinfo(struct ndz_file *ndz, char *sigfile);
 int ndz_writehashinfo(struct ndz_file *ndz, char *sigfile, char *ifile);
 void ndz_hash_data(struct ndz_file *ndz, unsigned char *data,
 		   unsigned long count, unsigned char *hash);
 char *ndz_hash_dump(unsigned char *h, int hlen);
 void ndz_hashmap_dump(struct ndz_rangemap *map, int summaryonly);
-struct ndz_rangemap *ndz_compute_delta(struct ndz_rangemap *omap,
-				       struct ndz_rangemap *nmap);
-struct ndz_rangemap *ndz_compute_delta_sigmap(struct ndz_rangemap *omap,
-					      struct ndz_rangemap *nmap);
+struct ndz_rangemap *ndz_compute_delta(struct ndz_file *ondz,
+				       struct ndz_file *nndz);
+struct ndz_rangemap *ndz_compute_delta_sigmap(struct ndz_file *ondz,
+					      struct ndz_file *nndz);
 
 #endif /* _LIBNDZ_H_ */
 

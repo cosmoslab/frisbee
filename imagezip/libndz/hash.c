@@ -348,6 +348,7 @@ ndz_freehashmap(struct ndz_file *ndz)
 struct deltainfo {
     struct ndz_rangemap *omap;
     struct ndz_rangemap *dmap;
+    struct ndz_rangemap *relocmap;
     int omapdone;
 };
 
@@ -441,6 +442,21 @@ compfastdelta(struct ndz_rangemap *nmap, struct ndz_range *range, void *arg)
 #ifdef COMPDELTA_DEBUG
 	    fprintf(stderr, "  exact overlap with old map, ");
 #endif
+
+	    /*
+	     * XXX if the sector range includes a relocation,
+	     * we always force it into the image.
+	     */
+	    if (dinfo->relocmap &&
+		ndz_rangemap_overlap(dinfo->relocmap, addr, eaddr-addr+1)) {
+#ifdef COMPDELTA_DEBUG
+		fprintf(stderr, "has relocation, adding\n");
+#endif
+		rv = ndz_rangemap_alloc(dmap, addr, eaddr-addr+1, NULL);
+		assert(rv == 0);
+		return 0;
+	    }
+
 	    odata = orange->data;
 	    ndata = range->data;
 	    assert(odata->hashlen == ndata->hashlen);
@@ -450,11 +466,11 @@ compfastdelta(struct ndz_rangemap *nmap, struct ndz_range *range, void *arg)
 #endif
 		rv = ndz_rangemap_alloc(dmap, addr, eaddr-addr+1, NULL);
 		assert(rv == 0);
-	    } else {
-#ifdef COMPDELTA_DEBUG
-		fprintf(stderr, "hash same, skipping\n");
-#endif
+		return 0;
 	    }
+#ifdef COMPDELTA_DEBUG
+	    fprintf(stderr, "hash same, skipping\n");
+#endif
 	    return 0;
 	}
     }
@@ -475,10 +491,14 @@ compfastdelta(struct ndz_rangemap *nmap, struct ndz_range *range, void *arg)
 }
 
 struct ndz_rangemap *
-ndz_compute_delta(struct ndz_rangemap *omap, struct ndz_rangemap *nmap)
+ndz_compute_delta(struct ndz_file *ondz, struct ndz_file *nndz)
 {
-    struct ndz_rangemap *dmap;
+    struct ndz_rangemap *omap, *nmap, *dmap;
     struct deltainfo dinfo;
+
+    if (ondz == NULL || (omap = ondz->rangemap) == NULL ||
+	nndz == NULL || (nmap = nndz->rangemap) == NULL)
+	return NULL;
 
     if (omap == NULL || nmap == NULL)
 	return NULL;
@@ -491,6 +511,7 @@ ndz_compute_delta(struct ndz_rangemap *omap, struct ndz_rangemap *nmap)
 
     dinfo.omap = omap;
     dinfo.dmap = dmap;
+    dinfo.relocmap = nndz->relocmap;
     dinfo.omapdone = 0;
 #if 0
     (void) ndz_rangemap_iterate(nmap, compdelta, &dinfo);
@@ -504,12 +525,13 @@ ndz_compute_delta(struct ndz_rangemap *omap, struct ndz_rangemap *nmap)
  * computing hash alignments.
  */
 struct ndz_rangemap *
-ndz_compute_delta_sigmap(struct ndz_rangemap *omap, struct ndz_rangemap *nmap)
+ndz_compute_delta_sigmap(struct ndz_file *ondz, struct ndz_file *nndz)
 {
-    struct ndz_rangemap *dmap;
+    struct ndz_rangemap *omap, *nmap, *dmap;
     struct deltainfo dinfo;
 
-    if (omap == NULL || nmap == NULL)
+    if (ondz == NULL || (omap = ondz->hashmap) == NULL ||
+	nndz == NULL || (nmap = nndz->hashmap) == NULL)
 	return NULL;
 
     dmap = ndz_rangemap_init(nmap->loaddr, nmap->hiaddr);
@@ -520,6 +542,7 @@ ndz_compute_delta_sigmap(struct ndz_rangemap *omap, struct ndz_rangemap *nmap)
 
     dinfo.omap = omap;
     dinfo.dmap = dmap;
+    dinfo.relocmap = nndz->relocmap;
     dinfo.omapdone = 0;
     (void) ndz_rangemap_iterate(nmap, compfastdelta, &dinfo);
 

@@ -34,13 +34,14 @@ all:	libndz.a
 
 include $(TESTBED_SRCDIR)/GNUmakerules
 
-OBJS = rangemap.o ndzfile.o ndzdata.o chunk.o hash.o
+OBJS = rangemap.o ndzfile.o ndzdata.o chunk.o hash.o reloc.o
 
 rangemap.o: rangemap.h
 ndzfile.o: libndz.h $(MAINDIR)/imagehdr.h
 ndzdata.o: libndz.h $(MAINDIR)/imagehdr.h
 chunk.o: libndz.h $(MAINDIR)/imagehdr.h
 hash.o: libndz.h $(MAINDIR)/imagehdr.h $(MAINDIR)/imagehash.h
+reloc.o: libndz.h $(MAINDIR)/imagehdr.h $(MAINDIR)/imagehash.h
 
 libndz.a:	$(OBJS)
 	$(AR) $(ARFLAGS) $@ $?
