@@ -246,11 +246,10 @@ writehinfo(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
  * Write out hash (signature) info associated with the named image.
  */
 int
-ndz_writehashinfo(struct ndz_file *ndz, char *sigfile)
+ndz_writehashinfo(struct ndz_file *ndz, char *sigfile, char *ifile)
 {
     int ofd, cc;
     struct hashinfo hi;
-    char *iname;
 
     if (ndz == NULL || ndz->hashmap == NULL || sigfile == NULL)
 	return -1;
@@ -261,7 +260,8 @@ ndz_writehashinfo(struct ndz_file *ndz, char *sigfile)
 	return -1;
     }
 
-    iname = ndz->fname;
+    if (ifile == NULL)
+	ifile = ndz->fname;
 
     memset(&hi, 0, sizeof(hi));
     strcpy((char *)hi.magic, HASH_MAGIC);
@@ -277,7 +277,7 @@ ndz_writehashinfo(struct ndz_file *ndz, char *sigfile)
 	else
 	    fprintf(stderr,
 		    "%s: incomplete write (%d) to sigfile %s\n",
-		    iname, cc, sigfile);
+		    ifile, cc, sigfile);
 	close(ofd);
 	unlink(sigfile);
 	return -1;
@@ -290,7 +290,7 @@ ndz_writehashinfo(struct ndz_file *ndz, char *sigfile)
 			     (void *)(uintptr_t)ofd) != 0) {
 	fprintf(stderr,
 		"%s: could not write one or more hash entries to sigfile %s\n",
-		ndz->fname, sigfile);
+		ifile, sigfile);
 	close(ofd);
 	unlink(sigfile);
 	return -1;
@@ -303,11 +303,11 @@ ndz_writehashinfo(struct ndz_file *ndz, char *sigfile)
      * This is a crude (but fast!) method for matching images with
      * signatures.
      */
-    if (strcmp(iname, "-") != 0) {
+    if (strcmp(ifile, "-") != 0) {
 	struct stat sb;
 	struct timeval tm[2];
 
-	cc = stat(iname, &sb);
+	cc = stat(ifile, &sb);
 	if (cc >= 0) {
 #ifdef linux
 	    tm[0].tv_sec = sb.st_atime;
@@ -326,7 +326,7 @@ ndz_writehashinfo(struct ndz_file *ndz, char *sigfile)
 		    sigfile, strerror(errno));
     }
 
-    fprintf(stderr, "%s: new signature written to %s\n", iname, sigfile);
+    fprintf(stderr, "%s: new signature written to %s\n", ifile, sigfile);
     return 0;
 }
 

@@ -95,6 +95,7 @@ static int forcesig = 0;
 static int debug = 0;
 static int verify = 0;
 static int clevel = 4;
+static int fullsig = 0;
 static int hashtype = HASH_TYPE_SHA1;
 static int hashlen = 20;
 static long hashblksize = HASHBLK_SIZE / 512;
@@ -110,6 +111,7 @@ usage(void)
 	    "\n"
 	    "-S         Use signature files when computing differences.\n"
 	    "-V         Verify consistency of image and signature.\n"
+	    "-F         Generate a full-image signature for the delta.\n"
 	    "-f         Force imagedelta to use a questionable sigfile.\n"
 	    "-d         Enable debugging.\n"
 	    "-D hfunc   Hash function to use (md5 or sha1).\n"
@@ -663,7 +665,7 @@ main(int argc, char **argv)
 {
     int ch;
 
-    while ((ch = getopt(argc, argv, "SfdVb:D:")) != -1)
+    while ((ch = getopt(argc, argv, "SfdVb:D:F")) != -1)
 	switch(ch) {
 	case 'S':
 	    usesigfiles = 1;
@@ -703,6 +705,9 @@ main(int argc, char **argv)
 		fprintf(stderr, "Invalid compression level\n");
 		usage();
 	    }
+	    break;
+	case 'F':
+	    fullsig = 1;
 	    break;
 	case 'h':
 	case '?':
@@ -856,8 +861,12 @@ main(int argc, char **argv)
 	}
 	free(cstate);
 
+	/* readjust to reflect the actual number of hash entries */
+	delta.ndz->hashentries = delta.ndz->hashcurentry;
+
 	/* write the new sigfile */
-	if (ndz_writehashinfo(delta.ndz, delta.sigfile) != 0) {
+	if (ndz_writehashinfo(fullsig ? ndz2.ndz : delta.ndz,
+			      delta.sigfile, argv[2]) != 0) {
 	    fprintf(stderr, "%s: could not write signature file %s\n",
 		    argv[2], delta.sigfile);
 	}
