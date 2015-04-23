@@ -812,7 +812,7 @@ main(int argc, char **argv)
 
 	/* write the new sigfile */
 	if (gensigfile) {
-	    if (ndz_writehashinfo(new.ndz, new.sigfile) != 0) {
+	    if (ndz_writehashinfo(new.ndz, new.sigfile, argv[1]) != 0) {
 		fprintf(stderr, "%s: could not write signature file %s\n",
 			argv[1], new.sigfile);
 	    }
