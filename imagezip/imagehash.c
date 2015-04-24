@@ -658,8 +658,8 @@ createhash(char *name, struct hashinfo **hinfop)
 #ifdef TIMEIT
 		printf("%qu bytes: inflate cycles: %llu\n",
 		       ndatabytes, (unsigned long long)dcycles);
-	}
 #endif
+	}
 	free(hfile);
 	return 0;
 }
