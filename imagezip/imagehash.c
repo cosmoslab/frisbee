@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -51,6 +51,9 @@
 #include "imagehash.h"
 #include "queue.h"
 
+//#define TERSE_DUMP_OUTPUT
+#define HANDLE_SPLIT_HASH
+
 #ifndef linux
 #define TIMEIT
 #endif
@@ -81,6 +84,10 @@ static unsigned long nchunks, nregions, nhregions, nsplithashes;
 static char *imagename;
 static char *fileid = NULL;
 static char *sigfile = NULL;
+static int sanity = 0;
+#ifdef HANDLE_SPLIT_HASH
+static int splithash = 0;
+#endif
 
 static char chunkbuf[CHUNKSIZE];
 
@@ -88,6 +95,8 @@ static void usage(void);
 static int gethashinfo(char *name, struct hashinfo **hinfo);
 static int readhashinfo(char *name, struct hashinfo **hinfop);
 static int checkhash(char *name, struct hashinfo *hinfo);
+static int comparehashinfo(struct hashinfo *siginfo,
+			   struct hashinfo *imageinfo);
 static void dumphash(char *name, struct hashinfo *hinfo, int withchunk);
 static int createhash(char *name, struct hashinfo **hinfop);
 static int hashimage(char *name, struct hashinfo **hinfop);
@@ -121,7 +130,7 @@ main(int argc, char **argv)
 	extern char build_info[];
 	struct hashinfo *hashinfo = 0;
 
-	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:")) != -1)
+	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:SX")) != -1)
 		switch(ch) {
 		case 'b':
 			hashblksize = atol(optarg);
@@ -180,6 +189,16 @@ main(int argc, char **argv)
 		case 'r':
 			regfile = 1;
 			break;
+		case 'S':
+			sanity = 1;
+			break;
+		case 'X':
+#ifdef HANDLE_SPLIT_HASH
+			splithash = 1;
+#else
+			fprintf(stderr, "-X not supported, ignored\n");
+#endif
+			break;
 		case 'h':
 		case '?':
 		default:
@@ -198,13 +217,14 @@ main(int argc, char **argv)
 	if (report && !create && sigfile == NULL)
 		create++;
 
-	if ((create && argc < 1) || (!create && sigfile == NULL && argc < 2))
+	if (((create || sanity) && argc < 1) ||
+	    (!create && !sanity && sigfile == NULL && argc < 2))
 		usage();
 
 	hashblksizeinsec = bytestosec(hashblksize);
 
 	/* XXX hack special case to dump a sigfile */
-	if (!create && sigfile != NULL) {
+	if (!create && !sanity && sigfile != NULL) {
 		if (readhashinfo("", &hashinfo) != 0)
 			exit(2);
 		detail = 2;
@@ -230,7 +250,7 @@ main(int argc, char **argv)
 			exit(1);
 		}
 	}
-	if (!create && access(argv[1], R_OK) != 0) {
+	if (!create && !sanity && access(argv[1], R_OK) != 0) {
 		perror("device file");
 		exit(1);
 	}
@@ -238,6 +258,31 @@ main(int argc, char **argv)
 #ifdef SIGINFO
 	signal(SIGINFO, dump_stats);
 #endif
+
+	/*
+	 * Sanity check the signature of an image
+	 */
+	if (sanity) {
+		struct hashinfo *ihashinfo = 0;
+
+		if (readhashinfo(argv[0], &hashinfo) != 0) {
+			fprintf(stderr, "Could not read hashinfo from %s\n",
+				signame(argv[0]));
+			exit(1);
+		}
+		if (hashimage(argv[0], &ihashinfo) != 0) {
+			fprintf(stderr, "Could not compute hashinfo for %s\n",
+				argv[0]);
+			exit(1);
+		}
+		assert(ihashinfo != NULL);
+		strcpy((char *)ihashinfo->magic, HASH_MAGIC);
+		ihashinfo->version = HASH_VERSION_2;
+		ihashinfo->hashtype = hashtype;
+		ihashinfo->blksize = hashblksizeinsec;
+
+		exit(comparehashinfo(hashinfo, ihashinfo));
+	}
 
 	/*
 	 * Raw image comparison
@@ -285,6 +330,9 @@ usage(void)
 		"    output an ASCII report to stdout rather than creating a signature file\n"
 		"imagehash -R -o sigfile\n"
 		"    output an ASCII report of the indicated signature file\n"
+		"imagehash [-d] -S [-o sigfile] <image-filename>\n"
+		"    sanity check the signature for an image file,\n"
+		"    comparing the signature against the image itself\n"
 		"imagehash -v\n"
 		"    print version info and exit\n"
 		"\n"
@@ -341,7 +389,7 @@ readhashinfo(char *name, struct hashinfo **hinfop)
 {
 	struct hashinfo hi, *hinfo;
 	char *hname;
-	int fd, nregbytes, cc;
+	int fd, nbytes, cc;
 
 	hname = signame(name);
 	fd = open(hname, O_RDONLY, 0666);
@@ -350,13 +398,15 @@ readhashinfo(char *name, struct hashinfo **hinfop)
 		free(hname);
 		return -1;
 	}
-	cc = read(fd, &hi, sizeof(hi));
-	if (cc != sizeof(hi)) {
+	nbytes = sizeof(hi);
+	cc = read(fd, &hi, nbytes);
+	if (cc != nbytes) {
 	readbad:
 		if (cc < 0)
 			perror(hname);
 		else
-			fprintf(stderr, "%s: too short\n", hname);
+			fprintf(stderr, "%s: too short (%d != %d)\n",
+				hname, cc, nbytes);
 	bad:
 		close(fd);
 		free(hname);
@@ -367,15 +417,15 @@ readhashinfo(char *name, struct hashinfo **hinfop)
 		fprintf(stderr, "%s: not a valid signature file\n", hname);
 		goto bad;
 	}
-	nregbytes = hi.nregions * sizeof(struct hashregion);
-	hinfo = malloc(sizeof(hi) + nregbytes);
+	nbytes = hi.nregions * sizeof(struct hashregion);
+	hinfo = malloc(sizeof(hi) + nbytes);
 	if (hinfo == 0) {
 		fprintf(stderr, "%s: not enough memory for info\n", hname);
 		goto bad;
 	}
 	*hinfo = hi;
-	cc = read(fd, hinfo->regions, nregbytes);
-	if (cc != nregbytes) {
+	cc = read(fd, hinfo->regions, nbytes);
+	if (cc != nbytes) {
 		free(hinfo);
 		goto readbad;
 	}
@@ -461,6 +511,8 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 	struct hashregion *reg;
 
 	if (detail > 1) {
+#ifdef TERSE_DUMP_OUTPUT
+#else
 		switch (hinfo->version) {
 		case HASH_VERSION_1:
 			printf("sig version 1, blksize=%d sectors:\n",
@@ -475,8 +527,14 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 			      "expect garbage:\n", hinfo->version);
 			break;
 		}
+#endif
 		for (i = 0; i < hinfo->nregions; i++) {
 			reg = &hinfo->regions[i];
+#ifdef TERSE_DUMP_OUTPUT
+			printf("%s\t%d\t%d\n",
+			       spewhash(reg->hash, hashlen),
+			       reg->region.start, reg->region.size);
+#else
 			printf("[%u-%u] (%d): ",
 			       reg->region.start,
 			       reg->region.start + reg->region.size-1,
@@ -495,6 +553,7 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 			} else if (HASH_CHUNKDOESSPAN(reg->chunkno))
 				nsplithashes++;
 			printf("hash %s\n", spewhash(reg->hash, hashlen));
+#endif
 		}
 	}
 	if (nsplithashes)
@@ -600,6 +659,72 @@ createhash(char *name, struct hashinfo **hinfop)
 }
 
 static volatile uint32_t badhashes, checkedhashes;
+
+static int
+comparehashinfo(struct hashinfo *siginfo, struct hashinfo *imageinfo)
+{
+	int i = 0;
+
+	if (siginfo->hashtype != imageinfo->hashtype) {
+		fprintf(stderr,
+			"Sig/image have different hashtypes (%d != %d)\n",
+			siginfo->hashtype, imageinfo->hashtype);
+		i++;
+	}
+	if (siginfo->blksize != imageinfo->blksize) {
+		fprintf(stderr,
+			"Sig/image have different block sizes "
+			"(%d != %d)\n",
+			siginfo->blksize, imageinfo->blksize);
+		i++;
+	}
+	if (siginfo->nregions != imageinfo->nregions) {
+		fprintf(stderr,
+			"Sig/image have different number of hash regions "
+			"(%d != %d)\n",
+			siginfo->nregions, imageinfo->nregions);
+		i++;
+	}
+	if (i)
+		return i;
+
+	switch (siginfo->hashtype) {
+	case HASH_TYPE_MD5:
+	default:
+		hashlen = 16;
+		break;
+	case HASH_TYPE_SHA1:
+		hashlen = 20;
+		break;
+	}
+
+	for (i = 0; i < siginfo->nregions; i++) {
+		struct hashregion *sr = &siginfo->regions[i];
+		struct hashregion *ir = &imageinfo->regions[i];
+
+		if (sr->region.start != ir->region.start ||
+		    sr->region.size != ir->region.size) {
+			fprintf(stderr,
+				"Sig/image entry %d have different ranges "
+				"([%u-%u] != [%u-%u])\n",
+				i, sr->region.start,
+				sr->region.start + sr->region.size - 1,
+				ir->region.start,
+				ir->region.start + ir->region.size - 1);
+			return -1;
+		}
+		if (memcmp(sr->hash, ir->hash, hashlen)) {
+			fprintf(stderr,
+				"Sig/image entry %d have different hashes "
+				"(%s != ", i, spewhash(sr->hash, hashlen));
+			/* XXX spewhash uses static buffer */
+			fprintf(stderr, "%s)\n", spewhash(ir->hash, hashlen));
+			return -1;
+		}
+	}
+
+	return 0;
+}
 
 static int
 checkhash(char *name, struct hashinfo *hinfo)
@@ -938,6 +1063,10 @@ hashimage(char *name, struct hashinfo **hinfop)
 		nchunks++;
 	}
  done:
+#ifdef HANDLE_SPLIT_HASH
+	if (splithash)
+		errors += hashchunk(-1, chunkbuf, hinfop);
+#endif
 	if (!isstdin)
 		close(ifd);
 	nchunks++;
@@ -961,6 +1090,22 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 	int errors = 0;
 #ifdef TIMEIT
 	u_int64_t sstamp, estamp;
+#endif
+#ifdef HANDLE_SPLIT_HASH
+	static struct hashregion lhash;
+	static unsigned char *ldata;
+	static int spanoff = -1;
+
+	if (chunkno == -1) {
+		if (spanoff >= 0)
+			addhash(hinfop, lhash.chunkno,
+				lhash.region.start, lhash.region.size,
+				lhash.hash);
+		if (ldata)
+			free(ldata);
+		spanoff = -1;
+		return 0;
+	}
 #endif
 
 	z.zalloc = Z_NULL;
@@ -1093,23 +1238,94 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 				exit(1);
 			}
 
-			if (doall ||
-			    !hasrelocs(sectobytes(rstart), sectobytes(hsize))) {
-				/*
-				 * NULL hashfunc indicates we are doing raw
-				 * comparison.  Otherwise, we compute the hash.
-				 */
-				if (hashfunc == 0) {
-					errors += datacmp(rstart, hsize,
-							  rbuf->data);
-				} else {
-					(void)(*hashfunc)(rbuf->data,
-							  sectobytes(hsize),
-							  hash);
-					addhash(hinfop, chunkno, rstart, hsize,
-						hash);
-				}
+			/*
+			 * If the region has relocs, then we don't hash
+			 */
+			if (!doall &&
+			    hasrelocs(sectobytes(rstart), sectobytes(hsize)))
+				goto hdone;
+
+			/*
+			 * NULL hashfunc indicates we are doing raw
+			 * comparison.  Otherwise, we compute the hash.
+			 */
+			if (hashfunc == 0) {
+				errors += datacmp(rstart, hsize, rbuf->data);
+				goto hdone;
 			}
+
+#ifdef HANDLE_SPLIT_HASH
+			/*
+			 * Deal with data for a hash region that spans
+			 * chunk boundaries. This does not catch all cases!
+			 */
+			if (!splithash)
+				goto nosplit;
+
+			if (spanoff >= 0) {
+				struct region *lreg = &lhash.region;
+				size_t bytes = sectobytes(hsize);
+
+				/*
+				 * XXX We handle the case of a full
+				 * hashblksize range that spans chunk
+				 * boundaries.
+				 */
+				if (rstart == lreg->start + lreg->size &&
+				    hsize + lreg->size <= hashblksizeinsec) {
+					assert(spanoff+bytes <= hashblksize);
+					assert(ldata != NULL);
+					memcpy(ldata+spanoff, rbuf->data,
+					       bytes);
+					(void)(*hashfunc)(ldata, spanoff+bytes,
+							  hash);
+					HASH_CHUNKSETSPAN(lhash.chunkno);
+					addhash(hinfop, lhash.chunkno,
+						lreg->start, lreg->size+hsize,
+						hash);
+					spanoff = -1;
+					goto hdone;
+				}
+				/*
+				 * Not the special case we can deal with,
+				 * just dump the hash info we saved.
+				 */
+				addhash(hinfop, lhash.chunkno,
+					lreg->start, lreg->size, lhash.hash);
+#if 0
+fprintf(stderr, "HACK: failed: [%u-%u][%u-%u]\n", lreg->start, lreg->start+lreg->size-1, rstart, rstart+hsize-1);
+#endif
+				spanoff = -1;
+				goto nosplit;
+			}
+			/*
+			 * If this is the last piece of the last region
+			 * in a chunk and it is not a full hashblksize piece,
+			 * then stash it to see if it is a range that spans
+			 * chunks.
+			 */
+			if (hsize < hashblksize && rsize == hsize &&
+			    nreg + 1 == blockhdr->regioncount) {
+				size_t bytes = sectobytes(hsize);
+
+				lhash.region.start = rstart;
+				lhash.region.size = hsize;
+				lhash.chunkno = chunkno;
+				(void)(*hashfunc)(rbuf->data, bytes,
+						  lhash.hash);
+				if (ldata == NULL) {
+					ldata = malloc(hashblksize);
+					assert(ldata != NULL);
+				}
+				memcpy(ldata, rbuf->data, bytes);
+				spanoff = bytes;
+				goto hdone;
+			}
+		nosplit:
+#endif
+			(void)(*hashfunc)(rbuf->data, sectobytes(hsize), hash);
+			addhash(hinfop, chunkno, rstart, hsize, hash);
+		hdone:
 			rstart += hsize;
 			rsize -= hsize;
 		}
