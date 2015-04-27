@@ -108,7 +108,7 @@ ndz_readhashinfo(struct ndz_file *ndz, char *sigfile)
     unsigned lstart, lsize;
 #endif
 
-    if (ndz == NULL)
+    if (ndz == NULL || sigfile == NULL)
 	return NULL;
     if (ndz->hashmap)
 	return ndz->hashmap;
@@ -221,7 +221,7 @@ writehinfo(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
 {
     struct hashregion hr;
     struct ndz_hashdata *hd = range->data;
-    int ofd = (int)arg;
+    int ofd = (int)(uintptr_t)arg;
 
     if (hd == NULL) {
 	fprintf(stderr, "no hash info for range [%lu-%lu]\n",

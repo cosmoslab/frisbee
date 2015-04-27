@@ -50,7 +50,7 @@ findchunk(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
 {
     struct fcarg *fcarg = arg;
 
-    if ((ndz_chunkno_t)range->data == fcarg->in_chunkno) {
+    if ((uintptr_t)range->data == fcarg->in_chunkno) {
 	fcarg->out_range = range;
 	return 1;
     }
@@ -88,7 +88,7 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
     if (range == NULL)
 	return 0;
 
-    chunkno = (ndz_chunkno_t)range->data;
+    chunkno = (uintptr_t)range->data;
     assert(chunkno > 0);
     chunkno--;
 
@@ -256,7 +256,7 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
 		}
 		return (ssect - sect);
 	    }
-	    chunkno = (ndz_chunkno_t)range->data;
+	    chunkno = (uintptr_t)range->data;
 	    assert(chunkno != 0);
 	    chunkno--;
 	    if (chunkno != lchunkno) {

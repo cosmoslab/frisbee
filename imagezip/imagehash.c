@@ -51,7 +51,7 @@
 #include "imagehash.h"
 #include "queue.h"
 
-#define TERSE_DUMP_OUTPUT
+//#define TERSE_DUMP_OUTPUT
 #define HANDLE_SPLIT_HASH
 
 #ifndef linux
@@ -193,7 +193,11 @@ main(int argc, char **argv)
 			sanity = 1;
 			break;
 		case 'X':
+#ifdef HANDLE_SPLIT_HASH
 			splithash = 1;
+#else
+			fprintf(stderr, "-X not supported, ignored\n");
+#endif
 			break;
 		case 'h':
 		case '?':
@@ -1289,7 +1293,8 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 					       bytes);
 					(void)(*hashfunc)(ldata, spanoff+bytes,
 							  hash);
-					HASH_CHUNKSETSPAN(lhash.chunkno);
+					lhash.chunkno =
+						HASH_CHUNKSETSPAN(lhash.chunkno);
 					addhash(hinfop, lhash.chunkno,
 						lreg->start, lreg->size+hsize,
 						hash);

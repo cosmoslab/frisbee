@@ -49,6 +49,7 @@ ndz_rangemap_init(ndz_addr_t lo, ndz_addr_t hi)
 	map->hiaddr = hi;
 	map->hint = &map->head.next;
 	map->gen = 1;
+	map->sectors = 0;
     }
     return map;
 }
@@ -138,6 +139,7 @@ ndz_rangemap_alloc(struct ndz_rangemap *map, ndz_addr_t addr, ndz_size_t size,
 	    map->hint = &prev->next;
 	}
 	map->gen++;
+	map->sectors += size;
 	return 0;
     }
 
@@ -154,6 +156,7 @@ ndz_rangemap_alloc(struct ndz_rangemap *map, ndz_addr_t addr, ndz_size_t size,
     prev->next = range;
     map->hint = &prev->next;
     map->gen++;
+    map->sectors += size;
 
     return 0;
 }
@@ -220,6 +223,7 @@ ndz_rangemap_dealloc(struct ndz_rangemap *map, ndz_addr_t addr, ndz_size_t size)
 	    range->start = eaddr + 1;
 	map->hint = &prev->next;
 	map->gen++;
+	map->sectors -= size;
 
 	return 0;
     }
@@ -228,6 +232,7 @@ ndz_rangemap_dealloc(struct ndz_rangemap *map, ndz_addr_t addr, ndz_size_t size)
 	range->end = addr - 1;
 	map->hint = &prev->next;
 	map->gen++;
+	map->sectors -= size;
 
 	return 0;
     }
@@ -247,6 +252,7 @@ ndz_rangemap_dealloc(struct ndz_rangemap *map, ndz_addr_t addr, ndz_size_t size)
     range->end = addr - 1;
     map->hint = &range->next;
     map->gen++;
+    map->sectors -= size;
 
     return 0;
 }
@@ -340,22 +346,14 @@ ndz_rangemap_last(struct ndz_rangemap *map)
 }
 
 /*
- * Return the number of entries in the map.
+ * Return the number of sectors covered by the map.
  *
  * Does not affect the map hint.
  */
-int
-ndz_rangemap_count(struct ndz_rangemap *map)
+ndz_size_t
+ndz_rangemap_sectors(struct ndz_rangemap *map)
 {
-    struct ndz_range *range;
-    int count = 0;
-
-    assert(map);
-
-    for (range = map->head.next; range; range = range->next)
-	count++;
-
-    return count;
+    return map->sectors;
 }
 
 /*
@@ -534,7 +532,8 @@ ndz_rangemap_dump(struct ndz_rangemap *map, int summaryonly,
     unsigned long elements = 0;
     int nrange = 0;
 
-    printf("MAP: %p (hint=%p, gen=%lu)\n", map, map->hint, map->gen);
+    printf("MAP: %p (hint=%p, gen=%lu, sectors=%lu)\n",
+	   map, map->hint, map->gen, map->sectors);
     ndz_rangemap_dumpstats(map);
     for (range = map->head.next; range; range = range->next) {
 	if (!summaryonly) {

@@ -389,8 +389,8 @@ ndz_write(struct ndz_file *ndz, void *buf, size_t bytes, off_t offset)
 static int
 printrange(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
 {
-    printf("  [%lu - %lu], chunk=%u\n",
-	   range->start, range->end, (unsigned int)range->data - 1);
+    printf("  [%lu - %lu], chunk=%lu\n",
+	   range->start, range->end, (uintptr_t)range->data - 1);
     return 0;
 }
 

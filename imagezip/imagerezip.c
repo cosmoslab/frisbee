@@ -348,7 +348,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
     uint32_t roffset, hstart, hsize;
     size_t hbytes;
     ssize_t cc;
-    struct ndz_hashdata *hdata;
+    struct ndz_hashdata *hdata = NULL;
     struct ndz_range *hrange;
 
 #ifdef CHUNKIFY_DEBUG
@@ -675,7 +675,7 @@ unchunkify(struct ndz_rangemap *omap, struct ndz_range *range, void *arg)
 static void
 chunkfunc(struct ndz_rangemap *map, void *ptr)
 {
-    unsigned int chunkno = (int)ptr;
+    unsigned int chunkno = (uintptr_t)ptr;
     printf("chunkno=%u", chunkno);
 }
 
@@ -699,11 +699,13 @@ main(int argc, char **argv)
 	    hashblksize /= 512;
 	    break;
 	case 'D':
-	    if (strcmp(optarg, "md5") == 0)
+	    if (strcmp(optarg, "md5") == 0) {
 		hashtype = HASH_TYPE_MD5;
-	    else if (strcmp(optarg, "sha1") == 0)
+		hashlen = 16;
+	    } else if (strcmp(optarg, "sha1") == 0) {
 		hashtype = HASH_TYPE_SHA1;
-	    else {
+		hashlen = 20;
+	    } else {
 		fprintf(stderr, "Invalid digest type `%s'\n",
 			optarg);
 		usage();
