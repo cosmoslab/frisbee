@@ -468,13 +468,12 @@ readhashinfo(char *name, struct hashinfo **hinfop)
 #define REGPERBLK	8192	/* ~256KB -- must be power of 2 */
 
 static void
-addhash(struct hashinfo **hinfop, int chunkno, uint32_t start, uint32_t size,
-	unsigned char hash[HASH_MAXSIZE])
+addhash(struct hashinfo **hinfop, uint32_t chunkno, uint32_t start,
+	uint32_t size, unsigned char hash[HASH_MAXSIZE])
 {
 	struct hashinfo *hinfo = *hinfop;
 	int nreg;
 
-	assert(chunkno >= 0);
 	if (report) {
 		printf("%s\t%u\t%u",
 		       spewhash(hash, hashlen), start, size);
@@ -1289,7 +1288,8 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 					       bytes);
 					(void)(*hashfunc)(ldata, spanoff+bytes,
 							  hash);
-					HASH_CHUNKSETSPAN(lhash.chunkno);
+					lhash.chunkno =
+						HASH_CHUNKSETSPAN(lhash.chunkno);
 					addhash(hinfop, lhash.chunkno,
 						lreg->start, lreg->size+hsize,
 						hash);
