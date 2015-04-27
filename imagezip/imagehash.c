@@ -51,7 +51,7 @@
 #include "imagehash.h"
 #include "queue.h"
 
-//#define TERSE_DUMP_OUTPUT
+#define TERSE_DUMP_OUTPUT
 #define HANDLE_SPLIT_HASH
 
 #ifndef linux
@@ -88,6 +88,7 @@ static int sanity = 0;
 #ifdef HANDLE_SPLIT_HASH
 static int splithash = 0;
 #endif
+static int quiet = 0;
 
 static char chunkbuf[CHUNKSIZE];
 
@@ -130,7 +131,7 @@ main(int argc, char **argv)
 	extern char build_info[];
 	struct hashinfo *hashinfo = 0;
 
-	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:SX")) != -1)
+	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:SXq")) != -1)
 		switch(ch) {
 		case 'b':
 			hashblksize = atol(optarg);
@@ -198,6 +199,9 @@ main(int argc, char **argv)
 #else
 			fprintf(stderr, "-X not supported, ignored\n");
 #endif
+			break;
+		case 'q':
+			quiet = 1;
 			break;
 		case 'h':
 		case '?':
@@ -855,14 +859,13 @@ checkhash(char *name, struct hashinfo *hinfo)
 
 	stopreader();
 
-	if (!quiet)
-		dump_stats(0);
-	if (badhashes)
-		printf("%s: %u regions (%d chunks) had bad hashes, "
-		       "%llu bytes affected\n",
-		       name, badhashes, badchunks,
-		       (unsigned long long)badhashdata);
 	if (!quiet) {
+		dump_stats(0);
+		if (badhashes)
+			printf("%s: %u regions (%d chunks) had bad hashes, "
+			       "%llu bytes affected\n",
+			       name, badhashes, badchunks,
+			       (unsigned long long)badhashdata);
 		dump_readbufs();
 #ifdef TIMEIT
 		printf("%llu bytes: read cycles: "
