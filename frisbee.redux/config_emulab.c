@@ -434,6 +434,7 @@ set_put_values(struct config_host_authinfo *ai, int ix)
 	ii->put_itimeout = put_maxiwait;
 
 	/* put_oldversion */
+#if 0
 	/*
 	 * For standard images, we keep ALL old versions as:
 	 * <path>.<timestamp>, just because we are extra paranoid about those.
@@ -449,7 +450,12 @@ set_put_values(struct config_host_authinfo *ai, int ix)
 		snprintf(str, len, "%s.%09u", ii->path, (unsigned)curtime);
 		ii->put_oldversion = str;
 	} else
-		ii->put_oldversion = NULL;
+#endif
+	{
+		int len = strlen(ii->path) + 5;
+		ii->put_oldversion = mymalloc(len);
+		snprintf(ii->put_oldversion, len, "%s.bak", ii->path);
+	}
 
 	/* put_options */
 	ii->put_options = NULL;
@@ -1480,7 +1486,8 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 				if (wantvers) {
 					res = mydb_query("SELECT i.pid,i.gid,"
 						"i.imagename,v.path,"
-						"i.imageid,v.version"
+						"i.imageid,v.version,"
+						"v.uploader_path"
 						" FROM images as i "
 						" LEFT JOIN image_versions "
 						"  as v on "
@@ -1488,12 +1495,13 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 						"    v.version='%s' "
 						"WHERE i.pid='%s'"
 						" AND i.imagename='%s'",
-						6, wantvers, wantpid, wantname);
+						7, wantvers, wantpid, wantname);
 				}
 				else {
 					res = mydb_query("SELECT i.pid,i.gid,"
 						"i.imagename,v.path,"
-						"i.imageid,v.version"
+						"i.imageid,v.version,"
+						"v.uploader_path"
 						" FROM images as i "
 						" LEFT JOIN image_versions "
 						"  as v on "
@@ -1501,7 +1509,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 						"    v.version=i.version "
 						"WHERE i.pid='%s'"
 						" AND i.imagename='%s'",
-						6, wantpid, wantname);
+						7, wantpid, wantname);
 				}
 			} else {
 				/*
@@ -1511,7 +1519,8 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 				if (wantvers) {
 					res = mydb_query("SELECT i.pid,i.gid,"
 						"i.imagename,v.path,"
-						"i.imageid,v.version"
+						"i.imageid,v.version,"
+						"v.uploader_path"
 						" FROM images as i"
 						" LEFT JOIN image_versions "
 						"  as v on "
@@ -1523,13 +1532,14 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 						" AND (i.gid='%s' OR"
 						"    (i.gid=i.pid AND "
 						"     v.shared=1))",
-						6, wantvers, wantpid, wantname,
+						7, wantvers, wantpid, wantname,
 						ei->pid, ei->gid);
 				}
 				else {
 					res = mydb_query("SELECT i.pid,i.gid,"
 						"i.imagename,v.path,"
-						"i.imageid,v.version"
+						"i.imageid,v.version,"
+						"v.uploader_path"
 						" FROM images as i"
 						" LEFT JOIN image_versions "
 						"  as v on "
@@ -1572,11 +1582,12 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			struct emulab_ii_extra_info *ii;
 			struct config_imageinfo *ci;
 			struct stat sb;
-			char *iid;
-			int iidx;
+			char *iid, *targetpath;
+			int iidx, hasuploadpath = 0;
 
 			row = mysql_fetch_row(res);
 			/* XXX ignore rows with null or empty info */
+			/* XXX row[6] (uploader_path) can be NULL */
 			if (!row[0] || !row[0][0] ||
 			    !row[1] || !row[1][0] ||
 			    !row[2] || !row[2][0] ||
@@ -1584,6 +1595,16 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			    !row[4] || !row[4][0] ||
 			    !row[5] || !row[5][0])
 				continue;
+
+			/*
+			 * If an uploader_path was specified, use that.
+			 * Otherwise use the path.
+			 */
+			if (row[6] && row[6][0]) {
+				targetpath = row[6];
+				hasuploadpath = 1;
+			} else
+				targetpath = row[3];
 
 			/*
 			 * XXX if image is in the standard image directory,
@@ -1597,9 +1618,9 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			 * hwdown and other special experiments possibly
 			 * without revoking the access of the previous user.
 			 */
-			if (isindir(STDIMAGEDIR, row[3])) {
-				FrisError("%s: cannot update standard images "
-					  "right now", row[3]);
+			if (isindir(STDIMAGEDIR, targetpath)) {
+				FrisError("%s: cannot update image using "
+					  "path '%s'", targetpath);
 				continue;
 			}
 
@@ -1608,12 +1629,12 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			ci->imageid = iid;
 			ci->dir = NULL;
 			if (wantmeta && strcmp(wantmeta, "sig") == 0) {
-				ci->path = mymalloc(strlen(row[3]) + 4);
-				strcpy(ci->path, row[3]);
+				ci->path = mymalloc(strlen(targetpath) + 4);
+				strcpy(ci->path, targetpath);
 				strcat(ci->path, ".sig");
 				ci->flags = CONFIG_PATH_ISSIGFILE;
 			} else {
-				ci->path = mystrdup(row[3]);
+				ci->path = mystrdup(targetpath);
 				ci->flags = CONFIG_PATH_ISFILE;
 			}
 			if (stat(ci->path, &sb) == 0) {
@@ -1646,6 +1667,16 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			}
 
 			set_put_values(put, put->numimages);
+
+			/*
+			 * XXX if we have an explict uploader path we are
+			 * under control of image_create and don't need to
+			 * worry about backups.
+			 */
+			if (hasuploadpath && ci->put_oldversion) {
+				free(ci->put_oldversion);
+				ci->put_oldversion = NULL;
+			}
 			ii = mymalloc(sizeof *ii);
 			ii->DB_imageid = iidx;
 			ci->extra = ii;

@@ -187,23 +187,28 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 static void
 set_put_values(struct config_host_authinfo *ai, int ix)
 {
+	struct config_imageinfo *ii = &ai->imageinfo[ix];
+	int len;
+
 	/* put_maxsize */
-	ai->imageinfo[ix].put_maxsize = 10000000000ULL;	/* XXX 10GB */
+	ii->put_maxsize = 20000000000ULL;	/* XXX 20GB */
 
 	/* put_timeout */
-	ai->imageinfo[ix].put_timeout = 900;
-	ai->imageinfo[ix].put_itimeout = 120;
+	ii->put_timeout = 1200;
+	ii->put_itimeout = 120;
 
-	/* put_oldversion */
-	ai->imageinfo[ix].put_oldversion = NULL;
+	/* put_oldversion -- setting to NULL means no tmpfile during upload */
+	len = strlen(ii->path) + 5;
+	ii->put_oldversion = mymalloc(len);
+	snprintf(ii->put_oldversion, len, "%s.bak", ii->path);
 
 	/* put_options */
-	ai->imageinfo[ix].put_options = NULL;
+	ii->put_options = NULL;
 
 	/* and whack the get_* fields */
-	ai->imageinfo[ix].get_methods = 0;
-	ai->imageinfo[ix].get_timeout = 0;
-	ai->imageinfo[ix].get_options = NULL;
+	ii->get_methods = 0;
+	ii->get_timeout = 0;
+	ii->get_options = NULL;
 }
 
 #define FREE(p) { if (p) free(p); }

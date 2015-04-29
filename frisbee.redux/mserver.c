@@ -2009,7 +2009,7 @@ static void
 finishupload(struct childinfo *ci, int status)
 {
 	char *bakname, *tmpname, *realname;
-	int len, didbackup;
+	int didbackup;
 	struct uploadextra *ue;
 	time_t mtime;
 
@@ -2019,14 +2019,28 @@ finishupload(struct childinfo *ci, int status)
 	mtime = (time_t)ue->mtime;
 	free(ci->extra);
 	ci->extra = NULL;
-	tmpname = ci->imageinfo->path;
-	ci->imageinfo->path = realname;
+
+	if (realname) {
+		tmpname = ci->imageinfo->path;
+		assert(tmpname != NULL);
+		ci->imageinfo->path = realname;
+		bakname = ci->imageinfo->put_oldversion;
+		assert(bakname != NULL);
+	} else {
+		tmpname = bakname = NULL;
+		realname = ci->imageinfo->path;
+	}
 
 	if (status != 0) {
-		FrisError("%s: upload failed, removing tmpfile %s",
-			  realname, tmpname);
-		unlink(tmpname);
-		free(tmpname);
+		if (tmpname) {
+			FrisError("%s: upload failed, removing tmpfile %s",
+				  realname, tmpname);
+			unlink(tmpname);
+			free(tmpname);
+		} else {
+			FrisError("%s: upload failed, removing", realname);
+			unlink(realname);
+		}
 		return;
 	}
 
@@ -2035,35 +2049,30 @@ finishupload(struct childinfo *ci, int status)
 		gettimeofday(&tv[0], NULL);
 		tv[1].tv_sec = mtime;
 		tv[1].tv_usec = 0;
-		if (utimes(tmpname, tv) < 0)
-			FrisWarning("%s: failed to set mtime", tmpname);
+		if (utimes(tmpname ? tmpname : realname, tv) < 0)
+			FrisWarning("%s: failed to set mtime",
+				    tmpname ? tmpname : realname);
 	}
 
 	/*
 	 * If the configuration specified an explicit place for the
-	 * old version, move it there now. Otherwise just save it as
-	 * <realname>.bak
+	 * old version, move it there now. Otherwise, we were saving
+	 * directly to the specified path and there is nothing to backup.
 	 */
-	if (ci->imageinfo->put_oldversion)
-		bakname = ci->imageinfo->put_oldversion;
-	else {
-		len = strlen(realname) + 5;
-		bakname = malloc(len);
-		snprintf(bakname, len, "%s.bak", realname);
-	}
-	didbackup = 1;
-	if (rename(realname, bakname) < 0)
-		didbackup = 0;
-	if ((!didbackup && errno != ENOENT) || rename(tmpname, realname) < 0) {
-		FrisError("%s: failed to install new version (%d), leaving as %s",
-			  realname, errno, tmpname);
-		if (didbackup)
-			rename(bakname, realname);
+	if (bakname) {
+		didbackup = 1;
+		if (rename(realname, bakname) < 0)
+			didbackup = 0;
+		if ((!didbackup && errno != ENOENT) ||
+		    rename(tmpname, realname) < 0) {
+			FrisError("%s: failed to install new version (%d),"
+				  "leaving as %s", realname, errno, tmpname);
+			if (didbackup)
+				rename(bakname, realname);
+		}
+		free(tmpname);
 	}
 
-	free(tmpname);
-	if (ci->imageinfo->put_oldversion == NULL)
-		free(bakname);
 	FrisLog("%s: upload complete", realname);
 }
 
@@ -2076,8 +2085,7 @@ startuploader(struct config_imageinfo *ii, in_addr_t meaddr, in_addr_t youaddr,
 {
 	struct childinfo *ci;
 	struct uploadextra *ue;
-	char *tmpname;
-	int len, itimo = 0;
+	int itimo = 0;
 
 	assert(findchild(ii->imageid, PTYPE_UPLOADER, MS_METHOD_ANY) == NULL);
 	assert(errorp != NULL);
@@ -2158,14 +2166,21 @@ startuploader(struct config_imageinfo *ii, in_addr_t meaddr, in_addr_t youaddr,
 	/*
 	 * Arrange to upload the image as <path>.tmp and then
 	 * rename it into place when done.
+	 *
+	 * XXX if put_oldversion is NULL, we assume that we are
+	 * uploading to a temporary file in the first place.
+	 * See config_emulab.c.
 	 */
-	len = strlen(ci->imageinfo->path) + 5;
-	if ((tmpname = malloc(len)) != NULL) {
-		ue->realname = ci->imageinfo->path;
-		snprintf(tmpname, len, "%s.tmp", ci->imageinfo->path);
-		ci->imageinfo->path = tmpname;
-		ci->done = finishupload;
+	if (ci->imageinfo->put_oldversion) {
+		int len = strlen(ci->imageinfo->path) + 5;
+		char *tmpname = malloc(len);
+		if (tmpname != NULL) {
+			ue->realname = ci->imageinfo->path;
+			snprintf(tmpname, len, "%s.tmp", ci->imageinfo->path);
+			ci->imageinfo->path = tmpname;
+		}
 	}
+	ci->done = finishupload;
 
 	if ((*errorp = startchild(ci)) != 0) {
 		free_imageinfo(ci->imageinfo);
