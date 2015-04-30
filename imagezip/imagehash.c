@@ -51,7 +51,6 @@
 #include "imagehash.h"
 #include "queue.h"
 
-#define TERSE_DUMP_OUTPUT
 #define HANDLE_SPLIT_HASH
 
 #ifndef linux
@@ -85,10 +84,9 @@ static char *imagename;
 static char *fileid = NULL;
 static char *sigfile = NULL;
 static int sanity = 0;
-#ifdef HANDLE_SPLIT_HASH
 static int splithash = 0;
-#endif
 static int quiet = 0;
+static int terse = 0;
 
 static char chunkbuf[CHUNKSIZE];
 
@@ -131,7 +129,7 @@ main(int argc, char **argv)
 	extern char build_info[];
 	struct hashinfo *hashinfo = 0;
 
-	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:SXq")) != -1)
+	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:SXqT")) != -1)
 		switch(ch) {
 		case 'b':
 			hashblksize = atol(optarg);
@@ -202,6 +200,9 @@ main(int argc, char **argv)
 			break;
 		case 'q':
 			quiet = 1;
+			break;
+		case 'T':
+			terse = 1;
 			break;
 		case 'h':
 		case '?':
@@ -517,30 +518,30 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 	struct hashregion *reg;
 
 	if (detail > 1) {
-#ifdef TERSE_DUMP_OUTPUT
-#else
-		switch (hinfo->version) {
-		case HASH_VERSION_1:
-			printf("sig version 1, blksize=%d sectors:\n",
-			       bytestosec(HASHBLK_SIZE));
-			break;
-		case HASH_VERSION_2:
-			printf("sig version 2, blksize=%d sectors:\n",
-			       hinfo->blksize);
-			break;
-		default:
-			printf("unknown signature version (%x), "
-			      "expect garbage:\n", hinfo->version);
-			break;
+		if (!terse) {
+			switch (hinfo->version) {
+			case HASH_VERSION_1:
+				printf("sig version 1, blksize=%d sectors:\n",
+				       bytestosec(HASHBLK_SIZE));
+				break;
+			case HASH_VERSION_2:
+				printf("sig version 2, blksize=%d sectors:\n",
+				       hinfo->blksize);
+				break;
+			default:
+				printf("unknown signature version (%x), "
+				       "expect garbage:\n", hinfo->version);
+				break;
+			}
 		}
-#endif
 		for (i = 0; i < hinfo->nregions; i++) {
 			reg = &hinfo->regions[i];
-#ifdef TERSE_DUMP_OUTPUT
-			printf("%s\t%d\t%d\n",
-			       spewhash(reg->hash, hashlen),
-			       reg->region.start, reg->region.size);
-#else
+			if (terse) {
+				printf("%s\t%d\t%d\n",
+				       spewhash(reg->hash, hashlen),
+				       reg->region.start, reg->region.size);
+				continue;
+			}
 			printf("[%u-%u] (%d): ",
 			       reg->region.start,
 			       reg->region.start + reg->region.size-1,
@@ -559,7 +560,6 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 			} else if (HASH_CHUNKDOESSPAN(reg->chunkno))
 				nsplithashes++;
 			printf("hash %s\n", spewhash(reg->hash, hashlen));
-#endif
 		}
 	}
 	if (nsplithashes)
@@ -677,6 +677,7 @@ static int
 comparehashinfo(struct hashinfo *siginfo, struct hashinfo *imageinfo)
 {
 	int i = 0;
+	int checkchunk = 0;
 
 	if (siginfo->hashtype != imageinfo->hashtype) {
 		fprintf(stderr,
@@ -694,8 +695,9 @@ comparehashinfo(struct hashinfo *siginfo, struct hashinfo *imageinfo)
 	if (siginfo->nregions != imageinfo->nregions) {
 		fprintf(stderr,
 			"Sig/image have different number of hash regions "
-			"(%d != %d)\n",
-			siginfo->nregions, imageinfo->nregions);
+			"(%d != %d); original may %shave split-chunk ranges\n",
+			siginfo->nregions, imageinfo->nregions,
+			splithash ? "" : "not ");
 		i++;
 	}
 	if (i)
@@ -711,10 +713,21 @@ comparehashinfo(struct hashinfo *siginfo, struct hashinfo *imageinfo)
 		break;
 	}
 
+	if (siginfo->version > HASH_VERSION_1)
+		checkchunk = 1;
 	for (i = 0; i < siginfo->nregions; i++) {
 		struct hashregion *sr = &siginfo->regions[i];
 		struct hashregion *ir = &imageinfo->regions[i];
 
+		if (checkchunk && sr->chunkno != ir->chunkno) {
+			fprintf(stderr,
+				"Sig/image entry %d have inconsistent "
+				"chunknos (%c/%u != %c/%u)\n",
+				i, HASH_CHUNKDOESSPAN(sr->chunkno) ? 'S' : '-',
+				HASH_CHUNKNO(sr->chunkno),
+				HASH_CHUNKDOESSPAN(ir->chunkno) ? 'S' : '-',
+				HASH_CHUNKNO(ir->chunkno));
+		}
 		if (sr->region.start != ir->region.start ||
 		    sr->region.size != ir->region.size) {
 			fprintf(stderr,
