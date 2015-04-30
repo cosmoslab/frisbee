@@ -180,7 +180,6 @@ ndz_rangemap_dealloc(struct ndz_rangemap *map, ndz_addr_t addr, ndz_size_t size)
 {
     struct ndz_range *prev, *range, *next;
     ndz_addr_t eaddr = addr + size - 1;
-    int ishead = 0;
 
     if (map == NULL || eaddr < addr ||
 	addr < map->loaddr || eaddr > map->hiaddr)
@@ -202,10 +201,8 @@ ndz_rangemap_dealloc(struct ndz_rangemap *map, ndz_addr_t addr, ndz_size_t size)
 	return EBUSY;
 
     /* if prev is null we are at the beginning, take note */
-    if (prev == NULL) {
+    if (prev == NULL)
 	prev = &map->head;
-	ishead = 1;
-    }
 
     /*
      * If the dealloced range abuts the containing range at either the
