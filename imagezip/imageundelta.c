@@ -22,7 +22,7 @@
  */
 
 //#define APPLYDELTA_DEBUG
-#define CHUNKIFY_DEBUG
+//#define CHUNKIFY_DEBUG
 
 /*
  * imageundelta [ -S -f ] base.ndz delta.ndz newimage.ndz
@@ -110,8 +110,8 @@ static int sigchunkify(struct ndz_rangemap *sigmap, struct ndz_range *range,
 		       void *arg);
 static int chunkify(struct ndz_rangemap *mmap, struct ndz_range *range,
 		    void *arg);
-static int verifyfunc1(struct ndz_rangemap *imap, struct ndz_range *range,
-		       void *arg);
+static int verifyfunc(struct ndz_rangemap *imap, struct ndz_range *range,
+		      void *arg);
 
 void
 usage(void)
@@ -138,7 +138,7 @@ usage(void)
  * Validate that entries are covered by those in the signature map.
  */
 static int
-verifyfunc1(struct ndz_rangemap *imap, struct ndz_range *range, void *arg)
+verifyfunc(struct ndz_rangemap *imap, struct ndz_range *range, void *arg)
 {
     struct ndz_rangemap *sigmap = arg;
     struct ndz_range *srange;
@@ -263,7 +263,7 @@ readifile(struct fileinfo *info, int usesig)
 	     * Perform a sanity check, ensuring that ranges in the image map
 	     * are all covered by entries in the sigmap.
 	     */
-	    rv = ndz_rangemap_iterate(info->map, verifyfunc1, info->sigmap);
+	    rv = ndz_rangemap_iterate(info->map, verifyfunc, info->sigmap);
 	    if (rv != 0) {
 		fprintf(stderr,
 			"%s: signature does not completely cover image\n",
@@ -498,18 +498,25 @@ sigchunkify(struct ndz_rangemap *sigmap, struct ndz_range *srange, void *arg)
      * Create a fake range entry using the bounds of the sigmap range but
      * data form the image map range. We can do this since data for a single
      * sigmap entry will always come from the same source (either base or
-     * delta image map). There is the pathological case of a sigmap entry
-     * that spans two image map entries, but chunify should handle that
-     * just fine.
+     * delta image map). Note that a sigmap entry may cover multiple contiguous
+     * range map entries. Chunkify will handle this just fine as long as the
+     * data are all from the same image (base or delta).
      */
     assert(srange->start >= range->start);
     trange.start = srange->start;
-    if (srange->end > range->end) {
-	assert(range->next && range->next->start == range->end+1);
-	assert(srange->end <= range->next->end);
-    }
     trange.end = srange->end;
     trange.data = range->data;
+    /* massive assertion */
+    while (srange->end > range->end) {
+	struct ndz_range *next = range->next;
+	struct mapdata *hdata, *nhdata;
+	assert(next && next->start == range->end+1);
+	assert(range->data && next->data);
+	hdata = range->data;
+	nhdata = next->data;
+	assert(hdata->frombase == nhdata->frombase);
+	range = next;
+    }
 
     /*
      * Whacky, we need to set the next entry as chunkify uses that to
@@ -528,11 +535,11 @@ sigchunkify(struct ndz_rangemap *sigmap, struct ndz_range *srange, void *arg)
 }
 
 static int
-initnewchunk(struct chunkstate *cstate)
+initnewchunk(struct chunkstate *cstate, struct ndz_file *ndz)
 {
     struct blockhdr_V2 *hdr;
 
-    cstate->chunkobj = ndz_chunk_create(new.ndz, cstate->chunkno, clevel);
+    cstate->chunkobj = ndz_chunk_create(ndz, cstate->chunkno, clevel);
     if (cstate->chunkobj == NULL) {
 	fprintf(stderr, "Error creating chunk %u\n", cstate->chunkno);
 	return 1;
@@ -579,12 +586,12 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
     struct chunkstate *cstate = arg;
     ndz_addr_t rstart = range->start;
     ndz_size_t rsize = range->end + 1 - rstart, sc;
-    struct mapdata *mdata;
     uint32_t roffset, hstart, hsize;
     size_t hbytes;
     ssize_t cc;
     struct ndz_hashdata *hdata = NULL;
     struct ndz_range *hrange;
+    struct mapdata *mdata;
 
     assert(range->data != NULL);
     mdata = range->data;
@@ -606,7 +613,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	    return 1;
 	}
 	cstate->chunkno = 0;
-	if (initnewchunk(cstate) != 0)
+	if (initnewchunk(cstate, new.ndz) != 0)
 	    return 1;
 	cstate->header->firstsect = rstart;
 	cstate->curregion->start = rstart;
@@ -765,7 +772,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		}
 
 		cstate->chunkno++;
-		if (initnewchunk(cstate) != 0)
+		if (initnewchunk(cstate, new.ndz) != 0)
 		    return 1;
 		cstate->header->firstsect = pstart;
 		cstate->curregion->start = pstart;
@@ -1002,7 +1009,7 @@ main(int argc, char **argv)
     }
 
     state.dmapnext = ndz_rangemap_first(delta.map);
-    state.dmapaddr = 0;
+    state.dmapaddr = state.dmapnext ? state.dmapnext->start : 0;
     state.mmap = new.map;
 
     if (ndz_rangemap_iterate(base.map, applydelta, &state) != 0) {
