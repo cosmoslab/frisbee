@@ -33,6 +33,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <openssl/md5.h>
 #include <openssl/sha.h>
 
