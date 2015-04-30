@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -1787,7 +1787,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			struct emulab_ii_extra_info *ii;
 			struct config_imageinfo *ci;
 			struct stat sb;
-			char *iid;
+			char *iid, *path;
 			int iidx;
 
 			row = mysql_fetch_row(res);
@@ -1804,13 +1804,45 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			ci = &get->imageinfo[get->numimages];
 			ci->imageid = iid;
 			ci->dir = NULL;
+			/*
+			 * If path is a directory, this is a new format
+			 * image world. In that case we pick the .ndz file
+			 * out of that directory.
+			 */
+			if (stat(row[3], &sb) == 0 && S_ISDIR(sb.st_mode)) {
+				char ch;
+				int len = strlen(row[3]);
+
+				ch = row[3][len-1];
+				if (ch != '/')
+					len++;
+
+				len += strlen(row[2]);	/* <imagename> */
+				len += 4;		/* .ndz */
+				if (row[5])		/* :<vers> */
+					len += strlen(row[5]) + 1;
+				len++;			/* \0 */
+
+				path = mymalloc(len);
+				if (row[5])
+					snprintf(path, len, "%s%s%s.ndz:%s",
+						 row[3], (ch=='/') ? "" : "/",
+						 row[2], row[5]);
+				else
+					snprintf(path, len, "%s%s%s.ndz",
+						 row[3], (ch=='/') ? "" : "/",
+						 row[2]);
+			} else
+				path = mystrdup(row[3]);
+
 			if (wantmeta && strcmp(wantmeta, "sig") == 0) {
-				ci->path = mymalloc(strlen(row[3]) + 4);
-				strcpy(ci->path, row[3]);
+				ci->path = mymalloc(strlen(path) + 4);
+				strcpy(ci->path, path);
 				strcat(ci->path, ".sig");
 				ci->flags = CONFIG_PATH_ISSIGFILE;
+				free(path);
 			} else {
-				ci->path = mystrdup(row[3]);
+				ci->path = path;
 				ci->flags = CONFIG_PATH_ISFILE;
 			}
 			if (stat(ci->path, &sb) == 0) {
