@@ -100,6 +100,11 @@ static int hashtype = HASH_TYPE_SHA1;
 static int hashlen = 20;
 static long hashblksize = HASHBLK_SIZE / 512;
 
+static int chunkify(struct ndz_rangemap *mmap, struct ndz_range *range,
+		    void *arg);
+static int verifyfunc(struct ndz_rangemap *imap, struct ndz_range *range,
+		      void *arg);
+
 void
 usage(void)
 {
@@ -178,8 +183,13 @@ verifyfunc(struct ndz_rangemap *imap, struct ndz_range *range, void *arg)
 		    }
 		}
 	    }
-	    fprintf(stderr, "  *** [%lu-%lu]: bad sigentry [%lu-%lu]\n",
-		    range->start, eaddr, srange->start, srange->end);
+	    fprintf(stderr, "  *** [%lu-%lu]: bad sigentry [%lu-%lu](0x%x)\n",
+		    range->start, eaddr, srange->start, srange->end,
+		    ((struct ndz_hashdata *)srange->data)->chunkno);
+	    if (srange->next)
+		fprintf(stderr, "      next sigentry [%lu-%lu](0x%x)\n",
+			srange->next->start, srange->next->end,
+			((struct ndz_hashdata *)srange->next->data)->chunkno);
 	    return 1;
 	}
 	addr = srange->end + 1;
@@ -195,24 +205,30 @@ verifyfunc(struct ndz_rangemap *imap, struct ndz_range *range, void *arg)
     return 0;
 }
 
+static void
+chunkfunc(struct ndz_rangemap *map, void *ptr)
+{
+    unsigned int chunkno = (uintptr_t)ptr;
+    printf("chunkno=%u", chunkno);
+}
+
 /*
  * File must exist and be readable.
  * If usesigfiles is set, signature file must exist as well.
  * Reads in the range map and signature as well.
  */
 void
-openifile(char *file, struct fileinfo *info)
+openifile(char *file, struct fileinfo *info, int usesig)
 {
     int sigfd;
 
     info->ndz = ndz_open(file, 0);
     if (info->ndz == NULL) {
-	fprintf(stderr, "%s: could not open as NDZ file\n",
-		ndz_filename(info->ndz));
+	fprintf(stderr, "%s: could not open as NDZ file\n", file);
 	exit(1);
     }
 
-    if (usesigfiles) {
+    if (usesig) {
 	struct stat sb1, sb2;
 
 	info->sigfile = malloc(strlen(file) + 5);
@@ -269,7 +285,7 @@ openofile(char *file, struct fileinfo *info)
 }
 
 void
-readifile(struct fileinfo *info)
+readifile(struct fileinfo *info, int usesig)
 {
     /* read range info from image */
     info->map = ndz_readranges(info->ndz);
@@ -280,7 +296,7 @@ readifile(struct fileinfo *info)
     }
 
     /* read signature info */
-    if (usesigfiles) {
+    if (usesig) {
 	info->sigmap = ndz_readhashinfo(info->ndz, info->sigfile);
 	if (info->sigmap == NULL) {
 	    fprintf(stderr, "%s: could not read signature info\n",
@@ -324,14 +340,16 @@ struct chunkstate {
     blockhdr_t *header;
     struct region *region;
     struct region *curregion;
+    struct ndz_rangemap *verifysigmap;
+    struct ndz_rangemap *newsigmap;
 };
 
 static int
-initnewchunk(struct chunkstate *cstate)
+initnewchunk(struct chunkstate *cstate, struct ndz_file *ndz)
 {
     struct blockhdr_V2 *hdr;
 
-    cstate->chunkobj = ndz_chunk_create(delta.ndz, cstate->chunkno, clevel);
+    cstate->chunkobj = ndz_chunk_create(ndz, cstate->chunkno, clevel);
     if (cstate->chunkobj == NULL) {
 	fprintf(stderr, "Error creating chunk %u\n", cstate->chunkno);
 	return 1;
@@ -380,7 +398,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
     uint32_t roffset, hstart, hsize;
     size_t hbytes;
     ssize_t cc;
-    struct ndz_hashdata *hdata;
+    struct ndz_hashdata *hdata = NULL;
     struct ndz_range *hrange;
 
 #ifdef CHUNKIFY_DEBUG
@@ -398,7 +416,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	    return 1;
 	}
 	cstate->chunkno = 0;
-	if (initnewchunk(cstate) != 0)
+	if (initnewchunk(cstate, delta.ndz) != 0)
 	    return 1;
 	cstate->header->firstsect = rstart;
 	cstate->curregion->start = rstart;
@@ -547,7 +565,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		}
 
 		cstate->chunkno++;
-		if (initnewchunk(cstate) != 0)
+		if (initnewchunk(cstate, delta.ndz) != 0)
 		    return 1;
 		cstate->header->firstsect = pstart;
 		cstate->curregion->start = pstart;
@@ -678,13 +696,6 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
     return 0;
 }
 
-static void
-chunkfunc(struct ndz_rangemap *map, void *ptr)
-{
-    unsigned int chunkno = (uintptr_t)ptr;
-    printf("chunkno=%u", chunkno);
-}
-
 int
 main(int argc, char **argv)
 {
@@ -750,15 +761,15 @@ main(int argc, char **argv)
     /*
      * Make sure we can open all the files
      */
-    openifile(argv[0], &ndz1);
-    openifile(argv[1], &ndz2);
+    openifile(argv[0], &ndz1, usesigfiles);
+    openifile(argv[1], &ndz2, usesigfiles);
     openofile(argv[2], &delta);
 
     /*
      * Read in the range and signature info.
      */
-    readifile(&ndz1);
-    readifile(&ndz2);
+    readifile(&ndz1, usesigfiles);
+    readifile(&ndz2, usesigfiles);
 
 #if 0
     printf("==== Old range ");
