@@ -21,6 +21,7 @@
  * }}}
  */
 
+#define MAP_DEBUG
 //#define APPLYDELTA_DEBUG
 //#define CHUNKIFY_DEBUG
 
@@ -296,10 +297,9 @@ readifile(struct fileinfo *info, int usesig)
 			ndz_filename(info->ndz)); 
 		exit(1);
 	    }
-#if 1
-	    fprintf(stderr, "sig covers %lu more sectors than in image\n",
-		    ssects - isects);
-#endif
+	    if (debug)
+		fprintf(stderr, "sig covers %lu more sectors than in image\n",
+			ssects - isects);
 	}
     } else
 	info->sigmap = NULL;
@@ -986,16 +986,18 @@ main(int argc, char **argv)
     readifile(&base, 0);
     readifile(&delta, usesigfile);
 
-#if 1
-    printf("==== Base range ");
-    ndz_rangemap_dump(base.map, (debug==0), chunkfunc);
-    printf("==== Delta range ");
-    ndz_rangemap_dump(delta.map, (debug==0), chunkfunc);
-    if (usesigfile) {
-	printf("==== Delta hash ");
-	ndz_hashmap_dump(delta.sigmap, (debug==0));
+#ifdef MAP_DEBUG
+    if (debug) {
+	printf("==== Base range ");
+	ndz_rangemap_dump(base.map, (debug==1), chunkfunc);
+	printf("==== Delta range ");
+	ndz_rangemap_dump(delta.map, (debug==1), chunkfunc);
+	if (usesigfile) {
+	    printf("==== Delta hash ");
+	    ndz_hashmap_dump(delta.sigmap, (debug==1));
+	}
+	fflush(stdout);
     }
-    fflush(stdout);
 #endif
 
     /*
@@ -1018,10 +1020,12 @@ main(int argc, char **argv)
 	exit(1);
     }
 
-#if 1
-    printf("==== Merge ");
-    ndz_rangemap_dump(new.map, (debug==0), mergefunc);
-    fflush(stdout);
+#ifdef MAP_DEBUG
+    if (debug) {
+	printf("==== Merge ");
+	ndz_rangemap_dump(new.map, (debug==1), mergefunc);
+	fflush(stdout);
+    }
 #endif
 
     /*
@@ -1047,10 +1051,11 @@ main(int argc, char **argv)
 	    new.ndz->maplo = base.ndz->maplo;
 	else
 	    new.ndz->maplo = delta.ndz->maplo;
-#if 1
-	printf("new map range: low=%lu, high=%lu\n", new.ndz->maplo, new.ndz->maphi);
-	fflush(stdout);
-#endif
+	if (debug) {
+	    printf("new map range: low=%lu, high=%lu\n",
+		   new.ndz->maplo, new.ndz->maphi);
+	    fflush(stdout);
+	}
     }
 
     /*

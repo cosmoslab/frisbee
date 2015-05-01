@@ -21,6 +21,7 @@
  * }}}
  */
 
+#define MAP_DEBUG
 //#define CHUNKIFY_DEBUG
 
 /*
@@ -319,12 +320,14 @@ readifile(struct fileinfo *info, int usesig)
 			    next->start, next->end);
 		fprintf(stderr, "%s: error while validating range/hash maps\n",
 			ndz_filename(info->ndz));
-#if 0
-		printf("==== Image ");
-		ndz_rangemap_dump(info->map, (debug==0), NULL);
-		printf("==== Hash ");
-		ndz_hashmap_dump(info->sigmap, (debug==0));
-		fflush(stdout);
+#ifdef MAP_DEBUG
+		if (debug) {
+		    printf("==== Image ");
+		    ndz_rangemap_dump(info->map, (debug==1), NULL);
+		    printf("==== Hash ");
+		    ndz_hashmap_dump(info->sigmap, (debug==1));
+		    fflush(stdout);
+		}
 #endif
 		exit(1);
 	    }
@@ -480,9 +483,8 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	    fprintf(stderr, " found hash=%s\n",
 		    ndz_hash_dump(hdata->hash, hashlen));
 #endif
-#if 0
 	    /* sanity check */
-	    {
+	    if (debug > 1) {
 		unsigned char hbuf[HASH_MAXSIZE];
 
 		ndz_hash_data(delta.ndz, cstate->chunkdatabuf, hbytes, hbuf);
@@ -495,7 +497,6 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 			    hstart, hstart + hsize - 1);
 		}
 	    }
-#endif
 	} else {
 	    ndz_hash_data(delta.ndz, cstate->chunkdatabuf, hbytes,
 			  hdata->hash);
@@ -771,16 +772,18 @@ main(int argc, char **argv)
     readifile(&ndz1, usesigfiles);
     readifile(&ndz2, usesigfiles);
 
-#if 0
-    printf("==== Old range ");
-    ndz_rangemap_dump(ndz1.map, (debug==0), chunkfunc);
-    printf("==== Old hash ");
-    ndz_hashmap_dump(ndz1.sigmap, (debug==0));
-    printf("==== New range ");
-    ndz_rangemap_dump(ndz2.map, (debug==0), chunkfunc);
-    printf("==== New hash ");
-    ndz_hashmap_dump(ndz2.sigmap, (debug==0));
-    fflush(stdout);
+#ifdef MAP_DEBUG
+    if (debug) {
+	printf("==== Old range ");
+	ndz_rangemap_dump(ndz1.map, (debug==1), chunkfunc);
+	printf("==== Old hash ");
+	ndz_hashmap_dump(ndz1.sigmap, (debug==1));
+	printf("==== New range ");
+	ndz_rangemap_dump(ndz2.map, (debug==1), chunkfunc);
+	printf("==== New hash ");
+	ndz_hashmap_dump(ndz2.sigmap, (debug==1));
+	fflush(stdout);
+    }
 #endif
 
     /*
@@ -808,14 +811,16 @@ main(int argc, char **argv)
 	 */
 	delta.ndz->maplo = ndz2.ndz->maplo;
 	delta.ndz->maphi = ndz2.ndz->maphi;
-#if 0
-	printf("==== Delta hash ");
-	ndz_hashmap_dump(delta.map, (debug==0));
-	printf("==== Old hashmap stats:");
-	ndz_rangemap_dumpstats(ndz1.sigmap);
-	printf("==== New hashmap stats:");
-	ndz_rangemap_dumpstats(ndz2.sigmap);
-	fflush(stdout);
+#ifdef MAP_DEBUG
+	if (debug) {
+	    printf("==== Delta hash ");
+	    ndz_hashmap_dump(delta.map, (debug==1));
+	    printf("==== Old hashmap stats:");
+	    ndz_rangemap_dumpstats(ndz1.sigmap);
+	    printf("==== New hashmap stats:");
+	    ndz_rangemap_dumpstats(ndz2.sigmap);
+	    fflush(stdout);
+	}
 #endif
     }
     /*
@@ -837,14 +842,16 @@ main(int argc, char **argv)
 	delta.ndz->maplo = ndz2.ndz->maplo;
 	delta.ndz->maphi = ndz2.ndz->maphi;
 
-#if 0
-	printf("==== Delta map ");
-	ndz_hashmap_dump(delta.map, (debug==0));
-	printf("==== Old map stats:");
-	ndz_rangemap_dumpstats(ndz1.map);
-	printf("==== New map stats:");
-	ndz_rangemap_dumpstats(ndz2.map);
-	fflush(stdout);
+#ifdef MAP_DEBUG
+	if (debug) {
+	    printf("==== Delta map ");
+	    ndz_hashmap_dump(delta.map, (debug==1));
+	    printf("==== Old map stats:");
+	    ndz_rangemap_dumpstats(ndz1.map);
+	    printf("==== New map stats:");
+	    ndz_rangemap_dumpstats(ndz2.map);
+	    fflush(stdout);
+	}
 #endif
 	exit(2);
     }
