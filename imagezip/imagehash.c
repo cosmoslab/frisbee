@@ -872,13 +872,14 @@ checkhash(char *name, struct hashinfo *hinfo)
 
 	stopreader();
 
-	if (!quiet) {
+	if (!quiet)
 		dump_stats(0);
-		if (badhashes)
-			printf("%s: %u regions (%d chunks) had bad hashes, "
-			       "%llu bytes affected\n",
-			       name, badhashes, badchunks,
-			       (unsigned long long)badhashdata);
+	if (badhashes)
+		printf("%s: %u regions (%d chunks) had bad hashes, "
+		       "%llu bytes affected\n",
+		       name, badhashes, badchunks,
+		       (unsigned long long)badhashdata);
+	if (!quiet) {
 		dump_readbufs();
 #ifdef TIMEIT
 		printf("%llu bytes: read cycles: "

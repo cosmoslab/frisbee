@@ -347,9 +347,9 @@ ndz_freehashmap(struct ndz_file *ndz)
 }
 
 struct deltainfo {
+    struct ndz_file *ndz;
     struct ndz_rangemap *omap;
     struct ndz_rangemap *dmap;
-    struct ndz_rangemap *relocmap;
     int omapdone;
 };
 
@@ -448,8 +448,8 @@ compfastdelta(struct ndz_rangemap *nmap, struct ndz_range *range, void *arg)
 	     * XXX if the sector range includes a relocation,
 	     * we always force it into the image.
 	     */
-	    if (dinfo->relocmap &&
-		ndz_rangemap_overlap(dinfo->relocmap, addr, eaddr-addr+1)) {
+	    if (dinfo->ndz->relocdata &&
+		ndz_reloc_inrange(dinfo->ndz, addr, eaddr-addr+1)) {
 #ifdef COMPDELTA_DEBUG
 		fprintf(stderr, "has relocation, adding\n");
 #endif
@@ -510,9 +510,9 @@ ndz_compute_delta(struct ndz_file *ondz, struct ndz_file *nndz)
 	return NULL;
     }
 
+    dinfo.ndz = nndz;
     dinfo.omap = omap;
     dinfo.dmap = dmap;
-    dinfo.relocmap = nndz->relocmap;
     dinfo.omapdone = 0;
 #if 0
     (void) ndz_rangemap_iterate(nmap, compdelta, &dinfo);
@@ -541,9 +541,9 @@ ndz_compute_delta_sigmap(struct ndz_file *ondz, struct ndz_file *nndz)
 	return NULL;
     }
 
+    dinfo.ndz = nndz;
     dinfo.omap = omap;
     dinfo.dmap = dmap;
-    dinfo.relocmap = nndz->relocmap;
     dinfo.omapdone = 0;
     (void) ndz_rangemap_iterate(nmap, compfastdelta, &dinfo);
 

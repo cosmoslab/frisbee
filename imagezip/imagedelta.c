@@ -247,8 +247,9 @@ openifile(char *file, struct fileinfo *info, int usesig)
 	    exit(1);
 	}
 	if (!forcesig && labs(sb1.st_mtime - sb2.st_mtime) > 2) {
-	    fprintf(stderr, "%s: image and signature disagree (%ld != %ld), "
-		    "use -f to override.\n", file, sb1.st_mtime, sb2.st_mtime);
+	    fprintf(stderr, "%s: image and signature modtime disagree "
+		    "(%ld != %ld), use -f to override.\n",
+		    file, sb1.st_mtime, sb2.st_mtime);
 	    exit(1);
 	}
 	close(sigfd);
@@ -548,15 +549,12 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		cstate->header->lastsect = pstart;
 
 		/* include any relocations */
-		if (ndz2.ndz->relocmap) {
+		if (delta.ndz->relocentries > 0) {
 		    void *buf = (cstate->curregion + 1);
-		    delta.ndz->relocmap = ndz2.ndz->relocmap; /* XXX */
 		    if (ndz_reloc_put(delta.ndz, cstate->header, buf) != 0) {
-			delta.ndz->relocmap = NULL; /* XXX */
 			fprintf(stderr, "Error writing relocation info\n");
 			return 1;
 		    }
-		    delta.ndz->relocmap = NULL; /* XXX */
 		}
 
 		/* and write it */
@@ -671,15 +669,12 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	cstate->header->lastsect = delta.ndz->maphi;
 
 	/* include any relocations */
-	if (ndz2.ndz->relocmap) {
+	if (delta.ndz->relocentries > 0) {
 	    void *buf = (cstate->curregion + 1);
-	    delta.ndz->relocmap = ndz2.ndz->relocmap; /* XXX */
 	    if (ndz_reloc_put(delta.ndz, cstate->header, buf) != 0) {
-		delta.ndz->relocmap = NULL; /* XXX */
 		fprintf(stderr, "Error writing relocation info\n");
 		return 1;
 	    }
-	    delta.ndz->relocmap = NULL; /* XXX */
 	}
 
 	/* and write it */
@@ -695,6 +690,36 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
     }
 
     return 0;
+}
+ 
+static void
+setfiletime(char *dst, char *src)
+{
+    struct timeval tm[2];
+    struct stat sb;
+    int cc;
+
+    /*
+     * Set the modtime of the hash file to match that of the image.
+     * This is a crude (but fast!) method for matching images with
+     * signatures.
+     */
+    cc = stat(src, &sb);
+    if (cc >= 0) {
+#ifdef linux
+	tm[0].tv_sec = sb.st_atime;
+	tm[0].tv_usec = 0;
+	tm[1].tv_sec = sb.st_mtime;
+	tm[1].tv_usec = 0;
+#else
+	TIMESPEC_TO_TIMEVAL(&tm[0], &sb.st_atimespec);
+	TIMESPEC_TO_TIMEVAL(&tm[1], &sb.st_mtimespec);
+#endif
+	cc = utimes(dst, tm);
+    }
+    if (cc < 0)
+	fprintf(stderr, "%s: WARNING: could not set mtime (%s)\n",
+		dst, strerror(errno));
 }
 
 int
@@ -892,12 +917,19 @@ main(int argc, char **argv)
     delta.ndz->hashentries = ndz2.ndz->hashentries;
     delta.ndz->hashcurentry = 0;
 
+    if (ndz_reloc_copy(ndz2.ndz, delta.ndz)) {
+	fprintf(stderr, "%s: could not copy reloc info for delta image\n",
+		argv[2]);
+	exit(1);
+    }
+
     /*
      * If there is anything in the resulting delta, produce an image!
      */
     if (ndz_rangemap_first(delta.map) != NULL) {
 	struct chunkstate *cstate = calloc(1, sizeof(*cstate));
 	assert(cstate != NULL);
+	ndz_size_t dsect, fsect;
 
 	if (ndz_rangemap_iterate(delta.map, chunkify, cstate) != 0) {
 	    fprintf(stderr, "%s: error while creating new delta image\n",
@@ -916,8 +948,15 @@ main(int argc, char **argv)
 		    argv[2], delta.sigfile);
 	}
 	
+	dsect = ndz_rangemap_sectors(delta.map);
+	fsect = ndz_rangemap_sectors(ndz2.map);
+	printf("%s: %lu sectors, %3.1f%% of full image (%lu sectors)\n",
+	      argv[2], dsect, (double)dsect * 100 / fsect, fsect);
+	      
 	ndz_close(ndz2.ndz);
 	ndz_close(delta.ndz);
+
+	setfiletime(argv[2], argv[1]);
     } else {
 	fprintf(stderr, "Images %s and %s are identical, no delta produced!\n",
 		argv[0], argv[1]);

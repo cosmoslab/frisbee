@@ -93,6 +93,8 @@ ndz_open(const char *name, int forwrite)
     ndz->sectsize = SECSIZE;
     ndz->chunksize = CHUNKSIZE;
 
+    ndz_reloc_init(ndz);
+
     /*
      * XXX someday check checksum if present and stash info to check
      * in every chunk header.
@@ -259,16 +261,6 @@ ndz_readranges(struct ndz_file *ndz)
 
 	/* get the relocations */
 	if (head.reloc) {
-	    if (ndz->relocmap == NULL) {
-		ndz->relocmap =
-		    ndz_rangemap_init(NDZ_LOADDR, NDZ_HIADDR-NDZ_LOADDR);
-		if (ndz->relocmap == NULL) {
-		    fprintf(stderr, "%s: could not allocate relocmap\n",
-			    ndz->fname);
-		    ndz_rangemap_deinit(map);
-		    return NULL;
-		}
-	    }
 	    if (ndz_reloc_get(ndz, head.header, head.reloc) != 0) {
 		fprintf(stderr, "%s: could not add relocations\n",
 			ndz->fname);

@@ -504,15 +504,12 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		cstate->header->lastsect = pstart;
 
 		/* include any relocations */
-		if (old.ndz->relocmap) {
+		if (new.ndz->relocentries > 0) {
 		    void *buf = (cstate->curregion + 1);
-		    new.ndz->relocmap = old.ndz->relocmap; /* XXX */
 		    if (ndz_reloc_put(new.ndz, cstate->header, buf) != 0) {
-			new.ndz->relocmap = NULL; /* XXX */
 			fprintf(stderr, "Error writing relocation info\n");
 			return 1;
 		    }
-		    new.ndz->relocmap = NULL; /* XXX */
 		}
 
 		/* and write it */
@@ -630,15 +627,12 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	cstate->header->lastsect = new.ndz->maphi;
 
 	/* include any relocations */
-	if (old.ndz->relocmap) {
+	if (new.ndz->relocentries > 0) {
 	    void *buf = (cstate->curregion + 1);
-	    new.ndz->relocmap = old.ndz->relocmap; /* XXX */
 	    if (ndz_reloc_put(new.ndz, cstate->header, buf) != 0) {
-		new.ndz->relocmap = NULL; /* XXX */
 		fprintf(stderr, "Error writing relocation info\n");
 		return 1;
 	    }
-	    new.ndz->relocmap = NULL; /* XXX */
 	}
 
 	/* and write it */
@@ -824,6 +818,12 @@ main(int argc, char **argv)
     new.ndz->hashblksize = hashblksize;
     new.ndz->hashentries = old.ndz->hashentries;
     new.ndz->hashcurentry = 0;
+
+    if (ndz_reloc_copy(old.ndz, new.ndz)) {
+	fprintf(stderr, "%s: could not copy reloc info for new image\n",
+		argv[2]);
+	exit(1);
+    }
 
     /*
      * If there is anything in the old image, produce a new image!

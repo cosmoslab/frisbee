@@ -24,9 +24,12 @@
 /*
  * Relocation handling routines.
  *
- * XXX using a range map is overkill, since there are almost never more
- * than a few (one) relocations and they are single sector things.
- * But images with relocations are rare, so don't worry about it.
+ * We just associate an array of blockreloc structs with the NDZ file
+ * to keep track of these. This is good enough since there are not ever
+ * very many relocs and they are almost always in the first chunk.
+ *
+ * Note that I originally used a rangemap, but there can be more than
+ * one reloc per sector so that doesn't work.
  */
 
 #include <unistd.h>
@@ -41,13 +44,29 @@
 
 #define RELOC_DEBUG
 
+void
+ndz_reloc_init(struct ndz_file *ndz)
+{
+    assert(ndz != NULL);
+
+    ndz->relocdata = NULL;
+    ndz->relocentries = 0;
+    ndz->reloclo = NDZ_HIADDR;
+    ndz->relochi = NDZ_LOADDR;
+}
+
+/*
+ * Read relocs out of a chunk header and add them to the array of relocs
+ * for the file, reallocing the buffer as necessary. Not terrible efficient,
+ * but does not have to be.
+ */ 
 int
 ndz_reloc_get(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
 {
-    struct blockreloc *relocdata, *reloc = buf;
+    struct blockreloc *relocdata, *chunkreloc = buf;
     int i;
 
-    if (ndz == NULL || ndz->relocmap == NULL || hdr == NULL || reloc == NULL)
+    if (ndz == NULL || hdr == NULL || chunkreloc == NULL)
 	return -1;
 
     if (hdr->magic < COMPRESSED_V2 || hdr->reloccount == 0)
@@ -56,65 +75,127 @@ ndz_reloc_get(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
     /* resize the relocation buffer */
     i = ndz->relocentries + hdr->reloccount;
     if (ndz->relocdata == NULL)
-	relocdata = malloc(i * sizeof(*reloc));
+	relocdata = malloc(i * sizeof(struct blockreloc));
     else
-	relocdata = realloc(ndz->relocdata, i * sizeof(*reloc));
+	relocdata = realloc(ndz->relocdata, i * sizeof(struct blockreloc));
     if (relocdata == NULL) {
 	ndz_reloc_free(ndz);
 	return -1;
     }
     ndz->relocdata = relocdata;
 
-    relocdata = ndz->relocdata + ndz->relocentries;
-    memcpy(relocdata, reloc, hdr->reloccount * sizeof(*reloc));
+    relocdata = (struct blockreloc *)ndz->relocdata + ndz->relocentries;
     for (i = 0; i < hdr->reloccount; i++) {
-	ndz_size_t size = (reloc->size + ndz->sectsize - 1) / ndz->sectsize;
-	if (ndz_rangemap_alloc(ndz->relocmap, (ndz_addr_t)reloc->sector, size,
-			       &relocdata[i])) {
-	    ndz_reloc_free(ndz);
-	    return -1;
-	}
+	if (ndz->reloclo == NDZ_HIADDR)
+	    ndz->reloclo = chunkreloc->sector;
+	/* XXX we should be adding these in order; we assume this elsewhere */
+	assert(ndz->reloclo <= chunkreloc->sector);
+	if (chunkreloc->sector > ndz->relochi)
+	    ndz->relochi = chunkreloc->sector;
+
+	*relocdata++ = *chunkreloc++;
     }
     ndz->relocentries += hdr->reloccount;
 
 #ifdef RELOC_DEBUG
     if (hdr->reloccount > 0) {
-	fprintf(stderr, "got %d relocs, %d total\n",
-		hdr->reloccount, ndz->relocentries);
+	fprintf(stderr, "got %d relocs, %d total, range [%lu-%lu]\n",
+		hdr->reloccount, ndz->relocentries,
+		ndz->reloclo, ndz->relochi);
     }
 #endif
 
     return 0;
 }
 
+/*
+ * Find any relocation entries that apply to the indicated chunk and add them.
+ */
 int
 ndz_reloc_put(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
 {
-    struct blockreloc *reloc;
-    struct ndz_range *rrange;
-    ndz_addr_t addr, eaddr;
+    struct blockreloc *chunkreloc, *relocdata;
+    int i;
 
-    if (ndz == NULL || ndz->relocmap == NULL || hdr == NULL || buf == NULL)
+    if (ndz == NULL || hdr == NULL || buf == NULL)
 	return -1;
 
-    reloc = buf;
-    addr = hdr->firstsect;
-    eaddr = hdr->lastsect;
-    rrange = ndz_rangemap_overlap(ndz->relocmap, addr, eaddr - addr + 1);
-    while (rrange && rrange->start <= eaddr) {
-#ifdef RELOC_DEBUG
-	fprintf(stderr, "found reloc [%lu-%lu] in chunk range [%lu-%lu]\n",
-		rrange->start, rrange->end, addr, eaddr);
-#endif
-	assert(rrange->start >= addr && rrange->end <= eaddr);
-	assert(rrange->data != NULL);
+    if (ndz->relocentries == 0 ||
+	hdr->firstsect > ndz->relochi || hdr->lastsect < ndz->reloclo)
+	return 0;
 
-	*reloc = *(struct blockreloc *)rrange->data;
-	reloc++;
-	hdr->reloccount++;
-	rrange = rrange->next;
+    chunkreloc = buf;
+    relocdata = ndz->relocdata;
+    for (i = 0; i < ndz->relocentries; i++) {
+	assert(relocdata->sectoff + relocdata->size <= ndz->sectsize);
+	if (relocdata->sector >= hdr->firstsect &&
+	    relocdata->sector <= hdr->lastsect) {
+#ifdef RELOC_DEBUG
+	    fprintf(stderr, "found reloc for %u in chunk range [%u-%u]\n",
+		    relocdata->sector, hdr->firstsect, hdr->lastsect);
+#endif
+	    *chunkreloc++ = *relocdata;
+	}
+	relocdata++;
     }
 
+    return 0;
+}
+
+/*
+ * Returns 1 if there is a relocation in the indicated range, 0 otherwise
+ */
+int
+ndz_reloc_inrange(struct ndz_file *ndz, ndz_addr_t addr, ndz_size_t size)
+{
+    struct blockreloc *relocdata;
+    ndz_addr_t eaddr;
+    int i;
+
+    assert(ndz != NULL);
+
+    eaddr = addr + size - 1;
+    if (ndz->relocentries == 0 || addr > ndz->relochi || eaddr < ndz->reloclo)
+	return 0;
+
+    relocdata = ndz->relocdata;
+    for (i = 0; i < ndz->relocentries; i++) {
+	assert(relocdata->sectoff + relocdata->size <= ndz->sectsize);
+	if (relocdata->sector >= addr && relocdata->sector <= eaddr) {
+#ifdef RELOC_DEBUG
+	    fprintf(stderr, "found a reloc (%u) in range [%lu-%lu]\n",
+		    relocdata->sector, addr, eaddr);
+#endif
+	    return 1;
+	}
+	relocdata++;
+    }
+
+    return 0;
+}
+
+/*
+ * Reloc info is small so this is relatively painless
+ */
+int
+ndz_reloc_copy(struct ndz_file *ndzfrom, struct ndz_file *ndzto)
+{
+    size_t size;
+
+    if (ndzfrom == NULL || ndzto == NULL || ndzto->relocentries > 0)
+	return -1;
+
+    if (ndzfrom->relocentries == 0)
+	return 0;
+
+    size = ndzfrom->relocentries * sizeof(struct blockreloc);
+    if ((ndzto->relocdata = malloc(size)) == NULL)
+	return -1;
+
+    memcpy(ndzto->relocdata, ndzfrom->relocdata, size);
+    ndzto->relocentries = ndzfrom->relocentries;
+    ndzto->reloclo = ndzfrom->reloclo;
+    ndzto->relochi = ndzfrom->relochi;
     return 0;
 }
 
@@ -125,10 +206,6 @@ ndz_reloc_free(struct ndz_file *ndz)
 	if (ndz->relocdata) {
 	    free(ndz->relocdata);
 	    ndz->relocdata = NULL;
-	}
-	if (ndz->relocmap) {
-	    ndz_rangemap_deinit(ndz->relocmap);
-	    ndz->relocmap = NULL;
 	}
 	ndz->relocentries = 0;
     }

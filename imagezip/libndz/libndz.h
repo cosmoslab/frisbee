@@ -57,7 +57,7 @@ struct ndz_file {
     /* relocation information */
     unsigned relocentries;
     void *relocdata;
-    struct ndz_rangemap *relocmap;
+    ndz_addr_t reloclo, relochi;
     /* hash (signature) info */
     unsigned hashtype;
     unsigned hashblksize;
@@ -107,8 +107,11 @@ int ndz_chunk_flush(ndz_chunk_t chobj, int withheader);
 ssize_t ndz_chunk_left(ndz_chunk_t chobj);
 ssize_t ndz_chunk_append(ndz_chunk_t chobj, void *buf, size_t bytes);
 
+void ndz_reloc_init(struct ndz_file *ndz);
 int ndz_reloc_get(struct ndz_file *ndz, blockhdr_t *hdr, void *buf);
 int ndz_reloc_put(struct ndz_file *ndz, blockhdr_t *hdr, void *buf);
+int ndz_reloc_inrange(struct ndz_file *ndz, ndz_addr_t addr, ndz_size_t size);
+int ndz_reloc_copy(struct ndz_file *ndzfrom, struct ndz_file *ndzto);
 void ndz_reloc_free(struct ndz_file *ndz);
 
 struct ndz_rangemap *ndz_readhashinfo(struct ndz_file *ndz, char *sigfile);

@@ -12,11 +12,11 @@
 #
 # II. More advanced:
 #
-# 4. lay down I1.ndz on a ramdisk and optionally verify against sig
-# 5. lay down I2.ndz on a ramdisk and optionally verify against sig
+# 4. lay down I1.ndz on a ramdisk and optionally verify against sig [4]
+# 5. lay down I2.ndz on a ramdisk and optionally verify against sig [4]
 # 6. create an old school delta image (imagezip -D) I2.ddz from I2 disk, I1 sig
 # 7. compare sigs of I2.ddz I2.ddz.v2
-# 7a. if sigs don't compare [*], we compate I2.ddz.v2 against the I2 disk
+# 7a. if sigs don't compare [1], we compare I2.ddz.v2 against the I2 disk
 #
 # What we learn: imagezip and imagedelta delta creation are consistent.
 #
@@ -29,6 +29,19 @@
 #
 # What we learn: new format files can be loaded (imagezip), actual on-disk
 # contents are correct.
+#
+# What is left behind:
+#
+# I[12].ndz and I[12].ndz.sig:
+#    the original files we were working on.
+# I2.ddz.new and I2.ddz.new.sig (all phases):
+#    I2 delta image created with imagedelta.
+# I2.ddz and I2.ddz.sig (phase 2 and 3 only):
+#    I2 delta image created with imagezip from I2 disk and I1 signature.
+# I2.ndz.new and I2.ndz.new.sig (phase 3 only):
+#    full I2 image created with imageundelta
+# I2.ndz.clean and I2.ndz.clean.sig (phase 3 only):
+#    "clean" (-F 0) full I2 image recreated with imagezip from I2 disk.
 #
 # Footnotes:
 #
@@ -47,17 +60,20 @@
 #     garbage sectors from the original image. We perform the same
 #     comparison as in [2] instead.
 #
+# [4] A freshly unzipped image can has imagehash errors if the image has
+#     relocations.
+#
 my $TMPDIR = "/local/tmp";
 my $LOGDIR = "/local/logs";
 my @NEEDBINS = ("imagezip", "imageunzip", "imagehash", "imagedump",
     "imagedelta", "imageundelta");
 
-my $MAXPHASE = 2;
+my $MAXPHASE = 3;
 
 my $MAXSECTORS = (20 * 1024 * 1024 * 2);
 my $LVMSTRIPE = 6;
 
-my $checksig = 0;
+my $checksig = 1;
 my $cleanonfail = 0;
 
 my $os = `uname`;
@@ -90,7 +106,9 @@ if ($uid == 0) {
 }
 
 my $tstamp = time();
-print "Logs will be $LOGDIR/$tstamp.*.log ...\n";
+my $logfile = "$LOGDIR/testdelta.$tstamp.log";
+logit("Comparing '$ARGV[0]' and '$ARGV[1]'");
+logit("Log is $logfile");
 
 my %image1 = ( "name" => $ARGV[0] );
 my %image2 = ( "name" => $ARGV[1] );
@@ -102,11 +120,6 @@ $rv = phase2(\%image1, \%image2)
     if ($rv == 0 && $MAXPHASE > 1);
 $rv = phase3(\%image1, \%image2)
     if ($rv == 0 && $MAXPHASE > 2);
-
-if ($rv == 0) {
-    unmakedisk($image1{'name'}, $image1{'disk'});
-    unmakedisk($image2{'name'}, $image2{'disk'});
-}
 
 exit($rv);
 
@@ -142,21 +155,30 @@ sub phase1($$)
     logit("START image2 delta creation");
 again:
     if (mysystem("$bindir/imagedelta -SVF $imagev1 $imagev2 $delta.new", 0)) {
+	#
+	# The verification pass of imagedelta requires that any hash range
+	# falls completely in a single chunk or it has the magic high-bit
+	# set in the chunk number. We apparently have some images where
+	# the high bit is not properly set, triggering a verification failure.
+	# To get around this, we regenerate the faulty signature file.
+	#
 	logit("  WARNING: could not generate delta image");
-	if (!$fixedsig) {
-	    logit("  recreating signature for $imagev2...");
-	    mysystem("mv $imagev2.sig $imagev2.bak.sig");
-	    if (!mysystem("$bindir/imagehash -qcX $imagev2")) {
-		logit("  validating new signature for $imagev2...");
-		if (!comparesigfiles("$imagev2.bak", $imagev2, 0)) {
-		    unlink("$imagev2.bak.sig");
+	if ($fixedsig < 2) {
+	    my $nimage = ($fixedsig ? $imagev2 : $imagev1);
+
+	    logit("  recreating signature for $nimage...");
+	    mysystem("mv $nimage.sig $nimage.bak.sig");
+	    if (!mysystem("$bindir/imagehash -qcX $nimage")) {
+		logit("  validating new signature for $nimage...");
+		if (!comparesigfiles("$nimage.bak", $nimage, 0)) {
+		    unlink("$nimage.bak.sig");
 		    logit("RESTART image2 delta creation");
-		    $fixedsig = 1;
+		    $fixedsig++;
 		    goto again;
 		}
-		unlink("$imagev2.sig");
+		unlink("$nimage.sig");
 	    }
-	    mysystem("mv $imagev2.bak.sig $imagev2.sig");
+	    mysystem("mv $nimage.bak.sig $nimage.sig");
 	}
 	logit("FAILED image2 delta creation");
 	return 1;
@@ -211,15 +233,15 @@ sub phase2($$)
     }
     logit("END unzip of image1");
 
-    logit("START signature check of image1 on disk");
     if ($checksig) {
-	if (mysystem("$bindir/imagehash -qX $imagev1 $devv1")) {
+	logit("START signature check of image1 on disk");
+	if (comparesigtodisk($imagev1, $devv1)) {
 	    logit("FAILED signature check of image1 on disk");
 	    unmakedisk($imagev1, $devv1) if ($cleanonfail);
 	    return 1;
 	}
+	logit("END signature check of image1 on disk");
     }
-    logit("END signature check of image1 on disk");
 
     logit("START unzip of image2");
     my ($devv2,$ssizev2) = unzipimage($imagev2);
@@ -230,25 +252,25 @@ sub phase2($$)
     }
     logit("END unzip of image2");
 
-    logit("START signature check of image2 on disk");
     if ($checksig) {
-	if (mysystem("$bindir/imagehash -qX $imagev2 $devv2")) {
+	logit("START signature check of image2 on disk");
+	if (comparesigtodisk($imagev2, $devv2)) {
 	    logit("FAILED signature check of image2 on disk");
 	    unmakedisk($imagev2, $devv2) if ($cleanonfail);
 	    unmakedisk($imagev1, $devv1) if ($cleanonfail);
 	    return 1;
 	}
+	logit("END signature check of image2 on disk");
     }
-    logit("END signature check of image2 on disk");
 
-    logit("START create delta of image2 from disk with imagezip");
-    if (zipimage("$delta.old", "$imagev1.sig", $devv2, $ssizev2)) {
-	logit("FAILED create delta of image2 from disk with imagezip");
+    logit("START create imagezip delta of image2 from disk");
+    if (zipimage($delta, "$imagev1.sig", $devv2, $ssizev2)) {
+	logit("FAILED create imagezip delta of image2 from disk");
 	unmakedisk($imagev2, $devv2) if ($cleanonfail);
 	unmakedisk($imagev1, $devv1) if ($cleanonfail);
 	return 1;
     }
-    logit("END create delta of image2 from disk with imagezip");
+    logit("END create imagezip delta of image2 from disk");
 
     #
     # Hashmaps for delta images produced by imagezip are less than
@@ -259,11 +281,11 @@ sub phase2($$)
     if (-e "$delta.new") {
 	logit("START image sigfile compare for deltas");
 	# returns -1 if files are missing
-	my $rv = comparesigfiles("$delta.old", "$delta.new", 0);
+	my $rv = comparesigfiles($delta, "$delta.new", 0);
 	if ($rv > 0) {
 	    logit("  WARNING: delta signature mismatch, ".
 		  "comparing new sig with image");
-	    $rv = mysystem("$bindir/imagehash -q -o $delta.new.sig $devv2");
+	    $rv = comparesigtodisk("$delta.new", $devv2);
 	    if ($rv) {
 		logit("  *** $delta.new.sig is bad!");
 	    }
@@ -276,8 +298,6 @@ sub phase2($$)
 	}
 	logit("END image sigfile compare for deltas");
     }
-
-    unlink("$delta.old", "$delta.old.sig");
 
     $image1->{'disk'} = $devv1;
     $image2->{'disk'} = $devv2;
@@ -313,13 +333,151 @@ sub phase3($$)
 	return 1;
     }
 
-    logit("START unzip of delta.new to image1");
+    logit("START unzip of delta.new onto image1 disk");
 
-    if (applydelta($imagev1, $devv1)) {
-	logit("FAILED unzip of delta.new to image1");
+    if (applydelta("$delta.new", $devv1)) {
+	logit("FAILED unzip of delta.new onto image1 disk");
 	return 1;
     }
-    logit("END unzip of delta.new to image1");
+    logit("END unzip of delta.new onto image1 disk");
+
+    logit("START clean zip of image1+delta disk");
+    if (zipimage("$imagev2.fromdelta", undef, $devv1, $ssizev1, "-F 0 -x")) {
+	logit("FAILED clean zip of image1+delta disk");
+	return 1;
+    }
+    logit("END clean zip of image1+delta disk");
+
+    logit("START clean zip of image2 disk");
+    if (zipimage("$imagev2.fromold", undef, $devv2, $ssizev2, "-F 0 -x")) {
+	logit("FAILED clean zip of image2 disk");
+	return 1;
+    }
+    logit("END clean zip of image2 disk");
+
+    logit("START compare image1+delta to image2 contents");
+    if (compareimages("$imagev2.fromdelta", "$imagev2.fromold", 0)) {
+	logit("FAILED compare image1+delta to image2 contents");
+	return 1;
+    }
+    logit("END compare image1+delta to image2 contents");
+
+    # done with image1 disk
+    unlink("$imagev2.fromdelta", "$imagev2.fromdelta.sig");
+    unmakedisk($imagev1, $devv1);
+
+    logit("START unzip of image2.new");
+    my $imagev3 = "$imagev2.new";
+    my ($devv3,$ssizev3) = unzipimage($imagev3);
+    if (!$devv3) {
+	logit("FAILED unzip of image2.new");
+	return 1;
+    }
+    logit("END unzip of image2.new");
+
+    if ($checksig) {
+	logit("START signature check of image2.new on disk");
+	if (comparesigtodisk($imagev3, $devv3)) {
+	    logit("FAILED signature check of image2.new on disk");
+	    unmakedisk($imagev3, $devv3) if ($cleanonfail);
+	    return 1;
+	}
+	logit("END signature check of image2.new on disk");
+    }
+
+    logit("START clean zip of image2.new disk");
+    if (zipimage("$imagev2.clean", undef, $devv3, $ssizev3, "-F 0 -x")) {
+	logit("FAILED clean zip of image2.new disk");
+	return 1;
+    }
+    logit("END clean zip of image2.new disk");
+
+    logit("START compare image2 to image2.new contents");
+    if (compareimages("$imagev2.fromold", "$imagev2.clean", 0)) {
+	logit("FAILED compare image2 to image2.new contents");
+	return 1;
+    }
+    logit("END compare image2 to image2.new contents");
+
+    # done with all disks
+    unmakedisk($imagev2, $devv2);
+    unlink("$imagev2.fromold", "$imagev2.fromold.sig");
+    unmakedisk($imagev3, $devv3);
+
+    return 0;
+}
+
+#
+# Compare two images files.
+#
+# $how == 1: cmp the image files themselves (strongest)
+# $how == 2: imageunzip -I the files, compare the streams
+# $how == 4: dump and compare the signatures (weakest)
+#
+# $how == 0: try all three in order, return 0 if any succeed.
+#
+sub compareimages($$;$)
+{
+    my ($image1,$image2,$how) = @_;
+
+    if (!$how || $how == 1) {
+	if (!mysystem("cmp $image1 $image2")) {
+	    return 0;
+	}
+	print "  WARNING: image file comparison fails, trying image stream\n"
+	    if (!$how);
+    }
+    if (!$how || $how == 2) {
+	if (!mysystem("$bindir/imageunzip -I $image1 - > $image1.raw") &&
+	    !mysystem("$bindir/imageunzip -I $image2 - > $image2.raw") &&
+	    !mysystem("cmp $image1.raw $image2.raw")) {
+	    unlink("image1.raw", "image2.raw");
+	    return 0;
+	}
+	unlink("image1.raw", "image2.raw");
+	print "  WARNING: image stream comparison fails, trying image signature\n"
+	    if (!$how);
+    }
+    if (!$how || $how == 3) {
+	if (!comparesigfiles($image1, $image2, 0)) {
+	    return 0;
+	}
+	print "  *** image signature comparison fails, images are not the same!\n"
+	    if (!$how);
+    }
+
+    return 1;
+}
+
+sub sigcheck($)
+{
+    my $image = shift;
+
+    if (! -e "$image") {
+	print "  *** $image does not exist\n";
+	return 1;
+    }
+    if (! -e "$image.sig") {
+	print "  *** $image signature does not exist\n";
+	return 1;
+    }
+
+    if ($checksig) {
+	if (mysystem("$bindir/imagehash -qSX $image")) {
+	    print "  *** $image signature did not check\n";
+	    return 1;
+	}
+
+	# gen a new format sig file and compare
+	if (mysystem("$bindir/imagehash -qcX -o ${image}foo.sig $image")) {
+	    print "  *** could not generate signature for $image\n";
+	    return 1;
+	}
+	if (comparesigfiles($image, "${image}foo", 1)) {
+	    print "  *** new signature for $image does not match old\n";
+	    return 1;
+	}
+    }
 
     return 0;
 }
@@ -329,16 +487,20 @@ sub comparesigfiles($$$)
     my ($image1,$image2,$bitchnmoan) = @_;
 
     if (mysystem("$bindir/imagehash -RTq -o $image1.sig > $image1.sig.txt")) {
-	print "$image1: could not dump signature\n";
+	print "  *** could not dump signature for $image1\n";
 	return -1;
     }
     if (mysystem("$bindir/imagehash -RTq -o $image2.sig > $image2.sig.txt")) {
-	print "$image2: could not dump signature\n";
+	print "  *** could not dump signature for $image2\n";
 	return -1;
     }
     if (mysystem("diff -q $image1.sig.txt $image2.sig.txt", 1)) {
-	print "*** signatures differ (diff $image1.sig.txt $image2.sig.txt)\n"
-	    if ($bitchnmoan);
+	if ($bitchnmoan) {
+	    print "  *** signatures for $image1 and $image2 differ ".
+		"(diff $image1.sig.txt $image2.sig.txt)\n";
+	} else {
+	    unlink("$image1.sig.txt", "$image2.sig.txt");
+	}
 	return 1;
     }
 
@@ -346,42 +508,28 @@ sub comparesigfiles($$$)
     return 0;
 }
 
-sub sigcheck($)
+sub comparesigtodisk($$)
 {
-    my $image = shift;
+    my ($image,$dev) = @_;
 
-    if (! -e "$image") {
-	print STDERR "$image: does not exist\n";
-	return 1;
-    }
-    if (! -e "$image.sig") {
-	print STDERR "$image: signature does not exist\n";
-	return 1;
-    }
-
-    if ($checksig) {
-	if (mysystem("$bindir/imagehash -qSX $image")) {
-	    print "$image: signature did not check\n";
+    if (mysystem("sudo $bindir/imagehash -q $image $dev", 1)) {
+	#
+	# XXX imagehash can fail if the image has relocations.
+	#
+	if (imagerelocs($image) == 0) {
+	    print "  *** signature check of $image on $dev failed\n";
 	    return 1;
 	}
-
-	# gen a new format sig file and compare
-	if (mysystem("$bindir/imagehash -qcX -o ${image}foo.sig $image")) {
-	    print "$image: could not generate signature\n";
-	    return 1;
-	}
-	if (comparesigfiles($image, "${image}foo", 1)) {
-	    print "$image: new signature does not match old\n";
-	    return 1;
-	}
+	print "  WARNING: signature check of $image on $dev failed,".
+	    " probably due to relocations; continuing\n";
     }
 
     return 0;
 }
 
-sub zipimage($$$$)
+sub zipimage($$$$;$)
 {
-    my ($image,$oldsig,$dev,$ssize) = @_;
+    my ($image,$oldsig,$dev,$ssize,$moreargs) = @_;
     my $iargs;
 
     $iargs = "-U $image.sig";
@@ -413,8 +561,12 @@ sub zipimage($$$$)
 	$iargs .= " -S 131 -c $ssize";
     }
 
+    if ($moreargs) {
+	$iargs .= " $moreargs";
+    }
+
     if (mysystem("sudo $bindir/imagezip $iargs $dev $image")) {
-	print "$image: imagezip failed\n";
+	print "  *** imagezip of $image to $dev failed\n";
 	return 1;
     }
 
@@ -433,15 +585,17 @@ sub unzipimage($)
     my $ssize = imagesize($image);
     my $dev = makedisk($image, $ssize);
     if (!$dev) {
-	print "$image: could not create disk with $ssize sectors\n";
+	print "  *** could not create disk with $ssize sectors\n";
 	return $dev;
     }
     # and load it
     if (mysystem("sudo $bindir/imageunzip -f $image $dev")) {
-	print "$image: could not unzip image to $dev\n";
+	print "  *** could not unzip $image to $dev\n";
 	unmakedisk($image, $dev) if ($cleanonfail);
 	return $dev;
     }
+
+    # optionally compare vs signature
 
     return ($dev,$ssize);
 }
@@ -452,7 +606,7 @@ sub applydelta($$)
 
     # load it
     if (mysystem("sudo $bindir/imageunzip -f $delta $dev")) {
-	print "$image: could not unzip delta image to $dev\n";
+	print "  *** could not unzip delta image $delta to $dev\n";
 	return 1;
     }
 
@@ -465,14 +619,14 @@ sub imagesize($)
 
     my @output = `$bindir/imagedump $image`;
     if ($?) {
-	print "$image: *** could not get size of image\n";
+	print "  *** could not get size of $image\n";
 	return 0;
     }
     foreach my $line (@output) {
 	chomp($line);
 	if ($line =~ /covered sector range: \[(\d+)-(\d+)\]/) {
 	    if ($1 != 0) {
-		print "$image: WARNING: image does not start at 0\n";
+		print "  WARNING: image does not start at 0\n";
 	    }
 	    $ssize = $2 + 1;
 	    last;
@@ -480,6 +634,25 @@ sub imagesize($)
     }
 
     return $ssize;
+}
+
+sub imagerelocs($)
+{
+    my $image = shift;
+
+    my @output = `$bindir/imagedump $image`;
+    if ($?) {
+	print "  *** could not get size of $image\n";
+	return 0;
+    }
+    foreach my $line (@output) {
+	chomp($line);
+	if ($line =~ /(\d+) relocations covering/) {
+	    return $1;
+	}
+    }
+
+    return 0;
 }
 
 sub makedisk($$)
@@ -492,7 +665,7 @@ sub makedisk($$)
     } elsif ($image =~ /([^\/]+)$/) {
 	$istr = $1;
     } else {
-	print "$image: *** could not parse '$image'\n";
+	print "  *** could not parse name '$image'\n";
 	return undef;
     }
 
@@ -501,10 +674,10 @@ sub makedisk($$)
 
     if ($os eq "Linux") {
 	if ($ssize > $MAXSECTORS) {
-	    print "$image: ERROR: image too large ($ssize) for ramdisk,".
+	    print "  WARNING: image $image too large ($ssize) for ramdisk,".
 		" using LV instead\n";
 	    if (mysystem("sudo lvcreate -i $LVMSTRIPE -L ${mb}m -n $istr emulab")) {
-		print STDERR "could not create LV\n";
+		print "  *** could not create LV for $image\n";
 		return undef;
 	    }
 	    return "/dev/emulab/$istr";
@@ -519,7 +692,7 @@ sub makedisk($$)
 	#
 	my $mountpoint = "/mnt/$istr";
 	if (!mkdir($mountpoint)) {
-	    print STDERR "could not make mountpoint $mountpoint\n";
+	    print "  *** could not make mountpoint $mountpoint\n";
 	    return undef;
 	}
 	if (mysystem("sudo mount -t tmpfs -o size=${mb}m tmpfs $mountpoint")) {
@@ -540,7 +713,7 @@ sub makedisk($$)
 	    return undef;
 	}
     } else {
-	print STDERR "Cannot do this under $os yet\n";
+	print "  *** cannot do this under $os yet\n";
     }
 
     return $dev;
@@ -560,19 +733,19 @@ sub unmakedisk($$)
     } elsif ($image =~ /([^\/]+)$/) {
 	$istr = $1;
     } else {
-	print "$image: *** could not parse '$image'\n";
+	print "  *** could not parse name '$image'\n";
 	return undef;
     }
 
     if ($dev eq "/dev/emulab/$istr") {
 	if (mysystem("sudo lvremove -f emulab/$istr")) {
-	    print STDERR "$image: could not destroy LV\n";
+	    print "  *** could not destroy LV emulab/$istr\n";
 	    return -1;
 	}
     } elsif (mysystem("sudo losetup -d $dev") ||
 	     mysystem("sudo umount /mnt/$istr") ||
 	     !rmdir("/mnt/$istr")) {
-	print STDERR "$image: could not tear down ramdisk\n";
+	print "  *** could not tear down ramdisk ($dev on /mnt/$istr)\n";
 	return -1;
     }
     return 0;
@@ -581,7 +754,6 @@ sub unmakedisk($$)
 sub mysystem($;$)
 {
     my ($cmd,$quiet) = @_;
-    my $logfile = "$LOGDIR/testdelta.$tstamp.log";
     my $now = localtime();
     my $redir;
 
@@ -597,7 +769,7 @@ sub mysystem($;$)
     }
     if (system("$cmd $redir")) {
 	my $stat = $?;
-	print STDERR "*** '$cmd' failed, see '$logfile'\n"
+	print "*** '$cmd' failed, see '$logfile'\n"
 	    if (!$quiet);
 	return $stat;
     }
@@ -608,7 +780,8 @@ sub mysystem($;$)
 sub logit($)
 {
     my $msg = shift;
+    my $pid = $$;
 
     my $elapsed = int(time() - $tstamp);
-    printf "+%03d: %s\n", $elapsed, $msg;
+    printf "%05d: +%03d: %s\n", $pid, $elapsed, $msg;
 }
