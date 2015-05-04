@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2004, 2009 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -170,7 +170,8 @@ fixup_lilo(int slice, int stype, u_int32_t start, u_int32_t size,
 		/*
 		 * Check for aliases which produce a map entry pointing
 		 * to the same sectors as the original.  We don't want to
-		 * relocate those sectors multiple times!
+		 * relocate those sectors multiple times! But we do need
+		 * to relocate the pointers.
 		 */
 		s0 = getsector(&ip->start);
 		for (a_ip = dtab.idtab.images; a_ip < ip; a_ip++) {
@@ -179,14 +180,6 @@ fixup_lilo(int slice, int stype, u_int32_t start, u_int32_t size,
 			a_s0 = getsector(&a_ip->start);
 			if (s0 == a_s0)
 				break;
-		}
-		if (a_ip < ip) {
-			if (debug > 1)
-				fprintf(stderr, "  LILO parse: "
-					"skipping %s (alias for %s)\n",
-					ip->name, a_ip->name);
-			ip++;
-			continue;
 		}
 
 		/*
@@ -202,7 +195,14 @@ fixup_lilo(int slice, int stype, u_int32_t start, u_int32_t size,
 		}
 		fixup_sector(FOFFSET(poff, struct idtab, images[i].start),
 			     &ip->start);
-		fixup_map(infd, s0);
+
+		if (a_ip < ip) {
+			if (debug > 1)
+				fprintf(stderr, "  LILO parse: "
+					"skipping %s (alias for %s)\n",
+					ip->name, a_ip->name);
+		} else
+			fixup_map(infd, s0);
 
 		ip++;
 	}

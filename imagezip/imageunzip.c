@@ -2227,6 +2227,7 @@ reloc_lilo(void *addr, int reloctype, uint32_t size)
 		if (sector == 0)
 			break;
 		sector += outputminsec;
+		assert(outputmaxsec == 0 || sector <= outputmaxsec);
 		putsector(sect, sector, sect->device, sect->nsect);
 		sect++;
 	}
