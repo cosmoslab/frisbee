@@ -415,7 +415,7 @@ applydelta(struct ndz_rangemap *bmap, struct ndz_range *brange, void *arg)
 #endif
 	/* base range */
 	if (baddr < daddr) {
-	    if (daddr < beaddr) {
+	    if (daddr <= beaddr) {
 		if (addmmrange(mmap, baddr, daddr-1, 1,
 			       (uintptr_t)brange->data))
 		    goto fail;
