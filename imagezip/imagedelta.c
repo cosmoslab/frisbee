@@ -957,6 +957,7 @@ main(int argc, char **argv)
 	ndz_close(delta.ndz);
 
 	setfiletime(argv[2], argv[1]);
+	setfiletime(delta.sigfile, argv[1]);
     } else {
 	fprintf(stderr, "Images %s and %s are identical, no delta produced!\n",
 		argv[0], argv[1]);
