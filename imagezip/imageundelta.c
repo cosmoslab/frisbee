@@ -292,10 +292,11 @@ readifile(struct fileinfo *info, int usesig)
 	    }
 	    if (ssects - isects == 0) {
 		fprintf(stderr,
-			"%s: signature exactly matches image.\nEither image "
-			"is not a delta or signature is not complete.\n",
+			"%s: WARNING: delta signature exactly matches image.\n"
+			"Either delta is really a full image or "
+			"signature is not for a full image.\n",
 			ndz_filename(info->ndz)); 
-		exit(1);
+		return;
 	    }
 	    if (debug)
 		fprintf(stderr, "sig covers %lu more sectors than in image\n",
@@ -333,7 +334,7 @@ addmmrange(struct ndz_rangemap *mmap, ndz_addr_t addr, ndz_addr_t eaddr,
     mdata->frombase = frombase;
     mdata->chunkno = chunkno;
 #ifdef APPLYDELTA_DEBUG
-    fprintf(stderr, "  adding %s range [%lu-%lu]:\n",
+    fprintf(stderr, "  adding %s range [%lu-%lu]\n",
 	    frombase ? "base" : "delta", addr, eaddr);
 #endif
     if (ndz_rangemap_alloc(mmap, addr, eaddr - addr + 1, mdata)) {
@@ -387,9 +388,7 @@ applydelta(struct ndz_rangemap *bmap, struct ndz_range *brange, void *arg)
     if (drange == NULL || daddr > beaddr) {
 	if (addmmrange(mmap, baddr, beaddr, 1, (uintptr_t)brange->data))
 	    goto fail;
-	state->dmapnext = drange;
-	state->dmapaddr = daddr;
-	return 0;
+	goto done;
     }
 
     /*
@@ -446,6 +445,27 @@ applydelta(struct ndz_rangemap *bmap, struct ndz_range *brange, void *arg)
 		goto fail;
 	    baddr = beaddr + 1;
 	    daddr = baddr;
+	}
+    }
+
+ done:
+    /*
+     * This is the final base map entry, must add everything else
+     * from the delta map.
+     */
+    if (brange->next == NULL && drange != NULL) {
+#ifdef APPLYDELTA_DEBUG
+	fprintf(stderr, " base finished, adding remaining delta"
+		" starting at [%lu-%lu]\n", daddr, deaddr);
+#endif
+	while (drange) {
+	    if (addmmrange(mmap, daddr, deaddr, 0, (uintptr_t)drange->data))
+		goto fail;
+	    if (drange->next) {
+		daddr = drange->next->start;
+		deaddr = drange->next->end;
+	    }
+	    drange = drange->next;
 	}
     }
 
