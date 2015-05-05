@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -66,7 +66,7 @@ read_linuxslice(int slice, iz_type stype, iz_lba start, iz_size size,
 	 * Check for a LILO boot block and create relocations as necessary
 	 * (if the partition starts at 0, the values are already relative)
 	 */
-	if (dorelocs && start > 0 &&
+	if (dorelocs && (start > 0 || forcerelocs) &&
 	    fixup_lilo(slice, stype, start, size, sname, infd, &rval) != 0)
 		return 1;
 

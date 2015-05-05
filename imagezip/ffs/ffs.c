@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -254,8 +254,8 @@ _read_bsdslice(int slice, iz_type bsdtype, iz_lba start, iz_size size,
 	 * Note that event if partitions were relative (absoffset == 0) we
 	 * have converted the value in dlabel to absolute by this point.
 	 */
-	if (dorelocs &&
-	    start != 0 && dlabel.label.d_partitions[0].p_offset == start) {
+	if (dorelocs && (start > 0 || forcerelocs) &&
+	    dlabel.label.d_partitions[0].p_offset == start) {
 		for (i = 0; i < npart; i++) {
 			if (dlabel.label.d_partitions[i].p_size == 0)
 				continue;

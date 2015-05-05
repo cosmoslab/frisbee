@@ -30,6 +30,7 @@ extern int slicemode;
 extern int dorelocs;
 extern int metaoptimize;
 extern int excludenonfs;
+extern int forcerelocs;
 
 extern off_t devlseek(int fd, off_t off, int whence);
 extern ssize_t devread(int fd, void *buf, size_t nbytes);
