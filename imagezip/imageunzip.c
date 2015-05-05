@@ -599,7 +599,7 @@ main(int argc, char *argv[])
 #ifdef NOTHREADS
 	nothreads = 1;
 #endif
-	while ((ch = getopt(argc, argv, "vdhs:zp:oOnFD:W:Cr:Na:ck:eu:fI")) != -1)
+	while ((ch = getopt(argc, argv, "vdhs:zp:oOnFD:W:Cr:Na:ck:eu:fIM:")) != -1)
 		switch(ch) {
 #ifdef FAKEFRISBEE
 		case 'F':
@@ -727,7 +727,10 @@ main(int argc, char *argv[])
 		case 'I':
 			ignoreskips++;
 			break;
-
+		/* set maxsector for error checking */
+		case 'M':
+			outputmaxsec = strtoul(optarg, NULL, 0);
+			break;
 		case 'h':
 		case '?':
 		default:
