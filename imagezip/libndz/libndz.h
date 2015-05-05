@@ -24,6 +24,8 @@
 #ifndef _LIBNDZ_H_
 #define	_LIBNDZ_H_
 
+//#define USE_CHUNKMAP
+
 #include "imagehdr.h"
 #include "imagehash.h"
 #include "rangemap.h"
@@ -38,6 +40,11 @@ struct ndz_hashdata {
     uint8_t hash[HASH_MAXSIZE];
 };
 
+struct ndz_bounds {
+    ndz_addr_t losect;
+    ndz_addr_t hisect;
+};
+
 struct ndz_file {
     int fd;
     int flags;
@@ -48,6 +55,11 @@ struct ndz_file {
     ndz_chunkno_t nchunks;
     ndz_addr_t maplo, maphi;
     struct ndz_rangemap *rangemap;
+#ifdef USE_CHUNKMAP
+    /* map of chunks to covered ranges */
+    ndz_chunkno_t chunkmapentries;
+    struct ndz_bounds *chunkmap;
+#endif
     /* chunk object info */
     ndz_chunk_t chunkobj;
     ndz_addr_t chunksect;

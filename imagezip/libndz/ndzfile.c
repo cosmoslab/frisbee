@@ -27,6 +27,7 @@
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
+#include <sys/stat.h>
 
 #include "libndz.h"
 
@@ -122,6 +123,10 @@ ndz_close(struct ndz_file *ndz)
 	    ndz_rangemap_deinit(ndz->hashmap);
 	if (ndz->rangemap)
 	    ndz_rangemap_deinit(ndz->rangemap);
+#ifdef USE_CHUNKMAP
+	if (ndz->chunkmap)
+	    free(ndz->chunkmap);
+#endif
 	if (ndz->fname)
 	    free(ndz->fname);
 	free(ndz);
@@ -204,6 +209,9 @@ ndz_readranges(struct ndz_file *ndz)
     int rv, i;
     ndz_chunkno_t chunkno;
     ndz_addr_t first = 0, last = 0;
+#ifdef USE_CHUNKMAP
+    struct stat sb;
+#endif
 
     if (ndz == NULL || (ndz->flags & NDZ_FILE_WRITE) != 0)
 	return NULL;
@@ -217,10 +225,35 @@ ndz_readranges(struct ndz_file *ndz)
 	return NULL;
     }
 
+#ifdef USE_CHUNKMAP
+    /*
+     * See if we can fstat the input so that we only have to do
+     * one allocation for the chunkmap.
+     */
+    if (fstat(ndz->fd, &sb) == 0 && sb.st_size > 0) {
+	ndz->chunkmapentries = (sb.st_size + CHUNKSIZE - 1) / CHUNKSIZE;
+	ndz->chunkmap = malloc(ndz->chunkmapentries *
+			       sizeof(ndz->chunkmap[0]));
+	if (ndz->chunkmap == NULL) {
+	    fprintf(stderr, "%s: could not allocate chunkmap\n",
+		    ndz->fname);
+	    ndz->chunkmapentries = 0;
+	    ndz_rangemap_deinit(map);
+	    return NULL;
+	}
+	fprintf(stderr, "allocated chunkmap of %d bytes\n",
+		ndz->chunkmapentries * sizeof(ndz->chunkmap[0]));
+    }
+#endif
+
     /*
      * Read the header of each chunk adding regions to the map.
      */
     for (chunkno = 0; ; chunkno++) {
+#ifdef USE_CHUNKMAP
+	ndz_addr_t clo, chi = 0;
+#endif
+
 	rv = ndz_readchunkheader(ndz, chunkno, &head);
 	if (rv)
 	    return NULL;
@@ -233,6 +266,10 @@ ndz_readranges(struct ndz_file *ndz)
 	    if (chunkno == 0)
 		first = hdr->firstsect;
 	    last = hdr->lastsect;
+#ifdef USE_CHUNKMAP
+	    clo = hdr->firstsect;
+	    chi = hdr->lastsect;
+#endif
 	}
 
 	/* get the regions */
@@ -243,6 +280,11 @@ ndz_readranges(struct ndz_file *ndz)
 		if (chunkno == 0)
 		    first = (ndz_addr_t)reg->start;
 		last = (ndz_addr_t)reg->start + (ndz_size_t)reg->size - 1;
+#ifdef USE_CHUNKMAP
+		if (i == 0)
+		    clo = (ndz_addr_t)reg->start;
+		chi = last;
+#endif
 	    }
 	    rv = ndz_rangemap_alloc(map,
 				    (ndz_addr_t)reg->start,
@@ -259,11 +301,36 @@ ndz_readranges(struct ndz_file *ndz)
 	    reg++;
 	}
 
+#ifdef USE_CHUNKMAP
+	if (chunkno >= ndz->chunkmapentries) {
+	    assert(chunkno == ndz->chunkmapentries);
+	    ndz->chunkmap = realloc(ndz->chunkmap,
+				    (chunkno+1)*sizeof(ndz->chunkmap[0]));
+	    if (ndz->chunkmap == NULL) {
+		fprintf(stderr, "%s: could not allocate chunkmap entry\n",
+			ndz->fname);
+		ndz->chunkmapentries = 0;
+		ndz_rangemap_deinit(map);
+		return NULL;
+	    }
+	    ndz->chunkmapentries = chunkno + 1;
+	}
+	ndz->chunkmap[chunkno].losect = clo;
+	ndz->chunkmap[chunkno].hisect = chi;
+#endif
+
 	/* get the relocations */
 	if (head.reloc) {
 	    if (ndz_reloc_get(ndz, head.header, head.reloc) != 0) {
 		fprintf(stderr, "%s: could not add relocations\n",
 			ndz->fname);
+#ifdef USE_CHUNKMAP
+		if (ndz->chunkmap) {
+		    free(ndz->chunkmap);
+		    ndz->chunkmap = NULL;
+		    ndz->chunkmapentries = 0;
+		}
+#endif
 		ndz_rangemap_deinit(map);
 		return NULL;
 	    }

@@ -33,6 +33,7 @@
 
 //#define CHUNK_DEBUG
 
+#ifndef USE_CHUNKMAP
 /*
  * Find the first range for a particular chunk.
  *
@@ -56,6 +57,7 @@ findchunk(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
     }
     return 0;
 }
+#endif
 
 /*
  * Read uncompessed data from an imagefile.
@@ -70,7 +72,6 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
     struct ndz_range *range, *crange;
     ndz_chunkno_t chunkno, lchunkno;
     ndz_chunk_t chunk;
-    struct fcarg fcarg;
     ssize_t rbytes, cc;
 
     if (ndz->rangemap == NULL && ndz_readranges(ndz) == NULL) {
@@ -101,7 +102,8 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
     ndz->chunkuses++;
 #endif
     chunk = ndz->chunkobj;
-    if (chunk && ndz_chunk_chunkno(chunk) == chunkno && ndz->chunksect <= ssect) {
+    if (chunk && ndz_chunk_chunkno(chunk) == chunkno &&
+	ndz->chunksect <= ssect) {
 #ifdef CHUNK_DEBUG
 	fprintf(stderr, "%s: reusing chunk %d object, sect=%ld\n",
 		ndz->fname, chunkno, ndz->chunksect);
@@ -152,13 +154,26 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
 	    }
 	}
 
-	/* note: chunk numbers are 1-based in range map */
-	fcarg.in_chunkno = chunkno + 1;
-	fcarg.out_range = NULL;
-	(void) ndz_rangemap_iterate(ndz->rangemap, findchunk, &fcarg);
-	crange = fcarg.out_range;
+#ifdef USE_CHUNKMAP
+	assert(chunkno < ndz->chunkmapentries);
+	csect = ndz->chunkmap[chunkno].losect;
+	crange = ndz_rangemap_lookup(ndz->rangemap, csect, NULL);
 	assert(crange != NULL);
-	csect = ndz->chunksect = crange->start;
+	assert(crange->start == csect);
+#else
+	{
+	    struct fcarg fcarg;
+
+	    /* note: chunk numbers are 1-based in range map */
+	    fcarg.in_chunkno = chunkno + 1;
+	    fcarg.out_range = NULL;
+	    (void) ndz_rangemap_iterate(ndz->rangemap, findchunk, &fcarg);
+	    crange = fcarg.out_range;
+	    assert(crange != NULL);
+	    csect = crange->start;
+	}
+#endif
+	ndz->chunksect = csect;
 #ifdef CHUNK_DEBUG
 	fprintf(stderr, "%s: (re)opened chunk %d object, sect=%ld\n",
 		ndz->fname, chunkno, ndz->chunksect);
