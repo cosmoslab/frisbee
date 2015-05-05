@@ -98,6 +98,7 @@ int	forcereads= 0;
 int	badsectors= 0;
 int	retrywrites= 1;
 int	dorelocs  = 1;
+int	forcerelocs = 0;
 int	metaoptimize = 0;
 int	filemode  = 0;
 int	excludenonfs = 0;
@@ -404,7 +405,7 @@ main(int argc, char *argv[])
 	memset(imageid, '\0', UUID_LENGTH);
 
 	gettimeofday(&sstamp, 0);
-	while ((ch = getopt(argc, argv, "vlbnNdihrs:c:z:ofI:13F:DR:S:XxH:U:P:Me:k:u:a:Z")) != -1)
+	while ((ch = getopt(argc, argv, "vlbnNdihrs:c:z:ofI:13F:DR:S:XxH:U:P:Me:k:u:a:ZL")) != -1)
 		switch(ch) {
 		case 'v':
 			version++;
@@ -424,6 +425,9 @@ main(int argc, char *argv[])
 			break;
 		case 'b':
 			slicetype = IZTYPE_FBSDNOLABEL;
+			break;
+		case 'L':
+			forcerelocs = 1;
 			break;
 		case 'N':
 			dorelocs = 0;
@@ -645,6 +649,9 @@ main(int argc, char *argv[])
 
 	if (!slicemode && !filemode && dorelocs)
 		dorelocs = 0;
+
+	if (forcerelocs && !dorelocs)
+		dorelocs = 1;
 
 	infilename = argv[0];
 	if (strcmp(infilename, "-")) {
