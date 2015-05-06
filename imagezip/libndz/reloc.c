@@ -143,35 +143,41 @@ ndz_reloc_put(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
 }
 
 /*
- * Returns 1 if there is a relocation in the indicated range, 0 otherwise
+ * Returns the number of relocations in the indicated range, 0 otherwise
+ * If size is zero, count til the end.
  */
 int
 ndz_reloc_inrange(struct ndz_file *ndz, ndz_addr_t addr, ndz_size_t size)
 {
     struct blockreloc *relocdata;
     ndz_addr_t eaddr;
-    int i;
+    int i, nreloc = 0;
 
     assert(ndz != NULL);
 
-    eaddr = addr + size - 1;
+    if (size == 0)
+	eaddr = (ndz->relochi > addr) ? ndz->relochi : addr;
+    else
+	eaddr = addr + size - 1;
     if (ndz->relocentries == 0 || addr > ndz->relochi || eaddr < ndz->reloclo)
 	return 0;
 
     relocdata = ndz->relocdata;
     for (i = 0; i < ndz->relocentries; i++) {
 	assert(relocdata->sectoff + relocdata->size <= ndz->sectsize);
+	if (relocdata->sector > eaddr)
+	    break;
 	if (relocdata->sector >= addr && relocdata->sector <= eaddr) {
-#ifdef RELOC_DEBUG
-	    fprintf(stderr, "found a reloc (%u) in range [%lu-%lu]\n",
-		    relocdata->sector, addr, eaddr);
-#endif
-	    return 1;
+	    nreloc++;
 	}
 	relocdata++;
     }
-
-    return 0;
+#ifdef RELOC_DEBUG
+    if (nreloc)
+	fprintf(stderr, "found %d relocs in range [%lu-%lu]\n",
+		nreloc, addr, eaddr);
+#endif
+    return nreloc;
 }
 
 /*

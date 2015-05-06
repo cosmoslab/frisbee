@@ -290,16 +290,17 @@ struct chunkstate {
     ndz_chunkno_t chunkno;
     unsigned char *chunkdatabuf;
     blockhdr_t *header;
+    uint32_t headerleft;
     struct region *region;
     struct region *curregion;
 };
 
 static int
-initnewchunk(struct chunkstate *cstate)
+initnewchunk(struct chunkstate *cstate, struct ndz_file *ndz)
 {
     struct blockhdr_V2 *hdr;
 
-    cstate->chunkobj = ndz_chunk_create(new.ndz, cstate->chunkno, clevel);
+    cstate->chunkobj = ndz_chunk_create(ndz, cstate->chunkno, clevel);
     if (cstate->chunkobj == NULL) {
 	fprintf(stderr, "Error creating chunk %u\n", cstate->chunkno);
 	return 1;
@@ -366,10 +367,21 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	    return 1;
 	}
 	cstate->chunkno = 0;
-	if (initnewchunk(cstate) != 0)
+	if (initnewchunk(cstate, new.ndz) != 0)
 	    return 1;
 	cstate->header->firstsect = rstart;
 	cstate->curregion->start = rstart;
+	cstate->headerleft = cstate->header->regionsize;
+	if (new.ndz->relocentries > 0) {
+	    /*
+	     * Account for relocations.
+	     * XXX we don't know how many relocs will wind up in this chunk
+	     * so we have to assume that all remaining ones will.
+	     */
+	    cstate->headerleft -=
+		(ndz_reloc_inrange(new.ndz, rstart, 0) *
+		 sizeof(struct blockreloc));
+	}
     }
 
     /*
@@ -486,12 +498,15 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	    size_t wbytes, chunkremaining;
 
 	    chunkremaining = ndz_chunk_left(cstate->chunkobj);
-	    if (chunkremaining < new.ndz->sectsize) {
+	    if (chunkremaining < new.ndz->sectsize ||
+		cstate->headerleft < sizeof(struct region)) {
 		/* switch to new chunk */
 #ifdef CHUNKIFY_DEBUG
-		fprintf(stderr, "    chunk %u full (%lu bytes), writing...\n",
+		fprintf(stderr,
+			"    chunk %u full (%lu bytes, %u header), writing\n",
 			cstate->chunkno,
-			(unsigned long)ndz_chunk_datasize(cstate->chunkobj));
+			(unsigned long)ndz_chunk_datasize(cstate->chunkobj),
+			cstate->header->regionsize - cstate->headerleft);
 #endif
 
 		/* finalize the header */
@@ -519,10 +534,15 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		}
 
 		cstate->chunkno++;
-		if (initnewchunk(cstate) != 0)
+		if (initnewchunk(cstate, new.ndz) != 0)
 		    return 1;
 		cstate->header->firstsect = pstart;
 		cstate->curregion->start = pstart;
+		cstate->headerleft = cstate->header->regionsize;
+		if (new.ndz->relocentries > 0)
+		    cstate->headerleft -=
+			(ndz_reloc_inrange(new.ndz, pstart, 0) *
+			 sizeof(struct blockreloc));
 
 		/* keep track if this hash range spans chunks */
 		if (psize < hsize)
@@ -567,10 +587,13 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		cstate->curregion++;
 		cstate->curregion->start = pstart;
 		cstate->curregion->size = wsize;
+		cstate->headerleft -= sizeof(struct region);
 #ifdef CHUNKIFY_DEBUG
-		fprintf(stderr, "    new range entry [%u-%u]\n",
+		fprintf(stderr,
+			"    new range entry [%u-%u], %u header bytes left\n",
 			cstate->curregion->start,
-			cstate->curregion->start+cstate->curregion->size-1);
+			cstate->curregion->start+cstate->curregion->size-1,
+			cstate->headerleft);
 #endif
 	    }
 

@@ -342,6 +342,7 @@ struct chunkstate {
     ndz_chunkno_t chunkno;
     unsigned char *chunkdatabuf;
     blockhdr_t *header;
+    uint32_t headerleft;
     struct region *region;
     struct region *curregion;
     struct ndz_rangemap *verifysigmap;
@@ -424,6 +425,17 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	    return 1;
 	cstate->header->firstsect = rstart;
 	cstate->curregion->start = rstart;
+	cstate->headerleft = cstate->header->regionsize;
+	if (delta.ndz->relocentries > 0) {
+	    /*
+	     * Account for relocations.
+	     * XXX we don't know how many relocs will wind up in this chunk
+	     * so we have to assume that all remaining ones will.
+	     */
+	    cstate->headerleft -=
+		(ndz_reloc_inrange(delta.ndz, rstart, 0) *
+		 sizeof(struct blockreloc));
+	}
     }
 
     /*
@@ -531,12 +543,15 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	    size_t wbytes, chunkremaining;
 
 	    chunkremaining = ndz_chunk_left(cstate->chunkobj);
-	    if (chunkremaining < delta.ndz->sectsize) {
+	    if (chunkremaining < delta.ndz->sectsize ||
+		cstate->headerleft < sizeof(struct region)) {
 		/* switch to new chunk */
 #ifdef CHUNKIFY_DEBUG
-		fprintf(stderr, "    chunk %u full (%lu bytes), writing...\n",
+		fprintf(stderr,
+			"    chunk %u full (%lu bytes, %u header), writing\n",
 			cstate->chunkno,
-			(unsigned long)ndz_chunk_datasize(cstate->chunkobj));
+			(unsigned long)ndz_chunk_datasize(cstate->chunkobj),
+			cstate->header->regionsize - cstate->headerleft);
 #endif
 
 		/* finalize the header */
@@ -568,6 +583,11 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		    return 1;
 		cstate->header->firstsect = pstart;
 		cstate->curregion->start = pstart;
+		cstate->headerleft = cstate->header->regionsize;
+		if (delta.ndz->relocentries > 0)
+		    cstate->headerleft -=
+			(ndz_reloc_inrange(delta.ndz, pstart, 0) *
+			 sizeof(struct blockreloc));
 
 		/* keep track if this hash range spans chunks */
 		if (psize < hsize)
@@ -612,10 +632,13 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		cstate->curregion++;
 		cstate->curregion->start = pstart;
 		cstate->curregion->size = wsize;
+		cstate->headerleft -= sizeof(struct region);
 #ifdef CHUNKIFY_DEBUG
-		fprintf(stderr, "    new range entry [%u-%u]\n",
+		fprintf(stderr,
+			"    new range entry [%u-%u], %u header bytes left\n",
 			cstate->curregion->start,
-			cstate->curregion->start+cstate->curregion->size-1);
+			cstate->curregion->start+cstate->curregion->size-1,
+			cstate->headerleft);
 #endif
 	    }
 
