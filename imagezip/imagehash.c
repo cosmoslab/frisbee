@@ -1332,16 +1332,17 @@ fprintf(stderr, "HACK: failed: [%u-%u][%u-%u]\n", lreg->start, lreg->start+lreg-
 			}
 			/*
 			 * If this is the last piece of the last region
-			 * in a chunk and it is not a full hashblksize piece,
-			 * then stash it to see if it is a range that spans
-			 * chunks.
+			 * in a chunk and it does not end on a hashblksize
+			 * boundary, then stash it to see if it is a range
+			 * that spans chunks.
 			 */
-			if (hsize < hashblksize && rsize == hsize &&
-			    nreg + 1 == blockhdr->regioncount) {
+			if (rsize == hsize &&
+			    nreg + 1 == blockhdr->regioncount &&
+			    ((rstart + rsize) % hashblksizeinsec) != 0) {
 				size_t bytes = sectobytes(hsize);
 
 				lhash.region.start = rstart;
-				lhash.region.size = hsize;
+				lhash.region.size = rsize;
 				lhash.chunkno = chunkno;
 				(void)(*hashfunc)(rbuf->data, bytes,
 						  lhash.hash);
