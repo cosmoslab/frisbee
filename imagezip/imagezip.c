@@ -1319,6 +1319,95 @@ usage()
 	exit(1);
 }
 
+#ifdef TEST_RANGEMAP
+#include <libndz/rangemap.h>
+struct ndz_rangemap *rangemap;
+
+static void
+initmap(void)
+{
+	ndz_addr_t maplo, maphi;
+	int rv;
+
+	maplo = inputminsec;
+	maphi = inputmaxsec ? inputmaxsec : NDZ_HIADDR;
+	fprintf(stderr, "Initializing range map [%lu-%lu]\n", maplo, maphi);
+
+	rangemap = ndz_rangemap_init(maplo, maphi);
+	assert(rangemap != NULL);
+
+	/* consider everything allocated to start */
+	rv = ndz_rangemap_alloc(rangemap, maplo, maphi-maplo+1, NULL);
+	assert(rv == 0);
+}
+
+static void
+freerange(ndz_addr_t start, ndz_size_t size)
+{
+	int rv;
+
+	if (rangemap == NULL)
+		initmap();
+
+	rv = ndz_rangemap_dealloc(rangemap, start, size);
+	assert(rv == 0);
+}
+
+static void
+allocrange(ndz_addr_t start, ndz_size_t size)
+{
+	int rv;
+
+	if (rangemap == NULL)
+		initmap();
+	rv = ndz_rangemap_alloc(rangemap, start, size, NULL);
+	assert(rv == 0);
+}
+
+static int
+verifyfunc(struct ndz_rangemap *imap, struct ndz_range *range, void *arg)
+{
+	struct range **izrangep = arg;
+	struct range *izrange = *izrangep;
+	ndz_addr_t addr, eaddr, izaddr, izeaddr;
+
+	addr = range->start;
+	eaddr = range->end;
+
+	if (izrange == NULL) {
+		fprintf(stderr, "*** [%lu-%lu]: ran out of iz ranges!\n",
+			addr, eaddr);
+		return 1;
+	}
+	izaddr = izrange->start;
+	izeaddr = izaddr + izrange->size - 1;
+	if (addr != izaddr || eaddr != izeaddr) {
+		fprintf(stderr,
+			"*** [%lu-%lu]: does not match iz range [%lu-%lu]!\n",
+			addr, eaddr, izaddr, izeaddr);
+		return 1;
+	}
+
+	*izrangep = izrange->next;
+	return 0;
+}
+
+static void
+comparemap(int verbose)
+{
+	struct range *currange = ranges;
+
+	ndz_rangemap_dump(rangemap, verbose ? 0 : 1, NULL);
+
+	/* ranges should be 1-to-1 with map ranges */
+	if (ndz_rangemap_iterate(rangemap, verifyfunc, &currange))
+		fprintf(stderr, "*** Maps differ!\n");
+	if (currange != NULL)
+		fprintf(stderr, "*** More iz ranges starting at %u!\n",
+			currange->start);
+}
+#endif
+
 /*
  * Add a range of free space to skip
  */
@@ -1340,15 +1429,9 @@ addskip(uint32_t start, uint32_t size)
 	skip->next  = skips;
 	skips       = skip;
 	numskips++;
-#if 0
-	{
-		static FILE *sd;
-		if (sd == NULL) {
-			sd = fopen("/tmp/skips", "w");
-			fprintf(sd, "%lu %lu\n", inputminsec, inputmaxsec);
-		}
-		fprintf(sd, "d %u %u\n", start, start + size - 1);
-	}
+
+#ifdef TEST_RANGEMAP
+	freerange((ndz_addr_t)start, (ndz_size_t)size);
 #endif
 }
 
@@ -1374,6 +1457,10 @@ addvalid(uint32_t start, uint32_t size)
 	*lastvalid   = valid;
 	lastvalid    = &valid->next;
 	numranges++;
+
+#ifdef TEST_RANGEMAP
+	allocrange((ndz_addr_t)start, (ndz_size_t)size);
+#endif
 }
 
 void
@@ -1743,6 +1830,9 @@ dumpranges(int verbose)
 	fprintf(stderr,
 		"Total Number of Valid Sectors: %u (bytes %llu) in %d ranges\n",
 		(unsigned)total, (unsigned long long)sectobytes(total), nranges);
+#ifdef TEST_RANGEMAP
+	comparemap(verbose);
+#endif
 }
 
 /*

@@ -34,6 +34,8 @@ DISTFILES	= global.h imagehdr.h queue.h sliceinfo.h \
 
 EXPANDCOPYRIGHT	= /usr/site/lib/copyright/expand-copyr
 
+WITH_RANGEMAP	= 0
+
 #
 # At least support MBR partitioning
 #
@@ -226,6 +228,11 @@ SUBDIRCFLAGS	+= -DHASHSTATS
 SUBDIRS		+= hashmap
 ZIPLIBS		+= hashmap/libhashmap.a
 LIBS		+= -lcrypto $(PTHREADLIBS)
+endif
+
+ifeq ($(WITH_RANGEMAP),1)
+ZIPCFLAGS	+= -DTEST_RANGEMAP
+ZIPLIBS		+= libndz/libndz.a
 endif
 
 all:	$(PROGS)
