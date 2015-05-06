@@ -583,6 +583,7 @@ initnewchunk(struct chunkstate *cstate, struct ndz_file *ndz)
 
     cstate->region = (struct region *)(hdr + 1);
     cstate->curregion = cstate->region;
+    cstate->headerleft = hdr->regionsize - sizeof(blockhdr_t);
 
     return 0;
 }
@@ -638,17 +639,15 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	    return 1;
 	cstate->header->firstsect = rstart;
 	cstate->curregion->start = rstart;
-	cstate->headerleft = cstate->header->regionsize;
-	if (delta.ndz->relocentries > 0) {
-	    /*
-	     * Account for relocations.
-	     * XXX we don't know how many relocs will wind up in this chunk
-	     * so we have to assume that all remaining ones will.
-	     */
+	/*
+	 * Account for relocations.
+	 * XXX we don't know how many relocs will wind up in this chunk
+	 * so we have to assume that all remaining ones will.
+	 */
+	if (delta.ndz->relocentries > 0)
 	    cstate->headerleft -=
 		(ndz_reloc_inrange(new.ndz, rstart, 0) *
 		 sizeof(struct blockreloc));
-	}
     }
 
     /*
@@ -808,7 +807,6 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		    return 1;
 		cstate->header->firstsect = pstart;
 		cstate->curregion->start = pstart;
-		cstate->headerleft = cstate->header->regionsize;
 		if (delta.ndz->relocentries > 0)
 		    cstate->headerleft -=
 			(ndz_reloc_inrange(new.ndz, pstart, 0) *
