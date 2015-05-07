@@ -49,6 +49,7 @@ ndz_rangemap_init(ndz_addr_t lo, ndz_addr_t hi)
 	map->hiaddr = hi;
 	map->hint = &map->head.next;
 	map->gen = 1;
+	map->entries = 0;
 	map->sectors = 0;
     }
     return map;
@@ -130,6 +131,7 @@ ndz_rangemap_alloc(struct ndz_rangemap *map, ndz_addr_t addr, ndz_size_t size,
 		prev->end = next->end;
 		prev->next = next->next;
 		ndz_range_free(next);
+		map->entries--;
 	    }
 	    /* if hint currently points to prev, leave it */
 	    if (*map->hint != prev)
@@ -156,6 +158,7 @@ ndz_rangemap_alloc(struct ndz_rangemap *map, ndz_addr_t addr, ndz_size_t size,
     prev->next = range;
     map->hint = &prev->next;
     map->gen++;
+    map->entries++;
     map->sectors += size;
 
     return 0;
@@ -214,6 +217,7 @@ ndz_rangemap_dealloc(struct ndz_rangemap *map, ndz_addr_t addr, ndz_size_t size)
 	if (range->end == eaddr) {
 	    prev->next = range->next;
 	    ndz_range_free(range);
+	    map->entries--;
 	}
 	/* otherwise increment start of containing range */
 	else
@@ -249,6 +253,7 @@ ndz_rangemap_dealloc(struct ndz_rangemap *map, ndz_addr_t addr, ndz_size_t size)
     range->end = addr - 1;
     map->hint = &range->next;
     map->gen++;
+    map->entries++;
     map->sectors -= size;
 
     return 0;
@@ -340,6 +345,17 @@ ndz_rangemap_last(struct ndz_rangemap *map)
 	range = range->next;
 
     return range;
+}
+
+/*
+ * Return the number of entries in the map.
+ *
+ * Does not affect the map hint.
+ */
+ndz_size_t
+ndz_rangemap_entries(struct ndz_rangemap *map)
+{
+    return map->entries;
 }
 
 /*
@@ -529,8 +545,8 @@ ndz_rangemap_dump(struct ndz_rangemap *map, int summaryonly,
     unsigned long elements = 0;
     int nrange = 0;
 
-    printf("MAP: %p (hint=%p, gen=%lu, sectors=%lu)\n",
-	   map, map->hint, map->gen, map->sectors);
+    printf("MAP: %p (hint=%p, gen=%lu, entries=%lu, sectors=%lu)\n",
+	   map, map->hint, map->gen, map->entries, map->sectors);
     ndz_rangemap_dumpstats(map);
     for (range = map->head.next; range; range = range->next) {
 	if (!summaryonly) {
@@ -549,7 +565,8 @@ ndz_rangemap_dump(struct ndz_rangemap *map, int summaryonly,
 	elements += (range->end - range->start + 1);
 	nrange++;
     }
-    printf("\t%d ranges, %lu elements\n", nrange, elements);
+    assert(nrange == map->entries);
+    assert(elements == map->sectors);
 }
 
 #ifdef RANGEMAP_TEST

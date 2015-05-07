@@ -241,8 +241,10 @@ ndz_readranges(struct ndz_file *ndz)
 	    ndz_rangemap_deinit(map);
 	    return NULL;
 	}
+#if 0
 	fprintf(stderr, "allocated chunkmap of %lu bytes\n",
 		ndz->chunkmapentries * sizeof(ndz->chunkmap[0]));
+#endif
     }
 #endif
 

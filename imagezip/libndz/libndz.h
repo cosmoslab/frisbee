@@ -24,7 +24,7 @@
 #ifndef _LIBNDZ_H_
 #define	_LIBNDZ_H_
 
-//#define USE_CHUNKMAP
+#define USE_CHUNKMAP
 
 #include "imagehdr.h"
 #include "imagehash.h"
