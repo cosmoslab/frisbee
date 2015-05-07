@@ -645,7 +645,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	/* XXX should always be zero */
 	if (cstate->chunkno == 0)
 	    cstate->header->firstsect = 0;
-	cstate->header->lastsect = new.ndz->maphi;
+	cstate->header->lastsect = new.ndz->maphi + 1;
 
 	/* include any relocations */
 	if (new.ndz->relocentries > 0) {

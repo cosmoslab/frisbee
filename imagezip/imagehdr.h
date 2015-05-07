@@ -83,7 +83,7 @@ struct blockhdr_V2 {
 	int32_t		regioncount;	/* number of regions */
 	/* V2 follows */
 	uint32_t	firstsect;	/* first sector described by block */
-	uint32_t	lastsect;	/* last sector described by block */
+	uint32_t	lastsect;	/* first sector past block */
 	int32_t		reloccount;	/* number of reloc entries */
 };
 
@@ -120,7 +120,7 @@ struct blockhdr_V4 {
 	int32_t		regioncount;	/* number of regions */
 	/* V2 follows */
 	uint32_t	firstsect;	/* first sector described by block */
-	uint32_t	lastsect;	/* last sector described by block */
+	uint32_t	lastsect;	/* first sector past block */
 	int32_t		reloccount;	/* number of reloc entries */
 	/* V4 follows */
 	uint16_t	enc_cipher;	/* cipher was used to encrypt */
