@@ -651,7 +651,7 @@ read_bsdcg(struct fs *fsp, struct cg *cgp, int cg, u_int32_t offset)
 				fprintf(stderr, "                   ");
 
 			max = fsp->fs_ipg;
-#if 1
+#if 0
 			/*
 			 * Paranoia!
 			 */
