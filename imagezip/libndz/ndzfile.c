@@ -31,6 +31,8 @@
 
 #include "libndz.h"
 
+//#define CHUNKMAP_DEBUG
+
 struct ndz_file *
 ndz_open(const char *name, int forwrite)
 {
@@ -241,9 +243,10 @@ ndz_readranges(struct ndz_file *ndz)
 	    ndz_rangemap_deinit(map);
 	    return NULL;
 	}
-#if 0
-	fprintf(stderr, "allocated chunkmap of %lu bytes\n",
-		ndz->chunkmapentries * sizeof(ndz->chunkmap[0]));
+#ifdef CHUNKMAP_DEBUG
+	fprintf(stderr, "allocated chunkmap of %lu bytes for %u chunks\n",
+		ndz->chunkmapentries * sizeof(ndz->chunkmap[0]),
+		ndz->chunkmapentries);
 #endif
     }
 #endif
@@ -253,7 +256,7 @@ ndz_readranges(struct ndz_file *ndz)
      */
     for (chunkno = 0; ; chunkno++) {
 #ifdef USE_CHUNKMAP
-	ndz_addr_t clo, chi = 0;
+	ndz_addr_t clo = 0, chi = 0;
 #endif
 
 	rv = ndz_readchunkheader(ndz, chunkno, &head);
@@ -317,6 +320,9 @@ ndz_readranges(struct ndz_file *ndz)
 	    }
 	    ndz->chunkmapentries = chunkno + 1;
 	}
+#ifdef CHUNKMAP_DEBUG
+	fprintf(stderr, "chunkmap[%u]: [%lu-%lu]\n", chunkno, clo, chi);
+#endif
 	ndz->chunkmap[chunkno].losect = clo;
 	ndz->chunkmap[chunkno].hisect = chi;
 #endif

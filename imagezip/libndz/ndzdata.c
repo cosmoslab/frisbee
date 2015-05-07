@@ -32,6 +32,7 @@
 #include "libndz.h"
 
 //#define CHUNK_DEBUG
+//#define CHUNKMAP_DEBUG
 
 #ifndef USE_CHUNKMAP
 /*
@@ -73,6 +74,9 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
     ndz_chunkno_t chunkno, lchunkno;
     ndz_chunk_t chunk;
     ssize_t rbytes, cc;
+#ifdef USE_CHUNKMAP
+    struct ndz_range *prev;
+#endif
 
     if (ndz->rangemap == NULL && ndz_readranges(ndz) == NULL) {
 	fprintf(stderr, "%s could not read sector ranges\n", ndz->fname);
@@ -157,9 +161,21 @@ ndz_readdata(struct ndz_file *ndz, void *buf, ndz_size_t nsect, ndz_addr_t sect)
 #ifdef USE_CHUNKMAP
 	assert(chunkno < ndz->chunkmapentries);
 	csect = ndz->chunkmap[chunkno].losect;
-	crange = ndz_rangemap_lookup(ndz->rangemap, csect, NULL);
-	assert(crange != NULL);
-	assert(crange->start == csect);
+	crange = ndz_rangemap_lookup(ndz->rangemap, csect, &prev);
+	if (crange == NULL) {
+	    if (prev == NULL)
+		crange = ndz_rangemap_first(ndz->rangemap);
+	    else
+		crange = prev->next;
+	    assert(crange != NULL);
+	}
+	csect = crange->start;
+	assert(csect <= ndz->chunkmap[chunkno].hisect);
+#ifdef CHUNKMAP_DEBUG
+	fprintf(stderr, "lookup chunk %u range [%lu-%lu] returns %lu\n",
+		chunkno, ndz->chunkmap[chunkno].losect,
+		ndz->chunkmap[chunkno].hisect, csect);
+#endif
 #else
 	{
 	    struct fcarg fcarg;
