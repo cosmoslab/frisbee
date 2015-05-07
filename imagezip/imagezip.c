@@ -1397,6 +1397,11 @@ comparemap(int verbose)
 {
 	struct range *currange = ranges;
 
+	/* XXX adjust max */
+	if (inputmaxsec != 0)
+		ndz_rangemap_dealloc(rangemap, inputmaxsec,
+				     NDZ_HIADDR - inputmaxsec + 1);
+
 	ndz_rangemap_dump(rangemap, verbose ? 0 : 1, NULL);
 
 	/* ranges should be 1-to-1 with map ranges */
@@ -1457,10 +1462,6 @@ addvalid(uint32_t start, uint32_t size)
 	*lastvalid   = valid;
 	lastvalid    = &valid->next;
 	numranges++;
-
-#ifdef TEST_RANGEMAP
-	allocrange((ndz_addr_t)start, (ndz_size_t)size);
-#endif
 }
 
 void
