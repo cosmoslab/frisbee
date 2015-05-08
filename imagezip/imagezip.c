@@ -785,8 +785,12 @@ main(int argc, char *argv[])
 	if (debug)
 		dumpskips(debug > 1);
 	makeranges();
+#ifdef TEST_RANGEMAP
+	dumpranges(debug > 1);
+#else
 	if (debug)
 		dumpranges(debug > 1);
+#endif
 	if (ranges == NULL) {
 		/*
 		 * No valid ranges, exit with an error.
@@ -1330,7 +1334,7 @@ initmap(void)
 	int rv;
 
 	maplo = inputminsec;
-	maphi = inputmaxsec ? inputmaxsec : NDZ_HIADDR;
+	maphi = inputmaxsec ? (inputmaxsec-1) : NDZ_HIADDR;
 	fprintf(stderr, "Initializing range map [%lu-%lu]\n", maplo, maphi);
 
 	rangemap = ndz_rangemap_init(maplo, maphi);
@@ -1395,8 +1399,6 @@ verifyfunc(struct ndz_rangemap *imap, struct ndz_range *range, void *arg)
 static void
 comparemap(int verbose)
 {
-	struct range *currange = ranges;
-
 	/* XXX adjust max */
 	if (inputmaxsec != 0)
 		ndz_rangemap_dealloc(rangemap, inputmaxsec,
@@ -1404,12 +1406,16 @@ comparemap(int verbose)
 
 	ndz_rangemap_dump(rangemap, verbose ? 0 : 1, NULL);
 
-	/* ranges should be 1-to-1 with map ranges */
-	if (ndz_rangemap_iterate(rangemap, verifyfunc, &currange))
-		fprintf(stderr, "*** Maps differ!\n");
-	if (currange != NULL)
-		fprintf(stderr, "*** More iz ranges starting at %u!\n",
-			currange->start);
+	if (frangesize == 0) {
+		struct range *currange = ranges;
+
+		/* ranges should be 1-to-1 with map ranges */
+		if (ndz_rangemap_iterate(rangemap, verifyfunc, &currange))
+			fprintf(stderr, "*** Maps differ!\n");
+		if (currange != NULL)
+			fprintf(stderr, "*** More iz ranges starting at %u!\n",
+				currange->start);
+	}
 }
 #endif
 
