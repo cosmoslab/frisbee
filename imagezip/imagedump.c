@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -141,6 +141,7 @@ main(int argc, char **argv)
 		if (!isstdin) {
 			if ((infd = open(argv[0], O_RDONLY, 0666)) < 0) {
 				perror(argv[0]);
+				errors++;
 				continue;
 			}
 		} else
@@ -155,13 +156,14 @@ main(int argc, char **argv)
 				fprintf(stderr,
 					"%s: Cannot validate checksum signing key\n",
 					argv[0]);
+				errors++;
 				continue;
 			}
 		}
 #endif
 #endif
 
-		errors = dumpfile(isstdin ? "<stdin>" : argv[0], infd);
+		errors += dumpfile(isstdin ? "<stdin>" : argv[0], infd);
 
 #ifdef WITH_CRYPTO
 #ifdef SIGN_CHECKSUM
@@ -192,7 +194,7 @@ usage(void)
 static char chunkbuf[CHUNKSIZE];
 static unsigned int magic;
 static unsigned long chunkcount;
-static uint32_t nextsector;
+static uint32_t nextsector, nextcovered;
 static uint32_t fmax, fmin, franges, amax, amin, aranges;
 static uint32_t adist[8]; /* <4k, <8k, <16k, <32k, <64k, <128k, <256k, >=256k */
 static int regmax, regmin;
@@ -213,6 +215,7 @@ dumpfile(char *name, int fd)
 	isstdin = (fd == fileno(stdin));
 	wasted = sectinuse = sectfree = 0;
 	nextsector = 0;
+	nextcovered = 0;
 	relocs = 0;
 	relocbytes = 0;
 	hisect = 0;
@@ -549,6 +552,15 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 		printf("  Chunk %d: %u compressed bytes, ",
 		       chunkno, hdr->size);
 		if (hdr->magic > COMPRESSED_V1) {
+			if (hdr->firstsect != nextcovered) {
+				printf("    WARNING: chunk %d %s in covered "
+				       "range, %u/%u last-end/cur-start\n",
+				       chunkno,
+				       (hdr->firstsect < nextcovered) ?
+				       "overlap" : "gap", nextcovered,
+				       hdr->firstsect);
+			}
+			nextcovered = hdr->lastsect;
 			printf("sector range [%u-%u], ",
 			       hdr->firstsect, hdr->lastsect-1);
 			if (hdr->reloccount > 0)

@@ -1093,6 +1093,13 @@ main(int argc, char **argv)
     }
 #endif
 
+#if 1
+    /*
+     * Range of the new map is the same as the delta.
+     */
+    new.ndz->maplo = delta.ndz->maplo;
+    new.ndz->maphi = delta.ndz->maphi;
+#else
     /*
      * Compute the range of the new map. We look at the first and last
      * ranges in the merged map and use the source entries of those to
@@ -1122,6 +1129,7 @@ main(int argc, char **argv)
 	    fflush(stdout);
 	}
     }
+#endif
 
     /*
      * Iterate through the produced map hashing (if necessary) and
