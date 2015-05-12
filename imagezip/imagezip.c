@@ -975,6 +975,25 @@ read_image(int fd)
 		gotbb = 2;
 		bbstr = "MBR";
 	}
+	/*
+	 * If we are forcing interpretation as a BSD slice, there should
+	 * not be an MBR, however there is sometimes this thing called the
+	 * "historical bogus partition table" (by the geom code) which
+	 * is an MBR with P4 having 50000 sectors. We need to avoid this
+	 * so we force looking for just a disklabel instead.
+	 */
+	if (gotbb == 2) {
+		parttab = disk.slices;
+		if (parttab[3].type == IZTYPE_386BSD &&
+		    parttab[3].size == 50000 && parttab[3].offset == 0 &&
+		    parttab[2].size == 0 && parttab[2].offset == 0 &&
+		    parttab[1].size == 0 && parttab[1].offset == 0 &&
+		    parttab[0].size == 0 && parttab[0].offset == 0) {
+			fprintf(stderr,
+				"WARNING: ignoring historical bogus MBR\n");
+			gotbb = 0;
+		}
+	}
 #endif
 
 	if (!gotbb) {
@@ -1072,7 +1091,7 @@ read_image(int fd)
 	 */
 	if (!slicemode) {
 		iz_lba dlow = disk.lodata;
-		iz_lba dhigh = disk.hidata;
+		iz_lba dhigh = maxmode ? (inputmaxsec-1) : disk.hidata;
 		iz_lba losect = disk.losect;
 		iz_lba hisect = disk.hisect;
 
@@ -1190,14 +1209,14 @@ read_image(int fd)
 	if (!slicemode) {
 		if (dstart != inputminsec) {
 			fprintf(stderr,
-				"partitioner value (%lu) different than "
+				"partitioner low value (%lu) different than "
 				"computed value (%lu); using the former\n",
 				(unsigned long)dstart, inputminsec);
 			inputminsec = dstart;
 		}
 		if (!maxmode && dstart+dsize != inputmaxsec) {
 			fprintf(stderr,
-				"partitioner value (%lu) different than "
+				"partitioner high value (%lu) different than "
 				"computed value (%lu); using the former\n",
 				(unsigned long)(dstart+dsize), inputmaxsec);
 			inputmaxsec = dstart + dsize;
