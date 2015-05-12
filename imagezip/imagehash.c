@@ -51,7 +51,6 @@
 #include "imagehash.h"
 #include "queue.h"
 
-//#define TERSE_DUMP_OUTPUT
 #define HANDLE_SPLIT_HASH
 
 #ifndef linux
@@ -85,10 +84,9 @@ static char *imagename;
 static char *fileid = NULL;
 static char *sigfile = NULL;
 static int sanity = 0;
-#ifdef HANDLE_SPLIT_HASH
 static int splithash = 0;
-#endif
 static int quiet = 0;
+static int terse = 0;
 
 static char chunkbuf[CHUNKSIZE];
 
@@ -131,7 +129,7 @@ main(int argc, char **argv)
 	extern char build_info[];
 	struct hashinfo *hashinfo = 0;
 
-	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:SXq")) != -1)
+	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:SXqT")) != -1)
 		switch(ch) {
 		case 'b':
 			hashblksize = atol(optarg);
@@ -202,6 +200,9 @@ main(int argc, char **argv)
 			break;
 		case 'q':
 			quiet = 1;
+			break;
+		case 'T':
+			terse = 1;
 			break;
 		case 'h':
 		case '?':
@@ -344,6 +345,9 @@ usage(void)
 		"-b blksize    size of hash blocks (512 <= size <= 32M)\n"
 		"-d            print additional detail to STDOUT\n"
 		"-o sigfile    name to use for sig file, else <image>.sig\n"
+		"-X            merge entries whose data spans chunks\n"
+		"-T            terse output for report mode\n"
+		"-q            quiet; do not output timing stats\n"
 		"-r            input file is a regular file, not an image\n");
 	exit(1);
 }	
@@ -514,30 +518,30 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 	struct hashregion *reg;
 
 	if (detail > 1) {
-#ifdef TERSE_DUMP_OUTPUT
-#else
-		switch (hinfo->version) {
-		case HASH_VERSION_1:
-			printf("sig version 1, blksize=%d sectors:\n",
-			       bytestosec(HASHBLK_SIZE));
-			break;
-		case HASH_VERSION_2:
-			printf("sig version 2, blksize=%d sectors:\n",
-			       hinfo->blksize);
-			break;
-		default:
-			printf("unknown signature version (%x), "
-			      "expect garbage:\n", hinfo->version);
-			break;
+		if (!terse) {
+			switch (hinfo->version) {
+			case HASH_VERSION_1:
+				printf("sig version 1, blksize=%d sectors:\n",
+				       bytestosec(HASHBLK_SIZE));
+				break;
+			case HASH_VERSION_2:
+				printf("sig version 2, blksize=%d sectors:\n",
+				       hinfo->blksize);
+				break;
+			default:
+				printf("unknown signature version (%x), "
+				       "expect garbage:\n", hinfo->version);
+				break;
+			}
 		}
-#endif
 		for (i = 0; i < hinfo->nregions; i++) {
 			reg = &hinfo->regions[i];
-#ifdef TERSE_DUMP_OUTPUT
-			printf("%s\t%d\t%d\n",
-			       spewhash(reg->hash, hashlen),
-			       reg->region.start, reg->region.size);
-#else
+			if (terse) {
+				printf("%s\t%d\t%d\n",
+				       spewhash(reg->hash, hashlen),
+				       reg->region.start, reg->region.size);
+				continue;
+			}
 			printf("[%u-%u] (%d): ",
 			       reg->region.start,
 			       reg->region.start + reg->region.size-1,
@@ -556,7 +560,6 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 			} else if (HASH_CHUNKDOESSPAN(reg->chunkno))
 				nsplithashes++;
 			printf("hash %s\n", spewhash(reg->hash, hashlen));
-#endif
 		}
 	}
 	if (nsplithashes)
@@ -606,6 +609,11 @@ createhash(char *name, struct hashinfo **hinfop)
 	 */
 	if (hashimage(name, hinfop)) {
 		free(hfile);
+		return -1;
+	}
+
+	if (*hinfop == NULL) {
+		fprintf(stderr, "%s: not a valid image (empty file?)\n", name);
 		return -1;
 	}
 
@@ -686,8 +694,9 @@ comparehashinfo(struct hashinfo *siginfo, struct hashinfo *imageinfo)
 	if (siginfo->nregions != imageinfo->nregions) {
 		fprintf(stderr,
 			"Sig/image have different number of hash regions "
-			"(%d != %d)\n",
-			siginfo->nregions, imageinfo->nregions);
+			"(%d != %d); original may %shave split-chunk ranges\n",
+			siginfo->nregions, imageinfo->nregions,
+			splithash ? "" : "not ");
 		i++;
 	}
 	if (i)
@@ -851,13 +860,14 @@ checkhash(char *name, struct hashinfo *hinfo)
 
 	stopreader();
 
-	if (!quiet) {
+	if (!quiet)
 		dump_stats(0);
-		if (badhashes)
-			printf("%s: %u regions (%d chunks) had bad hashes, "
-			       "%llu bytes affected\n",
-			       name, badhashes, badchunks,
-			       (unsigned long long)badhashdata);
+	if (badhashes)
+		printf("%s: %u regions (%d chunks) had bad hashes, "
+		       "%llu bytes affected\n",
+		       name, badhashes, badchunks,
+		       (unsigned long long)badhashdata);
+	if (!quiet) {
 		dump_readbufs();
 #ifdef TIMEIT
 		printf("%llu bytes: read cycles: "
@@ -1310,16 +1320,17 @@ fprintf(stderr, "HACK: failed: [%u-%u][%u-%u]\n", lreg->start, lreg->start+lreg-
 			}
 			/*
 			 * If this is the last piece of the last region
-			 * in a chunk and it is not a full hashblksize piece,
-			 * then stash it to see if it is a range that spans
-			 * chunks.
+			 * in a chunk and it does not end on a hashblksize
+			 * boundary, then stash it to see if it is a range
+			 * that spans chunks.
 			 */
-			if (hsize < hashblksize && rsize == hsize &&
-			    nreg + 1 == blockhdr->regioncount) {
+			if (rsize == hsize &&
+			    nreg + 1 == blockhdr->regioncount &&
+			    ((rstart + rsize) % hashblksizeinsec) != 0) {
 				size_t bytes = sectobytes(hsize);
 
 				lhash.region.start = rstart;
-				lhash.region.size = hsize;
+				lhash.region.size = rsize;
 				lhash.chunkno = chunkno;
 				(void)(*hashfunc)(rbuf->data, bytes,
 						  lhash.hash);
