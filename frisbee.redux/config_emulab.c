@@ -505,13 +505,14 @@ emulab_free_host_authinfo(struct config_host_authinfo *ai)
 }
 
 /*
- * Return the IP address/port to be used by the server/clients for
+ * Return the IP address/port-range to be used by the server/clients for
  * the image listed in ai->imageinfo[0].  Methods lists one or more transfer
  * methods that the client can handle, we return the method chosen.
- * If first is non-zero, then we need to return a "new" address and *addrp
- * and *portp are uninitialized.  If non-zero, then our last choice failed
- * (probably due to a port conflict) and we need to choose a new address
- * to try, possibly based on the existing info in *addrp and *portp.
+ * If first is non-zero, then we need to return a "new" address and *addrp,
+ * *loportp, and *hiportp are uninitialized.  If non-zero, then our last
+ * choice failed (probably due to a port conflict) and we need to choose
+ * a new address to try, possibly based on the existing info in *addrp,
+ * *loportp and *hiportp.
  *
  * For Emulab, we use the frisbee_index from the DB along with the base
  * multicast address and port to compute a unique address/port.  Uses the
@@ -521,21 +522,18 @@ emulab_free_host_authinfo(struct config_host_authinfo *ai)
  * For unicast, we use the index as well, just to produce a unique port
  * number.
  *
+ * NOTE: as of May 2015, we no longer generate a specific port number.
+ * We return 0 or a range and let the frisbeed/frisuploadd choose.
+ *
  * Return zero on success, non-zero otherwise.
  */
 static int
 emulab_get_server_address(struct config_imageinfo *ii, int methods, int first,
-			  in_addr_t *addrp, in_port_t *portp, int *methp)
+			  in_addr_t *addrp, in_port_t *loportp,
+			  in_port_t *hiportp, int *methp)
 {
 	int	  idx;
 	int	  a, b, c, d;
-
-#if 0
-	if ((methods & (CONFIG_IMAGE_MCAST|CONFIG_IMAGE_UCAST)) == 0) {
-		FrisError("get_server_address: only support UCAST/MCAST");
-		return 1;
-	}
-#endif
 
 	if (!mydb_update("UPDATE emulab_indicies "
 			" SET idx=LAST_INSERT_ID(idx+1) "
@@ -562,7 +560,8 @@ emulab_get_server_address(struct config_imageinfo *ii, int methods, int first,
 		c = (c % 254) + 1;
 	}
 	if (b > 254) {
-		FrisError("get_server_address: ran out of MC addresses!");
+		FrisError("get_server_address: ran out of MC addresses! "
+			  "Reset your DB emulab_indicies frisbee_index.\n");
 		return 1;
 	}
 
@@ -592,9 +591,21 @@ emulab_get_server_address(struct config_imageinfo *ii, int methods, int first,
 			goto again;
 		}
 
+		/*
+		 * Note that by construction we also avoid the "scope relative"
+		 * addresses which are the last 256 addresses in any scope;
+		 * i.e., in our scopes x.x.255.0 - x.x.255.255. But let's be
+		 * paranoid.
+		 */
+		assert(c != 255);
+
 		*methp = CONFIG_IMAGE_MCAST;
 		*addrp = (a << 24) | (b << 16) | (c << 8) | d;
-	} else if (methods & CONFIG_IMAGE_UCAST) {
+	}
+	/*
+	 * Unicast is our second choice.
+	 */
+	else if (methods & CONFIG_IMAGE_UCAST) {
 		*methp = CONFIG_IMAGE_UCAST;
 		/* XXX on retries, we don't mess with the address */
 		if (first)
@@ -606,24 +617,44 @@ emulab_get_server_address(struct config_imageinfo *ii, int methods, int first,
 	 */
 	else if (methods & CONFIG_IMAGE_BCAST) {
 		*methp = CONFIG_IMAGE_BCAST;
+		/* XXX on retries, we don't mess with the address */
 		if (first)
 			*addrp = INADDR_BROADCAST;
 	}
+	else {
+		FrisError("get_server_address: no supported method requested");
+		return 1;
+	}
 
 	/*
-	 * In the interest of uniform distribution, if we have a maximum
-	 * number of ports to use we just use the index directly.
+	 * Calculate a port range:
+	 *
+	 * If mc_port_lo == 0, the server always chooses so we just return
+	 * lo == hi == 0.
+	 *
+	 * Otherwise, if this is the first call, we use the index to compute
+	 * a starting value in the [mc_port_lo - mc_port_lo+mc_port_num]
+	 * range. Given an increasing index, these keeps us from starting
+	 * to look at the same place everytime and (hopefully) will reduce
+	 * the number of conflicts that the server encounters.
+	 *
+	 * If this was not the first call, we return the full range on
+	 * every call.
 	 */
-	if (mc_port_num) {
-		*portp = mc_port_lo + (idx % mc_port_num);
+	if (mc_port_num == 0) {
+		*loportp = 0;
+		*hiportp = 0;
+	} else if (first) {
+		*loportp = mc_port_lo + (idx % mc_port_num);
+		*hiportp = mc_port_lo + mc_port_num - 1;
+	} else {
+		*loportp = mc_port_lo;
+		*hiportp = mc_port_lo + mc_port_num - 1;
 	}
-	/*
-	 * In the interest of backward compat, if there is no maximum
-	 * number of ports, we use the "classic" formula.
-	 */
-	else {
-		*portp = mc_port_lo + (((c << 8) | d) & 0x7FFF);
-	}
+
+	if (debug)
+		FrisLog("get_server_address: idx %d, addr 0x%x, port [%d-%d]",
+			idx, *addrp, *loportp, *hiportp);
 
 	return 0;
 }
@@ -1788,7 +1819,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			struct config_imageinfo *ci;
 			struct stat sb;
 			char *iid, *path;
-			int iidx;
+			int iidx, wantsig;
 
 			row = mysql_fetch_row(res);
 			/* XXX ignore rows with null or empty info */
@@ -1800,14 +1831,24 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			    !row[5] || !row[5][0])
 				continue;
 
+			wantsig = (wantmeta && strcmp(wantmeta, "sig") == 0);
+
 			iid = build_imageid(row[0], row[2], row[5], wantmeta);
 			ci = &get->imageinfo[get->numimages];
 			ci->imageid = iid;
 			ci->dir = NULL;
 			/*
 			 * If path is a directory, this is a new format
-			 * image world. In that case we pick the .ndz file
-			 * out of that directory.
+			 * image world. The directory contains one or both
+			 * of a full image and delta (.ndz and .ddz) for
+			 * each version of an image. We return the full
+			 * image if it exists, the delta image otherwise.
+			 * This means that you cannot get the delta image
+			 * if the full image exists. If we want to support
+			 * that in the future, we can make a new "metadata"
+			 * tag (e.g., "delta") like we do for the signature
+			 * so that you could request foo,delta to explicitly
+			 * get the delta.
 			 */
 			if (stat(row[3], &sb) == 0 && S_ISDIR(sb.st_mode)) {
 				char ch;
@@ -1835,7 +1876,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			} else
 				path = mystrdup(row[3]);
 
-			if (wantmeta && strcmp(wantmeta, "sig") == 0) {
+			if (wantsig) {
 				ci->path = mymalloc(strlen(path) + 4);
 				strcpy(ci->path, path);
 				strcat(ci->path, ".sig");
@@ -2271,6 +2312,16 @@ emulab_init(char *opts)
 		FrisError("emulab_init: MC_NUMPORTS '%s' not in valid range!",
 			  MC_NUMPORTS);
 		return NULL;
+	}
+	if (mc_port_lo > 0) {
+		if (mc_port_num == 0)
+			mc_port_num = 65536 - mc_port_lo;
+		if (mc_port_lo + mc_port_num > 65536) {
+			FrisError("emulab_init: MC_BASEPORT (%d) + "
+				  "MC_NUMPORTS (%d) too large!",
+				  mc_port_lo, mc_port_num);
+			return NULL;
+		}
 	}
 
 	if ((path = myrealpath(SHAREROOT_DIR, pathbuf)) == NULL) {

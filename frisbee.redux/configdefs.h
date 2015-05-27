@@ -75,7 +75,8 @@ struct config {
 					struct config_host_authinfo **);
 	void (*config_free_host_authinfo)(struct config_host_authinfo *);
 	int (*config_get_server_address)(struct config_imageinfo *, int, int,
-					 in_addr_t *, in_port_t *, int *);
+					 in_addr_t *, in_port_t *, in_port_t *,
+					 int *);
 	char *(*config_canonicalize_imageid)(char *);
 	void *(*config_save)(void);
 	int (*config_restore)(void *);
@@ -95,7 +96,8 @@ extern void	config_free_host_authinfo(struct config_host_authinfo *);
 extern int	config_auth_by_IP(int, struct in_addr *, struct in_addr *,
 				  char *, struct config_host_authinfo **);
 extern int	config_get_server_address(struct config_imageinfo *, int, int,
-					  in_addr_t *, in_port_t *, int *);
+					  in_addr_t *, in_port_t *, in_port_t *,
+					  int *);
 extern char *	config_canonicalize_imageid(char *);
 extern void *	config_save(void);
 extern int	config_restore(void *);

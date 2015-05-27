@@ -46,7 +46,7 @@ extern int debug;
 
 static char *DEFAULT_IMAGEDIR	= "/usr/local/images";
 static char *DEFAULT_MCADDR	= "239.192.1";
-static char *DEFAULT_MCPORT	= "1025";
+static char *DEFAULT_MCPORT	= "0";
 static char *DEFAULT_MCNUMPORT	= "0";
 
 static char *indexfile;
@@ -242,13 +242,14 @@ null_free_host_authinfo(struct config_host_authinfo *ai)
 }
 
 /*
- * Return the IP address/port to be used by the server/clients for
+ * Return the IP address/port-range to be used by the server/clients for
  * the image listed in ai->imageinfo[0].  Methods lists one or more transfer
  * methods that the client can handle, we return the method chosen.
- * If first is non-zero, then we need to return a "new" address and *addrp
- * and *portp are uninitialized.  If non-zero, then our last choice failed
- * (probably due to a port conflict) and we need to choose a new address
- * to try, possibly based on the existing info in *addrp and *portp.
+ * If first is non-zero, then we need to return a "new" address and *addrp,
+ * *loportp, and *hiportp are uninitialized.  If non-zero, then our last
+ * choice failed (probably due to a port conflict) and we need to choose
+ * a new address to try, possibly based on the existing info in *addrp,
+ * *loportp and *hiportp.
  *
  * For Emulab, we use the frisbee_index from the DB along with the base
  * multicast address and port to compute a unique address/port.  Uses the
@@ -258,22 +259,19 @@ null_free_host_authinfo(struct config_host_authinfo *ai)
  * For unicast, we use the index as well, just to produce a unique port
  * number.
  *
+ * NOTE: as of May 2015, we no longer generate a specific port number.
+ * We return 0 or a range and let the frisbeed/frisuploadd choose.
+ *
  * Return zero on success, non-zero otherwise.
  */
 static int
 null_get_server_address(struct config_imageinfo *ii, int methods, int first,
-			in_addr_t *addrp, in_port_t *portp, int *methp)
+			in_addr_t *addrp, in_port_t *loportp,
+			in_port_t *hiportp, int *methp)
 {
 	int	a, b, c, d, idx;
 	int	incr = 1;
 	FILE	*fd;
-
-#if 0
-	if ((methods & (CONFIG_IMAGE_MCAST|CONFIG_IMAGE_UCAST)) == 0) {
-		FrisError("get_server_address: only support UCAST/MCAST");
-		return 1;
-	}
-#endif
 
  again:
 	if ((fd = fopen(indexfile, "r+")) == NULL) {
@@ -344,7 +342,11 @@ null_get_server_address(struct config_imageinfo *ii, int methods, int first,
 
 		*methp = CONFIG_IMAGE_MCAST;
 		*addrp = (a << 24) | (b << 16) | (c << 8) | d;
-	} else if (methods & CONFIG_IMAGE_UCAST) {
+	}
+	/*
+	 * Unicast is our second choice.
+	 */
+	else if (methods & CONFIG_IMAGE_UCAST) {
 		*methp = CONFIG_IMAGE_UCAST;
 		/* XXX on retries, we don't mess with the address */
 		if (first)
@@ -356,29 +358,45 @@ null_get_server_address(struct config_imageinfo *ii, int methods, int first,
 	 */
 	else if (methods & CONFIG_IMAGE_BCAST) {
 		*methp = CONFIG_IMAGE_BCAST;
+		/* XXX on retries, we don't mess with the address */
 		if (first)
 			*addrp = INADDR_BROADCAST;
 	}
+	else {
+		FrisError("get_server_address: no supported method requested");
+		return 1;
+	}
 
 	/*
-	 * In the interest of uniform distribution, if we have a maximum
-	 * number of ports to use we just use the index directly.
+	 * Calculate a port range:
+	 *
+	 * If mc_port_lo == 0, the server always chooses so we just return
+	 * lo == hi == 0.
+	 *
+	 * Otherwise, if this is the first call, we use the index to compute
+	 * a starting value in the [mc_port_lo - mc_port_lo+mc_port_num]
+	 * range. Given an increasing index, these keeps us from starting
+	 * to look at the same place everytime and (hopefully) will reduce
+	 * the number of conflicts that the server encounters.
+	 *
+	 * If this was not the first call, we return the full range on
+	 * every call.
 	 */
-	if (mc_port_num) {
-		*portp = mc_port_lo + (idx % mc_port_num);
-	}
-	/*
-	 * In the interest of backward compat, if there is no maximum
-	 * number of ports, we use the "classic" formula.
-	 */
-	else {
-		*portp = mc_port_lo + (((c << 8) | d) & 0x7FFF);
+	if (mc_port_num == 0) {
+		*loportp = 0;
+		*hiportp = 0;
+	} else if (first) {
+		*loportp = mc_port_lo + (idx % mc_port_num);
+		*hiportp = mc_port_lo + mc_port_num - 1;
+	} else {
+		*loportp = mc_port_lo;
+		*hiportp = mc_port_lo + mc_port_num - 1;
 	}
 
 	if (debug)
 		fprintf(stderr,
-			"get_server_address: idx %d, addr 0x%x, port %d\n",
-			idx, *addrp, *portp);
+			"get_server_address: idx %d, addr 0x%x, port [%d-%d]\n",
+			idx, *addrp, *loportp, *hiportp);
 
 	return 0;
 }
@@ -825,6 +843,16 @@ null_init(char *opts)
 		FrisError("emulab_init: MC numports '%s' not in valid range!",
 			  DEFAULT_MCNUMPORT);
 		return NULL;
+	}
+	if (mc_port_lo > 0) {
+		if (mc_port_num == 0)
+			mc_port_num = 65536 - mc_port_lo;
+		if (mc_port_lo + mc_port_num > 65536) {
+			FrisError("emulab_init: MC baseport (%d) + "
+				  "MC numports (%d) too large!",
+				  mc_port_lo, mc_port_num);
+			return NULL;
+		}
 	}
 
 	return &null_config;

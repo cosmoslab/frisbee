@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -447,11 +447,12 @@ typedef struct {
  */
 int	GetIP(char *str, struct in_addr *in);
 int	GetSockbufSize(void);
-int	ClientNetInit(void);
-int	ServerNetInit(void);
+int	ClientNetInit(int portnum);
+int	ServerNetInit(int portlo, int porthi);
 int	NetMCKeepAlive(void);
 unsigned long ClientNetID(void);
 int	PacketReceive(Packet_t *p);
+int	PacketRequest(Packet_t *p);
 void	PacketSend(Packet_t *p, int *resends);
 void	PacketReply(Packet_t *p);
 int	PacketValid(Packet_t *p, int nchunks);

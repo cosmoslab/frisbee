@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -203,11 +203,12 @@ config_auth_by_IP(int isget, struct in_addr *reqip, struct in_addr *hostip,
  */
 int
 config_get_server_address(struct config_imageinfo *ii, int methods, int first,
-			  in_addr_t *addr, in_port_t *port, int *method)
+			  in_addr_t *addr, in_port_t *loport, in_port_t *hiport,
+			  int *method)
 {
 	assert(myconfig != NULL);
-	return myconfig->config_get_server_address(ii, methods, first,
-						   addr, port, method);
+	return myconfig->config_get_server_address(ii, methods, first, addr,
+						   loport, hiport, method);
 }
 
 /*

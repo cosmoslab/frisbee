@@ -560,7 +560,7 @@ main(int argc, char **argv)
 		exit(0);
 	}
 #endif
-	ClientNetInit();
+	ClientNetInit(portnum);
 
 #ifdef DOEVENTS
 	if (eventserver != NULL && EventInit(eventserver) != 0) {
@@ -1800,7 +1800,7 @@ PlayFrisbee(void)
 	Packet_t	packet, *p = &packet;
 	struct timeval  estamp, timeo;
 	unsigned int	myid;
-	int		delay;
+	int		delay, rv;
 	int32_t		jtype = 0;
 
 	gettimeofday(&stamp, 0);
@@ -1850,12 +1850,13 @@ PlayFrisbee(void)
 	 * since we need to know the total block size. We resend the
 	 * message (dups are harmless) if we do not get a reply back.
 	 */
+	rv = -1;
 	gettimeofday(&timeo, 0);
 	while (1) {
 		struct timeval now;
 
 		gettimeofday(&now, 0);
-		if (timercmp(&timeo, &now, <=)) {
+		if (rv != 0 && timercmp(&timeo, &now, <=)) {
 #ifdef DOEVENTS
 			Event_t event;
 			if (eventserver != NULL &&
@@ -1866,7 +1867,7 @@ PlayFrisbee(void)
 #endif
 			CLEVENT(1, EV_CLIJOINREQ, myid, 0, 0, 0);
 			DOSTAT(joinattempts++);
-			p->hdr.type       = PKTTYPE_REQUEST;
+			p->hdr.type = PKTTYPE_REQUEST;
 			/*
 			 * Unless they have specified the -N option, continue
 			 * to use the V1 JOIN which tells the server only to
@@ -1896,15 +1897,36 @@ PlayFrisbee(void)
 			timeradd(&timeo, &now, &timeo);
 			if (debug > 1)
 				FrisLog("sent JOIN (%d)", p->hdr.subtype);
-		}
+#ifdef USE_REUSEADDR_COMPAT
+			/*
+			 * For backward compat, we need to check the unicast
+			 * socket to see if the server sent a reply there.
+			 *
+			 * We do not do this every time through the loop since
+			 * in the non-backward compat case it will timeout
+			 * every time. When other clients are busy, this will
+			 * cause a backlog of MC packets possibly causing our
+			 * reply to get dropped. So we only check immediately
+			 * after a send.
+			 */
+			rv = PacketRequest(p);
+#else
+			assert(rv != 0);
+#endif
+		} else
+			rv = -1;
+
+		if (rv)
+			rv = PacketReceive(p);
 
 		/*
 		 * Throw away any data packets. We cannot start until
 		 * we get a reply back.
 		 */
-		if (PacketReceive(p) == 0 &&
+		if (rv == 0 &&
 		    p->hdr.subtype == jtype &&
-		    p->hdr.type == PKTTYPE_REPLY) {
+		    p->hdr.type == PKTTYPE_REPLY &&
+		    p->msg.join.clientid == myid) {
 			if (jtype == PKTSUBTYPE_JOIN) {
 				p->msg.join2.chunksize = MAXCHUNKSIZE;
 				p->msg.join2.blocksize = MAXBLOCKSIZE;

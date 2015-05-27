@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -58,6 +58,8 @@ int		maxburstsize = SERVER_DYNBURST_SIZE;
 int		burstinterval = SERVER_BURST_GAP;
 unsigned long	bandwidth;
 int		portnum;
+int		portlo = -1;
+int		porthi;
 int		sockbufsize = SOCKBUFSIZE;
 int		killme;
 int		blockslost;
@@ -66,6 +68,7 @@ char		*lostmap;
 int		sendretries;
 struct in_addr	mcastaddr;
 struct in_addr	mcastif;
+char	       *addrfilename;
 char	       *filename;
 struct timeval  IdleTimeStamp, FirstReq, LastReq;
 volatile int	activeclients;
@@ -187,11 +190,40 @@ WorkQueueInit(void)
 }
 
 /*
- * Enqueue a work request.
+ * Enqueue a join reply.
+ * We always stick this at the head of the queue.
+ */
+static void
+WorkQueueEnqueueJoin(int vers, unsigned int clientid)
+{
+	WQelem_t	*wqel;
+
+	pthread_mutex_lock(&WorkQLock);
+
+	wqel = calloc(1, sizeof(WQelem_t));
+	if (wqel == NULL)
+		FrisFatal("WorkQueueEnqueueChunk: No more memory");
+
+	/* XXX */
+	wqel->chunk = -vers;
+	wqel->nblocks = (int)clientid;
+
+	queue_enter_first(&WorkQ, wqel, WQelem_t *, chain);
+	WorkQSize++;
+#ifdef STATS
+	if (WorkQSize > WorkQMax)
+		WorkQMax = WorkQSize;
+#endif
+
+	pthread_mutex_unlock(&WorkQLock);
+}
+
+/*
+ * Enqueue a chunk request.
  * If map==NULL, then we want the entire chunk.
  */
 static int
-WorkQueueEnqueue(int chunk, BlockMap_t *map, int count)
+WorkQueueEnqueueChunk(int chunk, BlockMap_t *map, int count)
 {
 	WQelem_t	*wqel;
 	int		elt, blocks;
@@ -263,7 +295,7 @@ WorkQueueEnqueue(int chunk, BlockMap_t *map, int count)
 
 	wqel = calloc(1, sizeof(WQelem_t));
 	if (wqel == NULL)
-		FrisFatal("WorkQueueEnqueue: No more memory");
+		FrisFatal("WorkQueueEnqueueChunk: No more memory");
 
 	wqel->chunk = chunk;
 	wqel->nblocks = count;
@@ -304,6 +336,20 @@ WorkQueueDequeue(int *chunkp, int *blockp, int *countp)
 	
 	wqel = (WQelem_t *) queue_first(&WorkQ);
 	chunk = wqel->chunk;
+
+	/*
+	 * XXX special case JOIN reply
+	 */
+	if (chunk < 0) {
+		*chunkp = chunk;
+		*countp = wqel->nblocks;
+		queue_remove(&WorkQ, wqel, WQelem_t *, chain);
+		free(wqel);
+		WorkQSize--;
+		pthread_mutex_unlock(&WorkQLock);
+		return 1;
+	}
+
 	if (wqel->nblocks == MAXCHUNKSIZE) {
 		block = 0;
 		count = MAXCHUNKSIZE;
@@ -341,7 +387,7 @@ ClientEnqueueMap(int chunk, BlockMap_t *map, int count, int isretry)
 		DOSTAT(partialreq++);
 	}
 
-	enqueued = WorkQueueEnqueue(chunk, map, count);
+	enqueued = WorkQueueEnqueueChunk(chunk, map, count);
 	if (!enqueued)
 		DOSTAT(qmerges++);
 #ifdef STATS
@@ -388,35 +434,8 @@ ClientJoin(Packet_t *p, int version)
 	struct in_addr	ipaddr   = { p->hdr.srcip };
 	unsigned int    clientid = p->msg.join.clientid;
 
-	/*
-	 * Return fileinfo. Duplicates are harmless.
-	 */
 	EVENT(1, EV_JOINREQ, ipaddr, clientid, version, 0, 0);
-	p->hdr.type = PKTTYPE_REPLY;
-	if (version == 1) {
-		/*
-		 * XXX we cannot accept JOINv1 requests if the image we
-		 * are serving is not a "traditional" 1MB padded image.
-		 * Otherwise, they would ultimately make requests for
-		 * parts of the non-rouded file that don't exist and we
-		 * would not respond.  We could fake up some data to return
-		 * but I'm not sure that is any better.
-		 */
-		if (!FileInfo.isimage) {
-			FrisLog("%s requested JOINv1 for non-image file, "
-				"ignoring...", inet_ntoa(ipaddr));
-			return;
-		}
-		p->hdr.datalen = sizeof(p->msg.join);
-		p->msg.join.blockcount = FileInfo.blocks;
-	} else {
-		p->hdr.datalen = sizeof(p->msg.join2);
-		p->msg.join2.blockcount = 0;
-		p->msg.join2.chunksize = CHUNKSIZE;
-		p->msg.join2.blocksize = BLOCKSIZE;
-		p->msg.join2.bytecount = FileInfo.filesize;
-	}
-	PacketReply(p);
+	WorkQueueEnqueueJoin(version, clientid);
 #ifdef STATS
 	{
 		int i, j = -1;
@@ -760,7 +779,7 @@ PlayFrisbee(void)
 			}
 			
 #ifdef STATS
-			/* If less than zero, exit when last cilent leaves */
+			/* If less than zero, exit when last client leaves */
 			if (timeout < 0 &&
 			    Stats.joins > 0 && activeclients == 0) {
 				fsleep(2000000);
@@ -812,6 +831,42 @@ PlayFrisbee(void)
 		}
 		}
 #endif
+
+		/*
+		 * Handle JOIN reply.
+		 *
+		 * XXX this is outside the normal packet pacing mechanism,
+		 * I see no reason to overly complicate this path for the
+		 * rare JOIN messages.
+		 */
+		if (chunk < 0) {
+			/* XXX */
+			int jvers = -chunk;
+			uint32_t clientid = (uint32_t)blockcount;
+
+			assert(jvers == 1 || jvers == 2);
+
+			if (debug)
+				FrisLog("sending JOIN%d reply to %u",
+					jvers, clientid);
+			p->hdr.type = PKTTYPE_REPLY;
+			if (jvers == 1) {
+				p->hdr.subtype = PKTSUBTYPE_JOIN;
+				p->hdr.datalen = sizeof(p->msg.join);
+				p->msg.join.clientid = clientid;
+				p->msg.join.blockcount = FileInfo.blocks;
+			} else {
+				p->hdr.subtype = PKTSUBTYPE_JOIN2;
+				p->hdr.datalen = sizeof(p->msg.join2);
+				p->msg.join2.clientid = clientid;
+				p->msg.join2.blockcount = 0;
+				p->msg.join2.chunksize = CHUNKSIZE;
+				p->msg.join2.blocksize = BLOCKSIZE;
+				p->msg.join2.bytecount = FileInfo.filesize;
+			}
+			PacketSend(p, 0);
+			continue;
+		}
 
 		lastblock = startblock + blockcount;
 
@@ -987,10 +1042,11 @@ PlayFrisbee(void)
 char *usagestr = 
  "usage: frisbeed [-d] <-p #> <-m mcastaddr> <filename>\n"
  " -d              Turn on debugging. Multiple -d options increase output.\n"
- " -p portnum      Specify a port number to listen on.\n"
+ " -p portnum      Specify a port number to listen on (0 to pick avail port).\n"
  " -m mcastaddr    Specify a multicast address in dotted notation.\n"
  " -i mcastif      Specify a multicast interface in dotted notation.\n"
  " -b              Use broadcast instead of multicast\n"
+ " -A file         Write address info to file in format <addr>:<port>.\n"
  "\n";
 
 void
@@ -1008,7 +1064,7 @@ main(int argc, char **argv)
 	off_t		fsize;
 	void		*ignored;
 
-	while ((ch = getopt(argc, argv, "dhp:k:m:i:tbDT:R:B:G:L:W:K:")) != -1)
+	while ((ch = getopt(argc, argv, "dhp:k:m:i:tbDT:R:B:G:L:W:K:A:")) != -1)
 		switch(ch) {
 		case 'b':
 			broadcast++;
@@ -1019,7 +1075,22 @@ main(int argc, char **argv)
 			break;
 			
 		case 'p':
-			portnum = atoi(optarg);
+			if (strchr(optarg, '-')) {
+				char *h = strchr(optarg, '-');
+				*h = '\0';
+				portlo = atoi(optarg);
+				porthi = atoi(h+1);
+				*h = '-';
+				if (portlo < 0 || portlo > 65535 ||
+				    porthi < 0 || porthi > 65535 ||
+				    portlo > porthi)
+					usage();
+			} else {
+				portlo = atoi(optarg);
+				porthi = portlo;
+				if (portlo < 0 || portlo > 65535)
+					usage();
+			}
 			break;
 			
 		case 'k':
@@ -1069,6 +1140,9 @@ main(int argc, char **argv)
 			if (keepalive < 0)
 				keepalive = 0;
 			break;
+		case 'A':
+			addrfilename = optarg;
+			break;
 		case 'h':
 		case '?':
 		default:
@@ -1079,7 +1153,7 @@ main(int argc, char **argv)
 	if (argc != 1)
 		usage();
 
-	if (!portnum || !mcastaddr.s_addr)
+	if (portlo < 0 || !mcastaddr.s_addr)
 		usage();
 
 	if (timeout > 0 && keepalive > timeout) {
@@ -1128,7 +1202,26 @@ main(int argc, char **argv)
 	/*
 	 * Everything else done, now init the network.
 	 */
-	ServerNetInit();
+	ServerNetInit(portlo, porthi);
+	if (addrfilename) {
+		/* long enough for XXX.XXX.XXX.XXX:DDDDD\n\0 */
+		char ainfo[24];
+		int afd, len;
+
+		snprintf(ainfo, sizeof(ainfo), "%s:%u\n",
+			 inet_ntoa(mcastaddr), (unsigned)portnum);
+		afd = open(addrfilename, O_WRONLY|O_CREAT|O_TRUNC, 0644);
+		if (afd < 0)
+			FrisPfatal(addrfilename);
+		len = strlen(ainfo) + 1;
+		if (write(afd, ainfo, len) != len) {
+			close(afd);
+			unlink(addrfilename);
+			FrisFatal("%s: could not write address info\n",
+				  addrfilename);
+		}
+		close(afd);
+	}
 
 	if (tracing) {
 		ServerTraceInit("frisbeed");

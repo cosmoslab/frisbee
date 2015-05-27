@@ -46,6 +46,7 @@
 #include <syslog.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <signal.h>
 #include <assert.h>
 #ifdef WITH_IGMP
 #include <sys/time.h>
@@ -57,7 +58,13 @@
 #define FRISBEE_SERVER	"/usr/testbed/sbin/frisbeed"
 #define FRISBEE_CLIENT	"/usr/testbed/sbin/frisbee"
 #define FRISBEE_UPLOAD	"/usr/testbed/sbin/frisuploadd"
-#define FRISBEE_RETRIES	5
+
+/*
+ * Given that we use port ranges when invoking the server, and given the
+ * way those ranges are calculated, there is no reason to retry more than
+ * once to try all possible ports.
+ */
+#define FRISBEE_RETRIES	1
 
 static void	get_options(int argc, char **argv);
 static int	makesocket(int portnum, struct in_addr *ifip, int *tcpsockp);
@@ -266,7 +273,7 @@ struct childinfo {
 	in_addr_t servaddr;	/* -S arg */
 	in_addr_t ifaceaddr;	/* -i arg */
 	in_addr_t addr;		/* -m arg */
-	in_port_t port;		/* -p arg */
+	in_port_t loport, hiport; /* to construct -p arg */
 	void (*done)(struct childinfo *, int);
 	void *extra;
 };
@@ -291,7 +298,9 @@ struct uploadextra {
 	int itimeout;
 };
 
+static int killchild(struct childinfo *);
 static struct childinfo *findchild(char *, int, int);
+static int getaddrchild(struct childinfo *);
 static int startchild(struct childinfo *);
 static struct childinfo *startserver(struct config_imageinfo *,
 				     in_addr_t, in_addr_t, int, int *);
@@ -554,7 +563,7 @@ fetch_parent(struct in_addr *myip, struct in_addr *hostip,
 	replyp->method = ci->method;
 	replyp->servaddr = ci->servaddr;
 	replyp->addr = ci->addr;
-	replyp->port = ci->port;
+	replyp->port = ci->loport;
 	return 0;
 }
 
@@ -704,7 +713,7 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		msg->body.getreply.method = ci->method;
 		msg->body.getreply.isrunning = 1;
 		msg->body.getreply.addr = htonl(ci->addr);
-		msg->body.getreply.port = htons(ci->port);
+		msg->body.getreply.port = htons(ci->loport);
 		goto reply;
 	}
 #endif
@@ -998,7 +1007,7 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		in.s_addr = htonl(ci->addr);
 		FrisLog("%s: started %s server on %s:%d (pid %d, timo %ds)",
 			imageid, GetMSMethods(ci->method),
-			inet_ntoa(in), ci->port, ci->pid, ci->timeout);
+			inet_ntoa(in), ci->loport, ci->pid, ci->timeout);
 		if (debug) {
 			FrisLog("  uid: %d, gids: %s",
 				ci->uid, gidstr(ci->ngids, ci->gids));
@@ -1019,6 +1028,17 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 				imageid, stat);
 			goto reply;
 		}
+		/*
+		 * Get the port chosen by the server
+		 */
+		if ((ci->loport == 0 || ci->loport != ci->hiport) &&
+		    getaddrchild(ci)) {
+			killchild(ci);
+			msg->body.getreply.error = MS_ERROR_TRYAGAIN;
+			FrisLog("%s: server did not report address info, "
+				"telling client to try again!", imageid);
+			goto reply;
+		}
 	} else {
 		struct in_addr in;
 
@@ -1033,11 +1053,11 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		if (wantstatus)
 			FrisLog("%s: STATUS is running %s on %s:%d (pid %d)",
 				imageid, GetMSMethods(ci->method),
-				inet_ntoa(in), ci->port, ci->pid);
+				inet_ntoa(in), ci->loport, ci->pid);
 		else
 			FrisLog("%s: %s server already running on %s:%d (pid %d)",
 				imageid, GetMSMethods(ci->method),
-				inet_ntoa(in), ci->port, ci->pid);
+				inet_ntoa(in), ci->loport, ci->pid);
 		if (debug)
 			FrisLog("  uid: %d, gids: %s",
 				ci->uid, gidstr(ci->ngids, ci->gids));
@@ -1061,7 +1081,7 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		msg->body.getreply.addr = msg->body.getreply.servaddr;
 	else
 		msg->body.getreply.addr = htonl(ci->addr);
-	msg->body.getreply.port = htons(ci->port);
+	msg->body.getreply.port = htons(ci->loport);
 
  reply:
 	msg->body.getreply.error = htons(msg->body.getreply.error);
@@ -1313,7 +1333,7 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 
 	in.s_addr = htonl(ci->addr);
 	FrisLog("%s: started uploader on %s:%d (pid %d, timo %ds)",
-		imageid, inet_ntoa(in), ci->port, ci->pid, ci->timeout);
+		imageid, inet_ntoa(in), ci->loport, ci->pid, ci->timeout);
 	if (debug)
 		FrisLog("  uid: %d, gids: %s",
 			ci->uid, gidstr(ci->ngids, ci->gids));
@@ -1333,9 +1353,20 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 			imageid, rv);
 		goto reply;
 	}
+	/*
+	 * Get the port chosen by the uploader
+	 */
+	if ((ci->loport == 0 || ci->loport != ci->hiport) &&
+	    getaddrchild(ci)) {
+		killchild(ci);
+		msg->body.getreply.error = MS_ERROR_TRYAGAIN;
+		FrisLog("%s: uploader did not report address info, "
+			"telling client to try again!", imageid);
+		goto reply;
+	}
 
 	msg->body.putreply.addr = htonl(ci->servaddr);
-	msg->body.putreply.port = htons(ci->port);
+	msg->body.putreply.port = htons(ci->loport);
 
  reply:
 	msg->body.putreply.error = htons(msg->body.putreply.error);
@@ -1639,6 +1670,40 @@ findchild(char *imageid, int ptype, int methods)
 }
 
 /*
+ * See if the indicated child has written out its address info.
+ * We extract the port info from this if necessary.
+ * Return zero on success, an error code on failure.
+ */
+static int
+getaddrchild(struct childinfo *ci)
+{
+	char afile[sizeof("/tmp/TT.NNNNNN")+1];
+	int a, b, c, d, p, rv = 1;
+	FILE *fd;
+
+	if (ci->ptype != PTYPE_CLIENT) {
+		snprintf(afile, sizeof(afile), "/tmp/%2s.%06u",
+			 ci->ptype == PTYPE_SERVER ? "dl" : "ul", ci->pid);
+		if ((fd = fopen(afile, "r")) != NULL &&
+		    fscanf(fd, "%d.%d.%d.%d:%d", &a, &b, &c, &d, &p) == 5) {
+			if (p > 0) {
+				FrisLog("%s chose port %u",
+					ci->ptype == PTYPE_SERVER ?
+					"server" : "uploader", p);
+				ci->loport = ci->hiport = p;
+				rv = 0;
+			}
+		}
+		if (fd != NULL) {
+			fclose(fd);
+			unlink(afile);
+		}
+	}
+
+	return rv;
+}
+
+/*
  * Fire off a frisbee server or client process to serve or download an image.
  * Return zero on success, an error code on failure.
  */
@@ -1661,6 +1726,7 @@ startchild(struct childinfo *ci)
 		int argc;
 		struct in_addr in;
 		char *pname, *opts;
+		char portarg[sizeof("-p NNNNN-NNNNN -A /tmp/TT.NNNNNN")+1];
 
 		if (myuid == 0) {
 			assert(ci->ngids >= 1);
@@ -1717,6 +1783,29 @@ startchild(struct childinfo *ci)
 		strncpy(servstr, inet_ntoa(in), sizeof servstr);
 		in.s_addr = htonl(ci->addr);
 
+		/*
+		 * Figure out the port arguments. If loport == 0 or we
+		 * have a port range, then we need to pass -A to capture
+		 * the chosen port. Otherwise, it is just the traditional
+		 * port argument.
+		 */
+		if (ci->loport == 0) {
+			assert(ci->ptype != PTYPE_CLIENT);
+			snprintf(portarg, sizeof(portarg),
+				 "-p 0 -A /tmp/%2s.%06u",
+				 ci->ptype == PTYPE_SERVER ? "dl" : "ul",
+				 getpid());
+		} else if (ci->loport != ci->hiport) {
+			assert(ci->ptype != PTYPE_CLIENT);
+			snprintf(portarg, sizeof(portarg),
+				 "-p %u-%u -A /tmp/%2s.%06u",
+				 ci->loport, ci->hiport,
+				 ci->ptype == PTYPE_SERVER ? "dl" : "ul",
+				 getpid());
+		} else
+			snprintf(portarg, sizeof(portarg),
+				 "-p %u", ci->loport);
+
 		switch (ci->ptype) {
 		case PTYPE_SERVER:
 		{
@@ -1730,21 +1819,21 @@ startchild(struct childinfo *ci)
 			opts = ci->imageinfo->get_options ?
 				ci->imageinfo->get_options : "";
 			snprintf(argbuf, sizeof argbuf,
-				 "%s -i %s -T %d %s %s -m %s -p %d %s",
+				 "%s -i %s -T %d %s %s -m %s %s %s",
 				 pname, ifacestr, timo, opts,
 				 ci->method == CONFIG_IMAGE_BCAST ? "-b" : "",
-				 inet_ntoa(in), ci->port, ci->imageinfo->path);
+				 inet_ntoa(in), portarg, ci->imageinfo->path);
 			break;
 		}
 		case PTYPE_CLIENT:
 			pname = FRISBEE_CLIENT;
 			snprintf(argbuf, sizeof argbuf,
-				 "%s -N -S %s -i %s %s %s -m %s -p %d %s",
+				 "%s -N -S %s -i %s %s %s -m %s %s %s",
 				 pname, servstr, ifacestr,
 				 debug > 1 ? "" : "-q",
 				 ci->method == CONFIG_IMAGE_UCAST ? "-O" :
 				 (ci->method == CONFIG_IMAGE_BCAST ? "-b" : ""),
-				 inet_ntoa(in), ci->port, ci->imageinfo->path);
+				 inet_ntoa(in), portarg, ci->imageinfo->path);
 			break;
 		case PTYPE_UPLOADER:
 		{
@@ -1764,10 +1853,10 @@ startchild(struct childinfo *ci)
 			opts = ci->imageinfo->put_options ?
 				ci->imageinfo->put_options : "";
 			snprintf(argbuf, sizeof argbuf,
-				 "%s -i %s -I %d -T %d %s -s %llu -m %s -p %d %s",
+				 "%s -i %s -I %d -T %d %s -s %llu -m %s %s %s",
 				 pname, ifacestr, itimo, timo, opts,
 				 (unsigned long long)isize,
-				 inet_ntoa(in), ci->port, ci->imageinfo->path);
+				 inet_ntoa(in), portarg, ci->imageinfo->path);
 			break;
 		}
 		default:
@@ -1803,7 +1892,7 @@ startchild(struct childinfo *ci)
 
 		in.s_addr = htonl(ci->addr);
 		snprintf(pidfile, sizeof pidfile, "%s/frisbeed-%s-%d.pid",
-			 _PATH_VARRUN, inet_ntoa(in), ci->port);
+			 _PATH_VARRUN, inet_ntoa(in), ci->loport);
 		fd = fopen(pidfile, "w");
 		if (fd != NULL) {
 			fprintf(fd, "%d\n", ci->pid);
@@ -1837,7 +1926,7 @@ startserver(struct config_imageinfo *ii, in_addr_t meaddr, in_addr_t youaddr,
 	 * Find the appropriate address, port and method to use.
 	 */
 	if (config_get_server_address(ii, methods, 1, &ci->addr,
-				      &ci->port, &ci->method)) {
+				      &ci->loport, &ci->hiport, &ci->method)) {
 		free(ci);
 		*errorp = MS_ERROR_FAILED;
 		return NULL;
@@ -1959,7 +2048,7 @@ startclient(struct config_imageinfo *ii, in_addr_t meaddr, in_addr_t youaddr,
 	ci->servaddr = youaddr;
 	ci->ifaceaddr = meaddr;
 	ci->addr = addr;
-	ci->port = port;
+	ci->loport = ci->hiport = port;
 	ci->method = methods;
 	ci->imageinfo = copy_imageinfo(ii);
 	ci->ptype = PTYPE_CLIENT;
@@ -2117,7 +2206,7 @@ startuploader(struct config_imageinfo *ii, in_addr_t meaddr, in_addr_t youaddr,
 	 * to the client's address afterward.
 	 */
 	if (config_get_server_address(ii, MS_METHOD_UNICAST, 1, &ci->addr,
-				      &ci->port, &ci->method)) {
+				      &ci->loport, &ci->hiport, &ci->method)) {
 		free(ci);
 		*errorp = MS_ERROR_FAILED;
 		return NULL;
@@ -2191,9 +2280,10 @@ startuploader(struct config_imageinfo *ii, in_addr_t meaddr, in_addr_t youaddr,
 	return ci;
 }
 
-int
+static int
 killchild(struct childinfo *ci)
 {
+	kill(ci->pid, SIGTERM);
 	return 0;
 }
 
@@ -2246,7 +2336,7 @@ reapchildren(int wpid, int *statusp)
 			ci->imageinfo->imageid,
 			ci->ptype == PTYPE_SERVER ? "server" :
 			ci->ptype == PTYPE_CLIENT ? "client" : "uploader",
-			pid, inet_ntoa(in), ci->port, status);
+			pid, inet_ntoa(in), ci->loport, status);
 
 		/*
 		 * Special case exit value.
@@ -2261,7 +2351,8 @@ reapchildren(int wpid, int *statusp)
 			if (ci->ptype != PTYPE_CLIENT &&
 			    !config_get_server_address(ci->imageinfo,
 						       ci->method, 0,
-						       &ci->addr, &ci->port,
+						       &ci->addr,
+						       &ci->loport, &ci->hiport,
 						       &ci->method) &&
 			    !startchild(ci)) {
 				/* give it a chance to run, and check again */
@@ -2272,7 +2363,7 @@ reapchildren(int wpid, int *statusp)
 					ci->imageinfo->imageid,
 					ci->ptype == PTYPE_SERVER ?
 					"server" : "uploader",
-					inet_ntoa(in), ci->port, ci->pid);
+					inet_ntoa(in), ci->loport, ci->pid);
 				if (wpid)
 					wpid = ci->pid;
 				continue;

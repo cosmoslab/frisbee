@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -54,10 +54,15 @@ unsigned long nonetbufs;
 /* Max number of times to attempt bind to port before failing. */
 #define MAXBINDATTEMPTS		1
 
+#define IS_MCAST_ADDR(sa)	((ntohl((sa).s_addr) >> 28) == 14)
+
 /* Max number of hops multicast hops. */
 #define MCAST_TTL		5
 
 static int		sock = -1;
+#ifdef USE_REUSEADDR_COMPAT
+static int		selfsock = -1;
+#endif
 struct in_addr		myipaddr;
 static int		nobufdelay = -1;
 int			broadcast = 0;
@@ -174,14 +179,75 @@ GetBcastAddr(struct in_addr *ifaddr, struct in_addr *bcaddr)
 	return 1;
 }
 
-static void
-CommonInit(int dobind)
+/*
+ * Bind one port from the given range.
+ * If lo == hi == 0, then we let the kernel choose.
+ * If lo == hi != 0, then we must get that port.
+ * Otherwise we loop over the range til we get one.
+ * Returns the port bound or 0 if unsuccessful.
+ */
+static in_port_t
+BindPort(in_addr_t addr, in_port_t portlo, in_port_t porthi)
 {
-	struct sockaddr_in	name;
+	struct sockaddr_in name;
+	socklen_t sl = sizeof(name);
+
+	name.sin_family      = AF_INET;
+	name.sin_addr.s_addr = htonl(addr);
+	name.sin_port        = htons(portlo);
+
+	/*
+	 * Let the kernel choose.
+	 */
+	if (portlo == 0) {
+		if (bind(sock, (struct sockaddr *)&name, sl) != 0)
+			return 0;
+
+		if (getsockname(sock, (struct sockaddr *)&name, &sl) < 0)
+			FrisPfatal("could not determine bound port");
+		return(ntohs(name.sin_port));
+	}
+	
+	/*
+	 * Specific port. Try a few times to get it.
+	 */
+	if (portlo == porthi) {
+		int i = MAXBINDATTEMPTS;
+
+		while (i) {
+			if (bind(sock, (struct sockaddr *)&name, sl) == 0)
+				return portlo;
+
+			if (--i) {
+				FrisPwarning("Bind to %s:%d failed. "
+					     "Will try %d more times!",
+					     inet_ntoa(name.sin_addr), portlo, i);
+				sleep(5);
+			}
+		}
+		return 0;
+	}
+
+	/*
+	 * Port range, gotta loop through trying to grab one.
+	 */
+	while (portlo <= porthi) {
+		name.sin_port = htons(portlo);
+		if (bind(sock, (struct sockaddr *)&name, sl) == 0)
+			return portlo;
+		portlo++;
+	}
+
+	return 0;
+}
+
+static void
+CommonInit(int portlo, int porthi, int dobind)
+{
 	int			i;
 	char			buf[BUFSIZ];
 	struct hostent		*he;
-	
+
 	sockbufsize = GetSockbufSize();
 	if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
 		FrisPfatal("Could not allocate a socket");
@@ -195,42 +261,10 @@ CommonInit(int dobind)
 		FrisPwarning("Could not set receive socket buffer size to %d",
 			     i);
 
-	if (dobind) {
-		name.sin_family      = AF_INET;
-		name.sin_port	     = htons(portnum);
-		name.sin_addr.s_addr = htonl(INADDR_ANY);
-
-		i = MAXBINDATTEMPTS;
-		while (i) {
-			if (bind(sock, (struct sockaddr *)&name, sizeof(name)) == 0)
-				break;
-
-			/*
-			 * Note that we exit with a magic value. 
-			 * This is for server wrapper-scripts so that they can
-			 * differentiate this case and try again with a
-			 * different port.
-			 */
-			if (--i == 0) {
-				FrisError("Could not bind to port %d!\n",
-					  portnum);
-				exit(EADDRINUSE);
-			}
-
-			FrisPwarning("Bind to port %d failed. Will try %d more times!",
-				     portnum, i);
-			sleep(5);
-		}
-		FrisLog("Bound to port %d", portnum);
-	} else {
-		FrisLog("NOT binding to port %d", portnum);
-	}
-	sndportnum = htons(portnum);
-
 	/*
 	 * At present, we use a multicast address in both directions.
 	 */
-	if ((ntohl(mcastaddr.s_addr) >> 28) == 14) {
+	if (IS_MCAST_ADDR(mcastaddr)) {
 		unsigned int loop = 0, ttl = MCAST_TTL;
 		struct ip_mreq mreq;
 
@@ -261,6 +295,20 @@ CommonInit(int dobind)
 			       &mcastif, sizeof(mcastif)) < 0) {
 			FrisPfatal("setsockopt(IPPROTO_IP, IP_MULTICAST_IF)");
 		}
+
+#ifdef USE_REUSEADDR
+		/*
+		 * Allow use of the desired port in the presense of other
+		 * non-MC use. Also allows for multiple clients of the same
+		 * stream.
+		 */
+		if (isclient) {
+			i = 1;
+			if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
+				       &i, sizeof(i)))
+				FrisWarning("Could not set SO_REUSEADDR");
+		}
+#endif
 
 #ifdef WITH_IGMP
 		IGMPInit(&mcastif, &mcastaddr);
@@ -293,6 +341,40 @@ CommonInit(int dobind)
 			       &i, sizeof(i)) < 0)
 			FrisPfatal("setsockopt(SOL_SOCKET, SO_BROADCAST)");
 	}
+
+	if (dobind) {
+		in_addr_t addr = INADDR_ANY;
+
+#ifdef USE_REUSEADDR
+		/*
+		 * For REUSEADDR to work in the face of unrelated apps that
+		 * bind INADDR_ANY:port, we must NOT also bind INADDR_ANY.
+		 */
+		if (isclient)
+			addr = ntohl(mcastaddr.s_addr);
+#endif
+		portnum = BindPort(addr, portlo, porthi);
+
+		/*
+		 * Could not get a port.
+		 * Note that we exit with a magic value. This is for server
+		 * wrapper-scripts so that they can differentiate this case
+		 * and try again with a different port.
+		 *
+		 * Note also that if portlo == 0, it cannot be a port
+		 * conflict so we do not retry.
+		 */
+		if (portnum == 0) {
+			FrisError("Could not bind %s:%d!\n",
+				  inet_ntoa(mcastaddr), portnum);
+			exit(portlo ? EADDRINUSE : -1);
+		}
+		FrisLog("Bound to %s:%d", inet_ntoa(mcastaddr), portnum);
+	} else {
+		portnum = portlo;
+		FrisLog("NOT binding to %s:%d", inet_ntoa(mcastaddr), portnum);
+	}
+	sndportnum = htons(portnum);
 
 #ifndef NO_SOCKET_TIMO
 	/*
@@ -334,15 +416,95 @@ CommonInit(int dobind)
 }
 
 int
-ClientNetInit(void)
+ClientNetInit(int port)
 {
-#ifndef SAME_HOST_HACK
-	CommonInit(1);
-#else
-	CommonInit(0);
-#endif
 	isclient = 1;
-	
+#ifdef SAME_HOST_HACK
+	CommonInit(port, port, 0);
+#else
+	CommonInit(port, port, 1);
+#endif
+
+#ifdef USE_REUSEADDR_COMPAT
+	/*
+	 * Bind a unicast socket for our interface address and the port.
+	 *
+	 * XXX this is for backward compatibility with an older server and
+	 * is used for two purposes.
+	 *
+	 * One, is so that we can receive a unicast JOIN reply from an old
+	 * server (the new server always multicasts JOIN replies). The old
+	 * client would see this reply because it would just bind the port
+	 * using INADDR_ANY in CommonInit, insuring that it would get the
+	 * JOIN reply. But with SO_REUSEADDR, we do not bind to INADDR_ANY,
+	 * we bind explicitly to the MC address and port and thus would not
+	 * see the reply without also binding the unicast (interface) address
+	 * and port.
+	 *
+	 * Two, we send all our multicast packets (joins and block requests)
+	 * out this interface so that the packets are stamped with the IP of
+	 * the interface and not the MC IP. The old server required that the
+	 * packet source IP match the source IP in the frisbee packet header
+	 * (the new server allows packets that come from the MC address).
+	 * We could just set the frisbee packet header srcip to be the MC
+	 * address instead, but we use that address for logging and stats
+	 * and want to keep it correct.
+	 */
+	if (myipaddr.s_addr && IS_MCAST_ADDR(mcastaddr)) {
+		struct sockaddr_in name;
+		int i;
+
+		if ((selfsock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+			FrisPfatal("Could not allocate a socket");
+
+		i = MCAST_TTL;
+		if (setsockopt(selfsock, IPPROTO_IP, IP_MULTICAST_TTL,
+			       &i, sizeof(i)) < 0) 
+			FrisWarning("Could not set MC TTL");
+
+		/* Disable local echo */
+		i = 0;
+		if (setsockopt(selfsock, IPPROTO_IP, IP_MULTICAST_LOOP,
+			       &i, sizeof(i)) < 0)
+			FrisWarning("Could not clear local echo");
+
+		/* Make sure we use the correct interface */
+		if (mcastif.s_addr &&
+		    setsockopt(selfsock, IPPROTO_IP, IP_MULTICAST_IF,
+			       &mcastif, sizeof(mcastif)) < 0) {
+			FrisWarning("Could not set MCAST_IF");
+		}
+
+		/* Set REUSEADDR */
+		i = 1;
+		if (setsockopt(selfsock, SOL_SOCKET, SO_REUSEADDR,
+			       &i, sizeof(i)))
+			FrisWarning("Could not set SO_REUSEADDR");
+
+		name.sin_family = AF_INET;
+		name.sin_port = htons(portnum);
+		name.sin_addr.s_addr = myipaddr.s_addr;
+		if (bind(selfsock, (struct sockaddr *)&name, sizeof(name)) < 0)
+			FrisPfatal("Could not bind to %s:%d",
+				   inet_ntoa(name.sin_addr), portnum);
+
+#ifndef NO_SOCKET_TIMO
+		/*
+		 * We use a socket level timeout instead of polling for data.
+		 */
+		{
+			struct timeval timeout;
+
+			timeout.tv_sec  = 0;
+			timeout.tv_usec = PKTRCV_TIMEOUT;
+			if (setsockopt(selfsock, SOL_SOCKET, SO_RCVTIMEO,
+				       &timeout, sizeof(timeout)) < 0)
+				FrisPfatal("setsockopt(SOL_SOCKET, SO_RCVTIMEO)");
+		}
+#endif
+	}
+#endif
+
 	return 1;
 }
 
@@ -353,10 +515,10 @@ ClientNetID(void)
 }
 
 int
-ServerNetInit(void)
+ServerNetInit(int portlo, int porthi)
 {
-	CommonInit(1);
 	isclient = 0;
+	CommonInit(portlo, porthi, 1);
 
 #ifdef linux
 	/*
@@ -423,7 +585,7 @@ NetMCKeepAlive(void)
  * The amount of data received is determined from the datalen of the hdr.
  * All packets are actually the same size/structure. 
  *
- * Returns 0 for a good packet, 1 for a back packet, -1 on timeout.
+ * Returns 0 for a good packet, 1 for a bad packet, -1 on timeout.
  */
 int
 PacketReceive(Packet_t *p)
@@ -454,9 +616,99 @@ PacketReceive(Packet_t *p)
 	bzero(&from, alen);
 	if ((mlen = recvfrom(sock, p, sizeof(*p), 0,
 			     (struct sockaddr *)&from, &alen)) < 0) {
-		if (errno == EWOULDBLOCK)
+		if (errno == EWOULDBLOCK || errno == EINTR)
 			return -1;
 		FrisPfatal("PacketReceive(recvfrom)");
+	}
+
+	/*
+	 * Basic integrity checks
+	 */
+	if (mlen < sizeof(p->hdr) + p->hdr.datalen) {
+		FrisLog("Bad message length (%d != %d)",
+			mlen, p->hdr.datalen);
+		return 1;
+	}
+#ifdef SAME_HOST_HACK
+	/*
+	 * If using a host alias for the client, a message may get
+	 * the wrong IP, so rig the IP check to make it always work.
+	 */
+	if (p->hdr.srcip != from.sin_addr.s_addr)
+		from.sin_addr.s_addr = p->hdr.srcip;
+
+	/*
+	 * Also, we aren't binding to a port on the client side, so the
+	 * first message to the server will contain the actual port we
+	 * will use from now on.
+	 */
+	if (!isclient && sndportnum == htons(portnum) &&
+	    sndportnum != from.sin_port)
+		sndportnum = from.sin_port;
+#endif
+	/*
+	 * XXX accept packets from the MC address. This will be the case with
+	 * newer clients that bind to the MC address instead of INADDR_ANY.
+	 */
+	if (from.sin_addr.s_addr == mcastaddr.s_addr)
+		from.sin_addr.s_addr = p->hdr.srcip;
+
+	if (p->hdr.srcip != from.sin_addr.s_addr) {
+		FrisLog("Bad message source (%x != %x)",
+			ntohl(from.sin_addr.s_addr), ntohl(p->hdr.srcip));
+		return 1;
+	}
+	if (sndportnum != from.sin_port) {
+		FrisLog("Bad message port (%d != %d)",
+			ntohs(from.sin_port), ntohs(sndportnum));
+		return 1;
+	}
+	return 0;
+}
+
+#ifdef USE_REUSEADDR_COMPAT
+/*
+ * Same as PacketReceive but read from unicast (self) socket.
+ *
+ * Returns 0 for a good packet, 1 for a bad packet, -1 on timeout.
+ */
+int
+PacketRequest(Packet_t *p)
+{
+	struct sockaddr_in from;
+	int		   mlen;
+	unsigned int	   alen;
+
+	if (selfsock < 0)
+		return -1;
+
+#ifdef NO_SOCKET_TIMO
+	{
+		fd_set		ready;
+		struct timeval	tv;
+		int		rv, maxfd;
+
+		tv.tv_sec = 0;
+		tv.tv_usec = PKTRCV_TIMEOUT;
+		FD_ZERO(&ready);
+		FD_SET(selfsock, &ready);
+		rv = select(selfsock+1, &ready, NULL, NULL, &tv);
+		if (rv < 0) {
+			if (errno == EINTR)
+				return -1;
+			FrisPfatal("PacketRequest(select)");
+		}
+		if (rv == 0)
+			return -1;
+	}
+#endif
+	alen = sizeof(from);
+	bzero(&from, alen);
+	if ((mlen = recvfrom(selfsock, p, sizeof(*p), 0,
+			     (struct sockaddr *)&from, &alen)) < 0) {
+		if (errno == EWOULDBLOCK || errno == EINTR)
+			return -1;
+		FrisPfatal("PacketRequest(recvfrom)");
 	}
 
 	/*
@@ -496,6 +748,7 @@ PacketReceive(Packet_t *p)
 	}
 	return 0;
 }
+#endif
 
 #ifndef MSG_DONTWAIT
 #define MSG_DONTWAIT 0
@@ -513,6 +766,7 @@ PacketSend(Packet_t *p, int *resends)
 {
 	struct sockaddr_in to;
 	int		   len, delays, rc;
+	int		   fd = sock;
 
 	len = sizeof(p->hdr) + p->hdr.datalen;
 	p->hdr.srcip = myipaddr.s_addr;
@@ -522,7 +776,12 @@ PacketSend(Packet_t *p, int *resends)
 	to.sin_addr.s_addr = mcastaddr.s_addr;
 
 	delays = 0;
-	while ((rc = sendto(sock, (void *)p, len, MSG_DONTWAIT,
+#ifdef USE_REUSEADDR_COMPAT
+	/* send out selfsock so the source IP is ours and not the MC addr */
+	if (selfsock >= 0)
+		fd = selfsock;
+#endif
+	while ((rc = sendto(fd, (void *)p, len, MSG_DONTWAIT,
 			    (struct sockaddr *)&to, sizeof(to))) <= 0) {
 		if (rc < 0 && !(errno == ENOBUFS || errno == EAGAIN))
 			FrisPfatal("PacketSend(sendto)");
@@ -569,7 +828,7 @@ PacketReply(Packet_t *p)
 
 	while (sendto(sock, (void *)p, len, 0, 
 		      (struct sockaddr *)&to, sizeof(to)) < 0) {
-		if (errno != ENOBUFS)
+		if (errno != ENOBUFS && errno != EAGAIN)
 			FrisPfatal("PacketSend(sendto)");
 
 		/*

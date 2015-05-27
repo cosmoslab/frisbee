@@ -183,6 +183,19 @@ IUZDEPS		+= ../imagezip/gpt/libgpt.a
 endif
 
 #
+# Define to attempt to be more robust in the face of port collisions
+# on the client. This only affects the client.
+#
+CFLAGS		+= -DUSE_REUSEADDR
+
+#
+# XXX this option is needed for awhile to ensure backward-compatibility.
+# See the comment in network.c::ClinetNetInit() for details.
+# This only affects the client.
+#
+CFLAGS		+= -DUSE_REUSEADDR_COMPAT
+
+#
 # Define this to use select to implement packet-receive-with-timeout
 # rather than using the SO_RCVTIMEO socket option.
 #

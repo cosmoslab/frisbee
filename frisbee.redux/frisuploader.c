@@ -49,9 +49,12 @@ static int bufsize = (64 * 1024);;
 static int timeout = 0;
 static int idletimeout = 0;
 static int sock = -1;
+static char *addrfilename;
 
 /* Globals */
 int debug = 0;
+int portlo = -1;
+int porthi;
 int portnum;
 int sockbufsize = SOCKBUFSIZE;
 
@@ -86,7 +89,7 @@ static void
 parse_args(int argc, char **argv)
 {
 	int ch;
-	while ((ch = getopt(argc, argv, "m:p:i:b:I:T:s:")) != -1) {
+	while ((ch = getopt(argc, argv, "m:p:i:b:I:T:s:A:")) != -1) {
 		switch (ch) {
 		case 'm':
 			if (!inet_aton(optarg, &clientip)) {
@@ -96,7 +99,22 @@ parse_args(int argc, char **argv)
 			}
 			break;
 		case 'p':
-			portnum = atoi(optarg);
+			if (strchr(optarg, '-')) {
+				char *h = strchr(optarg, '-');
+				*h = '\0';
+				portlo = atoi(optarg);
+				porthi = atoi(h+1);
+				*h = '-';
+				if (portlo < 0 || portlo > 65535 ||
+				    porthi < 0 || porthi > 65535 ||
+				    portlo > porthi)
+					usage();
+			} else {
+				portlo = atoi(optarg);
+				porthi = portlo;
+				if (portlo < 0 || portlo > 65535)
+					usage();
+			}
 			break;
 		case 'i':
 			if (!inet_aton(optarg, &clientif)) {
@@ -132,6 +150,9 @@ parse_args(int argc, char **argv)
 		case 's':
 			maxsize = strtoull(optarg, NULL, 0);
 			break;
+		case 'A':
+			addrfilename = optarg;
+			break;
 		default:
 			break;
 		}
@@ -139,7 +160,7 @@ parse_args(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-	if (clientip.s_addr == 0 || portnum == 0 || argc < 1)
+	if (clientip.s_addr == 0 || portlo < 0 || argc < 1)
 		usage();
 	/*
 	 * If both timeouts are set, make sure they play nice
@@ -323,30 +344,116 @@ recv_file()
  * but ServerNetInit only sets up UDP sockets. Maybe when we revisit
  * and refactor...
  */
+#define MAXBINDATTEMPTS 1
+
+/*
+ * This is straight out of network.c
+ *
+ * Bind one port from the given range.
+ * If lo == hi == 0, then we let the kernel choose.
+ * If lo == hi != 0, then we must get that port.
+ * Otherwise we loop over the range til we get one.
+ * Returns the port bound or 0 if unsuccessful.
+ */
+static in_port_t
+BindPort(in_addr_t addr, in_port_t portlo, in_port_t porthi)
+{
+	int i;
+	struct sockaddr_in name;
+	socklen_t sl = sizeof(name);
+
+	name.sin_family      = AF_INET;
+	name.sin_addr.s_addr = htonl(addr);
+	name.sin_port        = htons(portlo);
+
+	/*
+	 * Let the kernel choose.
+	 */
+	if (portlo == 0) {
+		if (bind(sock, (struct sockaddr *)&name, sl) != 0)
+			return 0;
+
+		if (getsockname(sock, (struct sockaddr *)&name, &sl) < 0)
+			FrisPfatal("could not determine bound port");
+		return(ntohs(name.sin_port));
+	}
+	
+	/*
+	 * Specific port. Try a few times to get it.
+	 */
+	if (portlo == porthi) {
+		i = MAXBINDATTEMPTS;
+
+		while (i) {
+			if (bind(sock, (struct sockaddr *)&name, sl) == 0)
+				return portlo;
+
+			if (--i) {
+				FrisPwarning("Bind to %s:%d failed. "
+					     "Will try %d more times!",
+					     inet_ntoa(name.sin_addr),
+					     portlo, i);
+				sleep(5);
+			}
+		}
+		return 0;
+	}
+
+	/*
+	 * Port range, gotta loop through trying to grab one.
+	 */
+	while (portlo <= porthi) {
+		name.sin_port = htons(portlo);
+		if (bind(sock, (struct sockaddr *)&name, sl) == 0)
+			return portlo;
+		portlo++;
+	}
+
+	return 0;
+}
+
+
 static void
 net_init(void)
 {
-	struct sockaddr_in name;
-	
 	if ((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
 		FrisPfatal("Could not allocate socket");
 
-	name.sin_family = AF_INET;
-	name.sin_addr.s_addr = clientif.s_addr;
-	name.sin_port = htons(portnum);
-	if (bind(sock, (struct sockaddr *)&name, sizeof(name)) < 0) {
+	portnum = BindPort(ntohl(clientif.s_addr), portlo, porthi);
+	if (portnum == 0) {
+		FrisError("Could not bind to %s:%u",
+			  inet_ntoa(clientif), portlo);
+		close(sock);
 		/*
 		 * We reproduce ServerNetInit behavior here: if we cannot
 		 * bind to the indicated port we exit with a special status
 		 * so that the master server which invoked us can pick
 		 * another.
 		 */
-		perror("Binding to socket");
-		close(sock);
-		exit(EADDRINUSE);
+		exit(portlo ? EADDRINUSE : -1);
 	}
 	if (listen(sock, 128) < 0) {
 		close(sock);
 		FrisPfatal("Could not listen on socket");
+	}
+
+	if (addrfilename) {
+		/* long enough for XXX.XXX.XXX.XXX:DDDDD\n\0 */
+		char ainfo[24];
+		int afd, len;
+
+		snprintf(ainfo, sizeof(ainfo), "%s:%u\n",
+			 inet_ntoa(clientif), (unsigned)portnum);
+		afd = open(addrfilename, O_WRONLY|O_CREAT|O_TRUNC, 0644);
+		if (afd < 0)
+			FrisPfatal(addrfilename);
+		len = strlen(ainfo) + 1;
+		if (write(afd, ainfo, len) != len) {
+			close(afd);
+			unlink(addrfilename);
+			FrisFatal("%s: could not write address info\n",
+				  addrfilename);
+		}
+		close(afd);
 	}
 }
