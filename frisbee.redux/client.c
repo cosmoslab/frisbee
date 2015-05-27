@@ -1125,7 +1125,7 @@ ChunkerStartup(void)
 #endif
 			if (!wasidle) {
 				CLEVENT(1, EV_CLIDCIDLE, 0, 0, 0, 0);
-				if (debug)
+				if (debug > 1)
 					FrisLog("No chunks ready to write!");
 			}
 			if (gotone)
@@ -1167,7 +1167,7 @@ ChunkerStartup(void)
 		 * We have a completed chunk. Write it to disk.
 		 */
 		chunkbytes = ChunkBytes(ChunkBuffer[i].thischunk);
-		if (debug)
+		if (debug > 1)
 			FrisLog("Writing chunk %d (buffer %d), size %d, after %d idle intervals",
 				ChunkBuffer[i].thischunk, i, chunkbytes,
 				wasidle);
@@ -1451,7 +1451,7 @@ GotBlock(Packet_t *p)
 						nfull, nfill);
 					lastnoroomchunk = chunk;
 					lastnoroomblocks = 0;
-					if (debug)
+					if (debug > 1)
 						FrisLog("No free buffer for chunk %d!",
 							chunk);
 				}
@@ -1499,7 +1499,7 @@ GotBlock(Packet_t *p)
 #endif
 		Chunks[chunk].seen = 1;
 
-		if (debug)
+		if (debug > 1)
 			FrisLog("Starting chunk %d (buffer %d)", chunk, free);
 
 		i = free;
@@ -1563,7 +1563,7 @@ GotBlock(Packet_t *p)
 		inprogress--;
 		CLEVENT(1, EV_CLIECHUNK, chunk, block, inprogress,
 			goodblocksrecv);
-		if (debug)
+		if (debug > 1)
 			FrisLog("Releasing chunk %d to main thread", chunk);
 #ifdef CONDVARS_WORK
 		pthread_mutex_lock(&chunkbuf_mutex);
@@ -1605,7 +1605,7 @@ RequestMissing(int chunk, BlockMap_t *map, int count)
 	Packet_t	packet, *p = &packet;
 	int		csize = ChunkSize(chunk);
 
-	if (debug)
+	if (debug > 1)
 		FrisLog("Requesting %d missing blocks of chunk:%d",
 			count, chunk);
 	
@@ -1675,7 +1675,7 @@ RequestRange(int chunk, int block, int count)
 		return;
 	}
 
-	if (debug)
+	if (debug > 1)
 		FrisLog("Requesting chunk:%d block:%d count:%d",
 			chunk, block, count);
 	
@@ -1895,7 +1895,7 @@ PlayFrisbee(void)
 			timeo.tv_sec = 0;
 			timeo.tv_usec = 500000;
 			timeradd(&timeo, &now, &timeo);
-			if (debug > 1)
+			if (debug)
 				FrisLog("sent JOIN (%d)", p->hdr.subtype);
 #ifdef USE_REUSEADDR_COMPAT
 			/*
@@ -1934,7 +1934,7 @@ PlayFrisbee(void)
 					(uint64_t)p->msg.join.blockcount *
 					MAXBLOCKSIZE;
 			}
-			if (debug > 1)
+			if (debug)
 				FrisLog("got JOIN (%d) reply", jtype);
 			CLEVENT(1, EV_CLIJOINREP,
 				p->msg.join2.chunksize,
