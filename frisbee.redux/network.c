@@ -200,8 +200,11 @@ BindPort(in_addr_t addr, in_port_t portlo, in_port_t porthi)
 	 * Let the kernel choose.
 	 */
 	if (portlo == 0) {
-		if (bind(sock, (struct sockaddr *)&name, sl) != 0)
+		if (bind(sock, (struct sockaddr *)&name, sl) != 0) {
+			FrisPwarning("Bind to %s:%d failed",
+				     inet_ntoa(name.sin_addr), portlo);
 			return 0;
+		}
 
 		if (getsockname(sock, (struct sockaddr *)&name, &sl) < 0)
 			FrisPfatal("could not determine bound port");
@@ -225,6 +228,8 @@ BindPort(in_addr_t addr, in_port_t portlo, in_port_t porthi)
 				sleep(5);
 			}
 		}
+		FrisPwarning("Bind to %s:%d failed",
+			     inet_ntoa(name.sin_addr), portlo);
 		return 0;
 	}
 
@@ -350,7 +355,7 @@ CommonInit(int portlo, int porthi, int dobind)
 		 * For REUSEADDR to work in the face of unrelated apps that
 		 * bind INADDR_ANY:port, we must NOT also bind INADDR_ANY.
 		 */
-		if (isclient)
+		if (isclient && IS_MCAST_ADDR(mcastaddr))
 			addr = ntohl(mcastaddr.s_addr);
 #endif
 		portnum = BindPort(addr, portlo, porthi);
