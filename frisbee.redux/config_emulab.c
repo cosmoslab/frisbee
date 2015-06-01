@@ -1582,7 +1582,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 						" AND (i.gid='%s' OR"
 						"    (i.gid=i.pid AND "
 						"     v.shared=1))",
-						6, wantpid, wantname,
+						7, wantpid, wantname,
 						ei->pid, ei->gid);
 				}
 			}
