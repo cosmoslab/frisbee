@@ -1800,7 +1800,7 @@ PlayFrisbee(void)
 	Packet_t	packet, *p = &packet;
 	struct timeval  estamp, timeo;
 	unsigned int	myid;
-	int		delay, rv;
+	int		delay, rv, checkid = 0;
 	int32_t		jtype = 0;
 
 	gettimeofday(&stamp, 0);
@@ -1884,12 +1884,14 @@ PlayFrisbee(void)
 				jtype = p->hdr.subtype = PKTSUBTYPE_JOIN;
 				p->hdr.datalen = sizeof(p->msg.join);
 				p->msg.join.clientid = myid;
+				checkid = 0;
 			} else {
 				jtype = p->hdr.subtype = PKTSUBTYPE_JOIN2;
 				p->hdr.datalen = sizeof(p->msg.join2);
 				p->msg.join2.clientid = myid;
 				p->msg.join2.chunksize = MAXCHUNKSIZE;
 				p->msg.join2.blocksize = MAXBLOCKSIZE;
+				checkid = 1;
 			}
 			PacketSend(p, 0);
 			timeo.tv_sec = 0;
@@ -1926,7 +1928,7 @@ PlayFrisbee(void)
 		if (rv == 0 &&
 		    p->hdr.subtype == jtype &&
 		    p->hdr.type == PKTTYPE_REPLY &&
-		    p->msg.join.clientid == myid) {
+		    (!checkid || p->msg.join.clientid == myid)) {
 			if (jtype == PKTSUBTYPE_JOIN) {
 				p->msg.join2.chunksize = MAXCHUNKSIZE;
 				p->msg.join2.blocksize = MAXBLOCKSIZE;
