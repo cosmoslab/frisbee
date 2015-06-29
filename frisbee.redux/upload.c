@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -182,6 +182,9 @@ main(int argc, char **argv)
 		idletimeout = 0;
 
 	if (imageid) {
+		int retried = 0;
+
+	again:
 		if (!put_request(imageid, ntohl(msip.s_addr), msport, proxyip,
 				 filesize, mtime, timeout, askonly, timo,
 				 &reply))
@@ -193,6 +196,20 @@ main(int argc, char **argv)
 			exit(0);
 		}
 		if (reply.error) {
+			/*
+			 * XXX right now the master server returns this if
+			 * the uploader dies immediately for any reason;
+			 * so we don't know if it is really a transient
+			 * condition. So, we just retry once. Note that
+			 * the server will have waited a couple of seconds
+			 * before replying to us, so no need to wait further.
+			 */
+			if (reply.error == MS_ERROR_TRYAGAIN && !retried) {
+				FrisWarning("%s: retrying put...", imageid);
+				retried++;
+				goto again;
+			}
+
 			/*
 			 * XXX this is a bit of a hack: MS_ERROR_TOOBIG
 			 * returns the max allowed size as a courtesy so
