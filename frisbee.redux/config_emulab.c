@@ -1655,6 +1655,23 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 				continue;
 			}
 
+			/*
+			 * XXX for the AMD case, we have to strip the AMD
+			 * prefix from the path. This is to ensure that
+			 * stats and other accesses of the path go through
+			 * the AMD mountpoint (e.g., "/proj/foo") and not the
+			 * NFS mountpoint (e.g., "/.amd_mnt/ops/proj/foo"),
+			 * and thus trigger AMD to do the NFS mount when the
+			 * FS is not already mounted.
+			 */
+			if (AMDROOT) {
+				int arlen = strlen(AMDROOT);
+				if (strncmp(AMDROOT, targetpath, arlen) == 0) {
+					targetpath += arlen;
+					assert(targetpath[0] == '/');
+				}
+			}
+
 			iid = build_imageid(row[0], row[2], row[5], wantmeta);
 			ci = &put->imageinfo[put->numimages];
 			ci->imageid = iid;
