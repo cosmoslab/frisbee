@@ -182,7 +182,7 @@ main(int argc, char **argv)
 		idletimeout = 0;
 
 	if (imageid) {
-		int retried = 0;
+		int retries = 2;
 
 	again:
 		if (!put_request(imageid, ntohl(msip.s_addr), msport, proxyip,
@@ -200,13 +200,15 @@ main(int argc, char **argv)
 			 * XXX right now the master server returns this if
 			 * the uploader dies immediately for any reason;
 			 * so we don't know if it is really a transient
-			 * condition. So, we just retry once. Note that
-			 * the server will have waited a couple of seconds
-			 * before replying to us, so no need to wait further.
+			 * condition. So, we give it a couple of retries.
+			 * Note that the server will have waited two seconds
+			 * before replying to us, so we only wait a couple
+			 * of additional seconds.
 			 */
-			if (reply.error == MS_ERROR_TRYAGAIN && !retried) {
+			if (reply.error == MS_ERROR_TRYAGAIN && retries > 0) {
 				FrisWarning("%s: retrying put...", imageid);
-				retried++;
+				retries--;
+				sleep(2);
 				goto again;
 			}
 
