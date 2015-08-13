@@ -22,6 +22,7 @@
  */
 
 #undef OLD_SCHOOL
+#undef PASSIVE
 
 /*
  * Frisbee client.
@@ -114,12 +115,17 @@ extern int	ImageUnzipQuit(void);
 /*
  * Chunk descriptor, one per MAXCHUNKSIZE*MAXBLOCKSIZE bytes of an image file.
  * For each chunk, record its state and the time at which it was last
- * requested by someone.  The time stamp is "only" 61 bits.  This could be a
- * problem if packets arrive more than 73,000 years apart.  But we'll take
+ * requested by someone.  The time stamp is "only" 60 bits.  This could be a
+ * problem if packets arrive more than 36,500 years apart.  But we'll take
  * our chances...
  */
 typedef struct {
+#ifdef PASSIVE
+	uint64_t lastreq:60;
+	uint64_t enroute:1;	/* we have seen a request but no data yet */
+#else
 	uint64_t lastreq:61;
+#endif
 	uint64_t ours:1;	/* last request was from us */
 	uint64_t seen:1;	/* chunk is either filling or been processed */
 	uint64_t done:1;	/* chunk has been fully processed */
@@ -152,6 +158,9 @@ Chunk_t		*Chunks;		/* Chunk descriptors */
 ChunkBuffer_t   *ChunkBuffer;		/* The cache */
 int		*ChunkRequestList;	/* Randomized chunk request order */
 int		TotalChunkCount;	/* Total number of chunks in file */
+#ifdef PASSIVE
+int		ChunksEnroute;		/* Total useful chunks enroute */
+#endif
 #ifdef CONDVARS_WORK
 static pthread_mutex_t	chunkbuf_mutex;
 static pthread_cond_t	chunkbuf_cond;
@@ -862,6 +871,21 @@ ClientRecvThread(void *arg)
 #ifdef NEVENTS
 				needstamp = 1;
 #endif
+#ifdef PASSIVE
+				/*
+				 * If we timed-out with a en route counter
+				 * that has been keeping us from making our
+				 * own requests, then we are out of synch.
+				 * Just clear the enroute counters.
+				 */
+				if (ChunksEnroute >= maxreadahead) {
+					int i;
+					for (i = 0; i < TotalChunkCount; i++)
+						Chunks[i].enroute = 0;
+					ChunksEnroute = 0;
+					CLEVENT(1, EV_CLIENCLEAR, ChunksEnroute, 0, 0, 0);
+				}
+#endif
 				RequestChunk(1);
 				IdleCounter = idletimer;
 
@@ -926,6 +950,13 @@ ClientRecvThread(void *arg)
 			 */
 			(void) RequestStamp(p->msg.block.chunk,
 					    p->msg.block.block, 1, (void *)1);
+#ifdef PASSIVE
+			if (Chunks[p->msg.block.chunk].enroute) {
+				Chunks[p->msg.block.chunk].enroute = 0;
+				ChunksEnroute--;
+				CLEVENT(1, EV_CLIENROUTE, 0, ChunksEnroute, 0, 0);
+			}
+#endif
 			break;
 
 		case PKTSUBTYPE_REQUEST:
@@ -936,7 +967,7 @@ ClientRecvThread(void *arg)
 
 			if (RequestStamp(p->msg.request.chunk,
 					 p->msg.request.block,
-					 p->msg.request.count, 0))
+					 p->msg.request.count, 0)) {
 #ifndef OLD_SCHOOL
 				/*
 				 * XXX experimental: Also reset timer if
@@ -948,6 +979,22 @@ ClientRecvThread(void *arg)
 #else
 				;
 #endif
+#ifdef PASSIVE
+				/*
+				 * XXX experimental: If there is something
+				 * in the request we need, mark the chunk
+				 * as en route. If there are enough en route
+				 * packets when it comes time for us to make
+				 * a non-timeout driven request, then we
+				 * hold off making the request.
+				 */
+				if (!Chunks[p->msg.request.chunk].enroute) {
+					Chunks[p->msg.request.chunk].enroute = 1;
+					ChunksEnroute++;
+					CLEVENT(1, EV_CLIENROUTE, 1, ChunksEnroute, 0, 0);
+				}
+#endif
+			}
 			break;
 
 		case PKTSUBTYPE_PREQUEST:
@@ -1584,6 +1631,20 @@ GotBlock(Packet_t *p)
 		 */
 		Chunks[chunk].done = 1;
 
+#ifdef PASSIVE
+		/*
+		 * If we know of enough chunks en route to keep us busy,
+		 * don't make a request here. Otherwise, if we were late
+		 * to the party, we might make a bunch of requests that
+		 * everyone else has already seen. For the greater good,
+		 * lets just ride the wave until we don't see any more
+		 * good stuff coming in.
+		 */
+		if (ChunksEnroute >= maxreadahead) {
+			CLEVENT(1, EV_CLIPASSIVE, ChunksEnroute, 0, 0, 0);
+			return 1;
+		}
+#endif
 		/*
 		 * Send off a request for a chunk we do not have yet. This
 		 * should be enough to ensure that there is more work to do
@@ -1764,7 +1825,13 @@ RequestChunk(int timedout)
 	/*
 	 * Scan our request list looking for candidates.
 	 */
-	k = (maxreadahead > emptybufs) ? emptybufs : maxreadahead;
+	k = maxreadahead;
+#ifdef PASSIVE
+	assert(maxreadahead > ChunksEnroute);
+	k -= ChunksEnroute;
+#endif
+	if (k > emptybufs)
+		k = emptybufs;
 	for (i = 0, j = 0; i < TotalChunkCount && j < k; i++) {
 		int chunk = ChunkRequestList[i];
 		

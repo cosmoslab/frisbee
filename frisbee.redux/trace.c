@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2002-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -52,6 +52,7 @@ TraceInit(char *file)
 		fd = fopen(file, "a+");
 		if (fd == NULL)
 			FrisPfatal("Cannot open logfile %s", file);
+		FrisLog("Writing trace events to %s", file);
 	} else
 		fd = stderr;
 
@@ -501,6 +502,21 @@ TraceDump(int serverrel, int level)
 				fprintf(fd, "%s: recv timeout, wait=%03ld.%03ld\n",
 					inet_ntoa(ptr->srcip),
 					stamp.tv_sec, stamp.tv_usec/1000);
+				break;
+			case EV_CLIENROUTE:
+				fprintf(fd, "%s: chunk %s, %d total enroute\n",
+					inet_ntoa(ptr->srcip),
+					ptr->args[0] ? "enroute" : "arrived",
+					ptr->args[1]);
+				break;
+
+			case EV_CLIPASSIVE:
+				fprintf(fd, "%s: no request, %d chunks enroute\n",
+					inet_ntoa(ptr->srcip), ptr->args[0]);
+				break;
+			case EV_CLIENCLEAR:
+				fprintf(fd, "%s: idle with %d chunks enroute, cleared\n",
+					inet_ntoa(ptr->srcip), ptr->args[0]);
 				break;
 			}
 		}

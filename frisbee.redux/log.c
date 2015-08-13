@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -188,7 +188,7 @@ FrisPwarning(const char *fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 
-	FrisWarning("%s : %s", buf, strerror(errno));
+	FrisWarning("%s: %s", buf, strerror(errno));
 }
 
 void
@@ -201,5 +201,5 @@ FrisPfatal(const char *fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 
-	FrisFatal("%s : %s", buf, strerror(errno));
+	FrisFatal("%s: %s", buf, strerror(errno));
 }
