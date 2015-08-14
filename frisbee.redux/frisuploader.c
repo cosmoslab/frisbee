@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -277,10 +277,7 @@ recv_file()
 			cc = remaining;
 		ncc = conn_read(conn, wbuf, cc);
 		if (ncc < 0) {
-			if (conn_timeout(conn))
-				rv = 2;
-			else
-				FrisPwarning("socket read");
+			FrisPwarning("socket read");
 			goto done;
 		}
 		if (ncc == 0)
@@ -297,8 +294,11 @@ recv_file()
 			goto done;
 		}
 	}
-	/* Note that coming up short (remaining > 0) is not an error */
-	rv = 0;
+	/*
+	 * Note that coming up short (remaining > 0) is not an error
+	 * unless we timed out.
+	 */
+	rv = conn_timeout(conn) ? 2 : 0;
 
  done:
 	gettimeofday(&et, NULL);

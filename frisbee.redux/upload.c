@@ -577,10 +577,7 @@ send_file(void)
 
 		cc = conn_write(conn, rbuf, ncc);
 		if (cc < 0) {
-			if (conn_timeout(conn))
-				rv = 2;
-			else
-				FrisPwarning("socket write");
+			FrisPwarning("socket write");
 			goto done;
 		}
 		remaining -= cc;
