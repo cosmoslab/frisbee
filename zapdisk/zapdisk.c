@@ -42,14 +42,14 @@
 #include "sliceinfo.h"
 
 /*
- * For FS superblocks and other metadata we wipe the first 1M since that
+ * For FS superblocks and other metadata we wipe the first 4M since that
  *   is sufficient to wipe the most commonly sized LVM metadata block.
  * For boot blocks we need up to 32k for GPT.
  */
-#define MD_ZAPSIZE	(1024*1024)
+#define MD_ZAPSIZE	(4*1024*1024)
 #define MBR_ZAPSIZE	512
 #define GPT_ZAPSIZE	(32*1024)
-#define MAX_ZAPSIZE	(1024*1024)
+#define MAX_ZAPSIZE	(4*1024*1024)
 
 static int verbose = 0;
 static int pnum = 0;
