@@ -68,8 +68,8 @@ main(int argc, char **argv)
 {
 	int rv;
 
-	UploadLogInit();
 	parse_args(argc, argv);
+	UploadLogInit();
 
 	net_init();
 
@@ -89,8 +89,11 @@ static void
 parse_args(int argc, char **argv)
 {
 	int ch;
-	while ((ch = getopt(argc, argv, "m:p:i:b:I:T:s:A:")) != -1) {
+	while ((ch = getopt(argc, argv, "m:p:i:b:I:T:s:A:d")) != -1) {
 		switch (ch) {
+		case 'd':
+			debug++;
+			break;
 		case 'm':
 			if (!inet_aton(optarg, &clientip)) {
 				fprintf(stderr, "Invalid client IP '%s'\n",
