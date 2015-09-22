@@ -84,8 +84,8 @@ main(int argc, char **argv)
 	int timo = 5; /* XXX */
 	int rv;
 
-	ClientLogInit();
 	parse_args(argc, argv);
+	ClientLogInit();
 
 	/* Special case: streaming from stdin */
 	if (strcmp(uploadpath, "-") == 0) {
@@ -329,9 +329,20 @@ main(int argc, char **argv)
 static void
 parse_args(int argc, char **argv)
 {
-	int ch;
-	while ((ch = getopt(argc, argv, "S:p:F:Q:sb:I:T:NP:o")) != -1) {
+	int ch, mem;
+
+	while ((ch = getopt(argc, argv, "S:p:F:Q:sb:I:T:NP:odk:")) != -1) {
 		switch (ch) {
+		case 'd':
+			debug++;
+			break;
+		case 'k':
+			mem = atoi(optarg);
+			if (mem <= 0 || (mem * 1024) > MAXSOCKBUFSIZE)
+				sockbufsize = MAXSOCKBUFSIZE;
+			else
+				sockbufsize = mem * 1024;
+			break;
 		case 'S':
 			mshost = optarg;
 			break;
@@ -419,7 +430,8 @@ usage(void)
 	"Options:\n"
 	"  -S <IP>      Specify the IP address of the master server.\n"
 	"  -p <port>    Specify the port number of the master server.\n"
-        "  -b <bufsize> Specify the IO buffer size to use (64K by default)\n"
+        "  -b <size>    Specify the IO buffer size to use (64K by default)\n"
+        "  -k <size>    Specify the socket buffer size to use (1M by default)\n"
         "  -T <timeout> Time in seconds to wait for the upload to finish.\n"
 	"  -Q <fileid>  Use in place of -F to just ask the server about\n"
         "               the indicated file (image). Tells whether the\n"
@@ -433,7 +445,8 @@ usage(void)
         "the actual upload daemon rather than the master server.\n"
         "That daemon must be started manually in advance.\n"
 	"Options:\n"
-        "  -b <bufsize> Specify the IO buffer size to use (64K by default)\n"
+        "  -b <size>    Specify the IO buffer size to use (64K by default)\n"
+        "  -k <size>    Specify the socket buffer size to use (1M by default)\n"
         "  -T <timeout> Time in seconds to wait for the upload to finish.\n"
     	"  -s           Use encryption.\n\n"
 #endif

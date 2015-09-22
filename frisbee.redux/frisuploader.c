@@ -76,7 +76,7 @@ main(int argc, char **argv)
 	FrisLog("%s: listening as %d/%d on port %d for image data from %s (max of %llu bytes)",
 		path, geteuid(), getegid(), portnum, inet_ntoa(clientip), maxsize);
 	if (idletimeout || timeout)
-		FrisLog("%s: using idletimeout=%ds, timeout=%ds\n",
+		FrisLog("%s: using idletimeout=%ds, timeout=%ds",
 			path, idletimeout, timeout);
 
 	rv = recv_file();
@@ -88,8 +88,9 @@ main(int argc, char **argv)
 static void
 parse_args(int argc, char **argv)
 {
-	int ch;
-	while ((ch = getopt(argc, argv, "m:p:i:b:I:T:s:A:d")) != -1) {
+	int ch, mem;
+
+	while ((ch = getopt(argc, argv, "m:p:i:b:I:T:s:A:dk:")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug++;
@@ -100,6 +101,13 @@ parse_args(int argc, char **argv)
 					optarg);
 				exit(1);
 			}
+			break;
+		case 'k':
+			mem = atoi(optarg);
+			if (mem <= 0 || (mem * 1024) > MAXSOCKBUFSIZE)
+				sockbufsize = MAXSOCKBUFSIZE;
+			else
+				sockbufsize = mem * 1024;
 			break;
 		case 'p':
 			if (strchr(optarg, '-')) {
@@ -184,7 +192,7 @@ static void
 usage(void)
 {
 	char *usagestr =
-    	"\nusage: frisuploader [-i iface] [-T timo] [-s maxsize] -m IP -p port outfile\n"
+    	"\nusage: frisuploader [-i iface] [-T timo] [-k size] [-s maxsize] -m IP -p port outfile\n"
         "Upload a file from client identified by <IP>:<port> and save to <outfile>.\n"
 	"Options:\n"
         "<outfile>      File to save the uploaded data into.\n"
@@ -195,6 +203,7 @@ usage(void)
 	"  -i <iface>   Interface on which to listen (specified by local IP).\n"
 	"  -I <timo>    Max time (in seconds) to allow connect to be idle (no traffic from client).\n"
 	"  -T <timo>    Max time (in seconds) to wait for upload to complete.\n"
+    	"  -k <size>    Specify the socket buffer size to use (1M by default)\n"
     	"  -s <size>    Maximum amount of data (in bytes) to upload.\n"
     	"\n\n";
     	

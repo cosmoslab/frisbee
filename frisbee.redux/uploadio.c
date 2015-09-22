@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2015 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -56,7 +56,7 @@ conn *
 conn_accept_tcp(int sock, struct in_addr *client, int conntimo, int iotimo)
 {
 	conn *newconn;
-	int nsock;
+	int nsock, sz;
 	struct sockaddr_in sin;
 	socklen_t len;
 
@@ -116,6 +116,10 @@ conn_accept_tcp(int sock, struct in_addr *client, int conntimo, int iotimo)
 		}
 	}
 
+	sz = sockbufsize;
+	if (setsockopt(nsock, SOL_SOCKET, SO_RCVBUF, &sz, sizeof(sz)) < 0)
+		FrisPwarning("Could not set send socket buffer size to %d", sz);
+
 	newconn->ctype = CONN_SOCKET;
 	newconn->flags = 0;
 	newconn->desc.sockfd = nsock;
@@ -127,6 +131,7 @@ conn *
 conn_open(in_addr_t addr, in_port_t port, int usessl, int conntimo, int iotimo)
 {
 	conn *newconn = malloc(sizeof *newconn);
+	int sz;
 
 	if (newconn == NULL) {
 		FrisLog("Out of memory");
@@ -228,6 +233,10 @@ conn_open(in_addr_t addr, in_port_t port, int usessl, int conntimo, int iotimo)
 				return NULL;
 			}
 		}
+
+		sz = sockbufsize;
+		if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sz, sizeof(sz)) < 0)
+			FrisPwarning("Could not set send socket buffer size to %d", sz);
 
 		newconn->ctype = CONN_SOCKET;
 		newconn->flags = 0;
