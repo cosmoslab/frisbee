@@ -481,8 +481,18 @@ main(int argc, char **argv)
 		struct in_addr pif;
 		GetReply reply;
 		int method = askonly ? MS_METHOD_ANY : xfermethods;
-		int timo = 10; /* XXX */
 		int host = 0;
+		int timo;
+
+		/*
+		 * XXX we could have a distinct timeout for the master
+		 * server, but we just use the server response timeout
+		 * instead since the master server and the image server
+		 * are probably the same. This does mean that by default
+		 * we will wait forever for a response here, but hey,
+		 * what else do we have to do?
+		 */
+		timo = servertimo;
 
 		if (proxyfor) {
 			struct in_addr in;
