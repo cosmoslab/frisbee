@@ -81,11 +81,30 @@ int
 main(int argc, char **argv)
 {
 	PutReply reply;
-	int timo = 5; /* XXX */
-	int rv;
+	int timo, rv;
 
 	parse_args(argc, argv);
 	ClientLogInit();
+
+	/*
+	 * Set a timeout for talking to the master server.
+	 * Use the idletimout if explicitly set (>0),
+	 * otherwise use the overall timeout if explicitly set (>0),
+	 * otherwise the overall timeout is based on image size and
+	 *   we may not know that, so just pick a big number!
+	 *
+	 * XXX The current master server is single-threaded and waits for a
+	 * couple of seconds after spawning a worker process to see if it
+	 * dies immediately. So what might seem like a reasonable delay of 5
+	 * seconds really isn't if there are even three requests in the
+	 * master server queue ahead of us!
+	 */
+	if (idletimeout > 0)
+		timo = idletimeout;
+	else if (timeout > 0)
+		timo = timeout;
+	else
+		timo = 60; /* XXX */
 
 	/* Special case: streaming from stdin */
 	if (strcmp(uploadpath, "-") == 0) {
