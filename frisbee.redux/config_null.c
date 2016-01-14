@@ -87,7 +87,7 @@ null_read(void)
 	if (dynrate)
 		FrisLog("  max bandwidth = N/A");
 	else
-		FrisLog("  max bandwidth = %d MB/sec",
+		FrisLog("  max bandwidth = %d Mb/sec",
 			(int)(maxrate/1000000));
 
 	if (maxlinger < 0)
