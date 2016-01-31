@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2005-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -55,6 +55,7 @@ static int verbose = 0;
 static int pnum = 0;
 static int bootblocks = 0;
 static int superblocks = 0;
+static int erase = 0;
 static int doit = 0;
 
 static char *diskname;
@@ -71,10 +72,11 @@ static void
 usage(void)
 {
 	fprintf(stderr, "usage: "
-		"zapdisk [-BS] <diskdev>\n"
+		"zapdisk [-BSE] [-Z] <diskdev>\n"
 		" -p <pnum>   operate only on the given partition\n"
 		" -B          zap MBR/GPT and partition boot programs\n"
 		" -S          zap possible superblocks in all partitions\n"
+		" -E          erase (TRIM) the partition or disk\n"
 		" -Z          really do the zap and don't just talk about it\n"
 		" <diskdev>   disk special file to operate on\n");
 	exit(1);
@@ -89,7 +91,7 @@ main(int argc, char **argv)
 	int ismbr;
 	int gotbb = 0;
 
-	while ((ch = getopt(argc, argv, "p:vBSZ")) != -1)
+	while ((ch = getopt(argc, argv, "p:vBSEZ")) != -1)
 		switch(ch) {
 		case 'Z':
 			doit++;
@@ -106,6 +108,9 @@ main(int argc, char **argv)
 		case 'S':
 			superblocks++;
 			break;
+		case 'E':
+			erase++;
+			break;
 		case '?':
 		default:
 			usage();
@@ -115,8 +120,8 @@ main(int argc, char **argv)
 	if (argc < 1)
 		usage();
 
-	if (!bootblocks && !superblocks) {
-		fprintf(stderr, "Must specify one or both of -B and -S\n");
+	if (!bootblocks && !superblocks && !erase) {
+		fprintf(stderr, "Must specify either -E or one or both of -B and -S\n");
 		usage();
 	}
 	diskname = argv[0];
@@ -164,6 +169,45 @@ main(int argc, char **argv)
 			printf("%s: has MBR\n", diskname);
 	}
 #endif
+	if (erase) {
+		iz_lba start;
+		iz_size size;
+		extern uint64_t getdisksize(int);
+		extern int erasedata(int, off_t, off_t, int);
+
+		if (!gotbb && pnum > 0) {
+			fprintf(stderr, "%s: No valid MBR/GPT,"
+				" cannot erase partitions\n", diskname);
+			exit(1);
+		}
+		if (pnum == 0) {
+			start = 0;
+			size = getdisksize(fd);
+		} else {
+			start = diskinfo.slices[pnum-1].offset;
+			size = diskinfo.slices[pnum-1].size;
+		}
+		if (!doit) {
+			printf("%s: would erase sectors [%lu-%lu]\n",
+			       diskname, (unsigned long)start,
+			       (unsigned long)start + size - 1);
+			exit(0);
+		}
+		if (verbose)
+			printf("%s: erasing sectors [%lu-%lu]\n",
+			       diskname, (unsigned long)start,
+			       (unsigned long)start + size - 1);
+		if (erasedata(fd, (off_t)start * secsize,
+			      (off_t)size * secsize, 0)) {
+			fprintf(stderr,
+				"%s: Could not erase sectors [%lu-%lu]\n",
+				diskname, (unsigned long)start,
+				(unsigned long)start + size - 1);
+			exit(1);
+		}
+		exit(0);
+	}
+
 	if (!gotbb) {
 		/* lack of a valid partition table is ok */
 		if (superblocks)

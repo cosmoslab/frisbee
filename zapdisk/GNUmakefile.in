@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2015 University of Utah and the Flux Group.
+# Copyright (c) 2000-2016 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -54,13 +54,16 @@ include $(TESTBED_SRCDIR)/GNUmakerules
 
 CFLAGS		= -O -g $(LDSTATIC) $(PARTFLAGS)
 
-zapdisk: zapdisk.o disksize.o $(PARTLIBS)
-	$(CC) $(CFLAGS) zapdisk.o disksize.o $(PARTLIBS) -o zapdisk
+zapdisk: zapdisk.o disksize.o erase.o $(PARTLIBS)
+	$(CC) $(CFLAGS) zapdisk.o disksize.o erase.o $(PARTLIBS) -o zapdisk
 	cp zapdisk zapdisk.debug
 	strip zapdisk
 
 disksize.o:	$(IZSRCDIR)/disksize.c
 	$(CC) -c $(CFLAGS) -o disksize.o $<
+
+erase.o:	$(IZSRCDIR)/erase.c
+	$(CC) -c $(CFLAGS) -o erase.o $<
 
 $(PARTLIBS):
 	@$(MAKE) -C $(OBJDIR)/os/imagezip partlibs
