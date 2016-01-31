@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2015 University of Utah and the Flux Group.
+# Copyright (c) 2000-2016 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -41,6 +41,12 @@ WITH_RANGEMAP	= 0
 #
 WITH_MBR	= 1
 WITH_GPT	= 1
+
+#
+# Support disk erase (e.g., TRIM) operations
+# (incomplete as of 1/2016)
+#
+WITH_ERASE	= 0
 
 #
 # Support encrypted and signed-checksumed images.

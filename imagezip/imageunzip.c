@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -113,6 +113,7 @@ static int	 dostype = -1;
 static int	 slice = 0;
 static int	 debug = 0;
 static int	 outfd;
+static int	 doerase = 0;
 static int	 dofill = 0;
 static int	 nothreads = 0;
 static int	 rdycount;
@@ -570,6 +571,7 @@ usage(void)
 		" -s slice        Output to DOS slice (DOS numbering 1-4)\n"
 		"                 NOTE: Must specify a raw disk device.\n"
 		" -D DOS-ptype    Set the DOS partition type in slice mode.\n"
+		" -E		  Erase (TRIM) free blocks where possible.\n"
 		" -z              Write zeros to free blocks.\n"
 		" -p pattern      Write 32 bit pattern to free blocks.\n"
 		"                 NOTE: Use -z/-p to avoid seeking.\n"
@@ -599,7 +601,7 @@ main(int argc, char *argv[])
 #ifdef NOTHREADS
 	nothreads = 1;
 #endif
-	while ((ch = getopt(argc, argv, "vdhs:zp:oOnFD:W:Cr:Na:ck:eu:fIM:")) != -1)
+	while ((ch = getopt(argc, argv, "vdhs:Ezp:oOnFD:W:Cr:Na:ck:eu:fIM:")) != -1)
 		switch(ch) {
 #ifdef FAKEFRISBEE
 		case 'F':
@@ -634,6 +636,14 @@ main(int argc, char *argv[])
 			dostype = (int)strtoul(optarg, NULL, 0);
 			break;
 
+#ifdef WITH_ERASE
+		case 'E':
+			doerase++;
+			break;
+#else
+			fprintf(stderr, "Erase not supported\n");
+			exit(1);
+#endif
 		case 'p':
 			fillpat = strtoul(optarg, NULL, 0);
 		case 'z':
