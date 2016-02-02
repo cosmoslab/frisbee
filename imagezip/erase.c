@@ -30,8 +30,12 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <stdint.h>
 #ifdef __FreeBSD__
 #include <sys/disk.h>
+#endif
+#ifdef __linux__
+#include <linux/fs.h>
 #endif
 
 #define SECSIZE		512
@@ -41,34 +45,41 @@
 #define ERASEMINSIZE	4096
 #define ZEROSIZE	(256*1024)
 
-static off_t ebsize = -1;
-static off_t erased = 0;
-static off_t zeroed = 0;
+#ifdef DIOCGDELETE
+typedef off_t blk_t;
+int cmd = DIOCGDELETE;
+#endif
+#ifdef BLKDISCARD
+typedef uint64_t blk_t;
+int cmd = BLKDISCARD;
+#endif
 
-static int zeroit(int fd, off_t offset, off_t count);
+static blk_t ebsize = -1;
 
-off_t
+static int zeroit(int fd, blk_t offset, blk_t count);
+
+blk_t
 erasebsize(void)
 {
 	if (ebsize < 0) {
-#ifdef DIOCGDELETE
-		/* XXX this seems to be the minimum */
-		ebsize = ERASEMINSIZE;
-#else
 		ebsize = 0;
+#if defined(DIOCGDELETE) || defined(BLKDISCARD)
+		/* XXX this seems to be the minimum for DIOCGDELETE */
+		/* XXX actually only needs to be 512 for BLKDISCARD */
+		ebsize = ERASEMINSIZE;
 #endif
 	}
 
 	return ebsize;
 }
 
-#ifdef DIOCGDELETE
+#if defined(DIOCGDELETE) || defined(BLKDISCARD)
 int
-erasedata(int fd, off_t offset, off_t ecount, int zeroonfail)
+erasedata(int fd, blk_t offset, blk_t ecount, int zeroonfail)
 {
-	off_t args[2];
-	off_t toff, tend, tcnt;
-	off_t bsize = erasebsize();
+	blk_t args[2];
+	blk_t toff, tend, tcnt;
+	blk_t bsize = erasebsize();
 
 	if (bsize == 0) {
 		if (zeroonfail)
@@ -105,9 +116,9 @@ erasedata(int fd, off_t offset, off_t ecount, int zeroonfail)
 
 	args[0] = toff;
 	args[1] = tcnt;
-	if (ioctl(fd, DIOCGDELETE, args) < 0) {
+	if (ioctl(fd, cmd, args) < 0) {
 		fprintf(stderr,
-			"DIOCGDELETE of [%lld-%lld] failed (%d)\n",
+			"erase ioctl of [%lld-%lld] failed (%d)\n",
 			(long long)args[0],
 			(long long)args[0]+args[1]-1, errno);
 		if (zeroonfail)
@@ -132,14 +143,14 @@ erasedata(int fd, off_t offset, off_t ecount, int zeroonfail)
 }
 #else
 int
-erasedata(int fd, off_t offset, off_t ecount, int zeroonfail)
+erasedata(int fd, blk_t offset, blk_t ecount, int zeroonfail)
 {
 	return -1;
 }
 #endif
 
 static int
-zeroit(int fd, off_t offset, off_t count)
+zeroit(int fd, blk_t offset, blk_t count)
 {
 	char *buf, *_buf;
 	size_t bsize, wsize;
