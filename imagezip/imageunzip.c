@@ -113,7 +113,9 @@ static int	 dostype = -1;
 static int	 slice = 0;
 static int	 debug = 0;
 static int	 outfd;
+#ifdef WITH_ERASE
 static int	 doerase = 0;
+#endif
 static int	 dofill = 0;
 static int	 nothreads = 0;
 static int	 rdycount;
