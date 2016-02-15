@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -762,6 +762,8 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	 * that doesn't exist if the authentication check allows access to
 	 * the containing directory) and we have a parent, we request it
 	 * from the parent.
+	 *
+	 * Otherwise we just fail.
 	 */
 	isize = 0;
 	getfromparent = 0;
@@ -863,9 +865,26 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		getfromparent = 1;
 	} else {
 		/*
-		 * No image and no parent, just flat fail.
+		 * XXX If the config module says the path does not exist,
+		 * we stat again so that we can differentiate a file that
+		 * does not exist from a project directory that is not mounted
+		 * or something else.
 		 */
-		rv = (errno == ENOENT) ? MS_ERROR_NOIMAGE : MS_ERROR_INVALID;
+		if ((ii->flags & CONFIG_PATH_EXISTS) == 0)
+			stat(ii->path, &sb);
+
+		/* Image file does not exist */
+		if (errno == ENOENT)
+			rv = MS_ERROR_NOIMAGE;
+		/* Automounter (autofs) error */
+		else if (errno == EIO)
+			rv = MS_ERROR_INVALID;
+		/* Huh? The file reappeared, have them try again. */
+		else if (errno == 0)
+			rv = MS_ERROR_TRYAGAIN;
+		/* Something inexplicible */
+		else
+			rv = MS_ERROR_INVALID;
 		FrisWarning("%s: client %s %s failed: %s",
 			    imageid, clientip, op, GetMSError(rv));
 		msg->body.getreply.error = rv;
