@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -967,6 +967,51 @@ emulab_nodeid(struct in_addr *cnetip)
 }
 
 /*
+ * Get the Emulab role for the given node.
+ * Return a malloc'ed string on success, NULL otherwise (node doesn't exist).
+ */
+static char *
+emulab_noderole(char *node)
+{
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+	char *role;
+
+	res = mydb_query("SELECT erole,inner_elab_role FROM reserved"
+			 " WHERE node_id='%s'", 2, node);
+	if (res == NULL)
+		return NULL;
+
+	/* Node is free */
+	if (mysql_num_rows(res) == 0) {
+		mysql_free_result(res);
+		return NULL;
+	}
+
+	/*
+	 * Is node an inner boss?
+	 * Note that string could be "boss" or "boss+router"
+	 * so we just check the prefix.
+	 */
+	row = mysql_fetch_row(res);
+	role = row[0];
+	if (role == NULL || role[0] == '\0') {
+		mysql_free_result(res);
+		return NULL;
+	}
+
+	/* recognize an inner boss node */
+	if (strcmp(role, "node") == 0 &&
+	    row[1] && strncmp(row[1], "boss", 4) == 0)
+		role = "innerboss";
+
+	role = mystrdup(role);
+	mysql_free_result(res);
+
+	return role;
+}
+
+/*
  * Get the Emulab internal imageid for the image identified by ipid/iname.
  * Return a non-zero index on success, zero otherwise.
  */
@@ -1227,13 +1272,14 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 {
 	MYSQL_RES	*res;
 	MYSQL_ROW	row;
-	char		*node, *proxy, *role = NULL;
+	char		*node, *proxy = NULL, *role = NULL;
 	int		i, j, nrows;
 	char		*wantpid = NULL, *wantname = NULL, *wantvers = NULL;
 	char		*wantmeta = NULL;
 	struct config_host_authinfo *get = NULL, *put = NULL;
 	struct emulab_ha_extra_info *ei = NULL;
 	int		imageidx = 0, ngids, igids[2];
+	int		issubbossquery = 0;
 
 	if (getp == NULL && putp == NULL)
 		return 0;
@@ -1260,7 +1306,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		 * proxying for any node.
 		 */
 		if (req->s_addr == htonl(INADDR_LOOPBACK)) {
-			role = "boss";
+			role = mystrdup("boss");
 			proxy = mystrdup(role);
 			goto isboss;
 		}
@@ -1273,44 +1319,45 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		}
 
 		/* Check the role of the node */
-		res = mydb_query("SELECT erole,inner_elab_role FROM reserved"
-				 " WHERE node_id='%s'", 2, proxy);
-		assert(res != NULL);
-
-		/* Node is free */
-		if (mysql_num_rows(res) == 0) {
-			mysql_free_result(res);
+		role = emulab_noderole(proxy);
+		if (role == NULL) {
 			free(proxy);
 			emulab_free_host_authinfo(get);
 			emulab_free_host_authinfo(put);
 			return 1;
 		}
 
+		/* Must be inner boss, subboss or shared host to proxy */
+		if (strcmp(role, "innerboss") &&
+		    strcmp(role, "subboss") && 
+		    strcmp(role, "sharedhost")) {
+			free(proxy);
+			free(role);
+			emulab_free_host_authinfo(get);
+			emulab_free_host_authinfo(put);
+			return 1;
+		}
+	} else if (get != NULL && imageid != NULL && imageid[0] != '/') {
 		/*
-		 * Is node an inner boss?
-		 * Note that string could be "boss" or "boss+router"
-		 * so we just check the prefix.
+		 * Another special case:
+		 * If the requesting node is a subboss, requesting
+		 * info on a specific image on its own behalf, we tell
+		 * it whether the image exists (error=0) or not (error=3).
+		 * This is for the subboss cache cleaner so it can get
+		 * rid of cached copies of images that no longer exist.
 		 */
-		row = mysql_fetch_row(res);
-		if (row[1] && strncmp(row[1], "boss", 4) == 0)
-			role = "innerboss";
-		/* or a subboss? */
-		else if (row[0] && strcmp(row[0], "subboss") == 0)
-			role = "subboss";
-		/* or a shared vnode host? */
-		else if (row[0] && strcmp(row[0], "sharedhost") == 0)
-			role = "sharedhost";
-		/* none of the above, return an error */
-		else {
-			mysql_free_result(res);
-			free(proxy);
-			emulab_free_host_authinfo(get);
-			emulab_free_host_authinfo(put);
-			return 1;
+		node = emulab_nodeid(host);
+		if (node) {
+			role = emulab_noderole(node);
+			if (role) {
+				if (strcmp(role, "subboss") == 0)
+					issubbossquery = 1;
+				free(role);
+				role = NULL;
+			}
 		}
-		mysql_free_result(res);
-	} else
-		proxy = NULL;
+		goto gotnode;
+	}
 
 #ifdef USE_LOCALHOST_PROXY
  isboss:
@@ -1320,8 +1367,10 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	 * If the node doesn't exist, we return an empty list.
 	 */
 	node = emulab_nodeid(host);
+ gotnode:
 	if (node == NULL) {
 		if (proxy) free(proxy);
+		if (role) free(role);
 		if (getp) *getp = get;
 		if (putp) *putp = put;
 		return 0;
@@ -1341,6 +1390,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	 * Note also that we no longer care about proxy or not after this.
 	 */
 	if (proxy) {
+		assert(role != NULL);
 #ifdef USE_LOCALHOST_PROXY
 		if (strcmp(role, "boss") == 0) {
 			res = NULL;
@@ -1382,6 +1432,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		if (res) {
 			if (mysql_num_rows(res) == 0) {
 				mysql_free_result(res);
+				free(role);
 				free(proxy);
 				free(node);
 				emulab_free_host_authinfo(get);
@@ -1390,6 +1441,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			}
 			mysql_free_result(res);
 		}
+		free(role);
 		free(proxy);
 	}
 
@@ -1736,9 +1788,18 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	if (get != NULL) {
 		struct emulab_ha_extra_info *ei = get->extra;
 
+		/* Interested in a specific image */
 		if (imageid != NULL) {
-			/* Interested in a specific image */
-			if (can_access(imageidx, ei, 0)) {
+			/*
+			 * If this is a non-proxy subboss query for a
+			 * specific image, return info if the image exists.
+			 * This allows the subboss cache flusher to find out
+			 * if a cached image is valid or not.
+			 *
+			 * XXX this means that a subboss could load any
+			 * image; we can live with that.
+			 */
+			if (issubbossquery || can_access(imageidx, ei, 0)) {
 				if (wantvers) {
 					res = mydb_query("SELECT i.pid,i.gid,"
 						"i.imagename,v.path,"
