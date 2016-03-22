@@ -1896,7 +1896,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			struct emulab_ii_extra_info *ii;
 			struct config_imageinfo *ci;
 			struct stat sb;
-			char *iid, *path;
+			char *iid, *path, *dpath;
 			int iidx, wantsig;
 
 			row = mysql_fetch_row(res);
@@ -1942,6 +1942,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 					len += strlen(row[5]) + 1;
 				len++;			/* \0 */
 
+				/* Return full image if it exists */
 				path = mymalloc(len);
 				if (row[5])
 					snprintf(path, len, "%s%s%s.ndz:%s",
@@ -1951,9 +1952,35 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 					snprintf(path, len, "%s%s%s.ndz",
 						 row[3], (ch=='/') ? "" : "/",
 						 row[2]);
+				if (stat(path, &sb) == 0)
+					goto gotit;
+
+				/* Otherwise return delta if it exists */
+				dpath = mymalloc(len);
+				if (row[5])
+					snprintf(dpath, len,
+						 "%s%s%s.ddz:%s",
+						 row[3],
+						 (ch=='/') ? "" : "/",
+						 row[2], row[5]);
+				else
+					snprintf(dpath, len,
+						 "%s%s%s.ddz",
+						 row[3],
+						 (ch=='/') ? "" : "/",
+						 row[2]);
+				if (stat(dpath, &sb) == 0) {
+					free(path);
+					path = dpath;
+					goto gotit;
+				}
+
+				/* Otherwise, return full path */
+				free(dpath);
 			} else
 				path = mystrdup(row[3]);
 
+		gotit:
 			if (wantsig) {
 				ci->path = mymalloc(strlen(path) + 4);
 				strcpy(ci->path, path);
