@@ -847,6 +847,14 @@ checkhash(char *name, struct hashinfo *hinfo)
 				else
 					reportbad = 1;
 			}
+			if (detail > 1) {
+				printf("BAD [%u-%u]:\n", reg->region.start,
+				       reg->region.start + reg->region.size - 1);
+				printf("  sig  %s\n",
+				       spewhash(reg->hash, hashlen));
+				printf("  disk %s\n",
+				       spewhash(hash, hashlen));
+			}
 		}
 #ifdef TIMEIT
 		sstamp = rdtsc();
