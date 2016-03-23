@@ -2807,7 +2807,7 @@ compress_chunk(off_t off, off_t size, int *full, uint32_t *subblksize)
 		 * In particular, we are not going to waste a significant
 		 * fraction of each chunk just to preserve this property.
 		 * Note also, that this is a heuristic anyway based on
-		 * how much space we need we will need for the compressed
+		 * how much space we will need for the compressed
 		 * version of any particular hash block.
 		 *
 		 * So I somewhat arbitrarily picked "no more than 5%
