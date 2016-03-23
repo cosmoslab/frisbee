@@ -1944,7 +1944,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 
 				/* Return full image if it exists */
 				path = mymalloc(len);
-				if (row[5])
+				if (row[5] && strcmp(row[5], "0") != 0)
 					snprintf(path, len, "%s%s%s.ndz:%s",
 						 row[3], (ch=='/') ? "" : "/",
 						 row[2], row[5]);
@@ -1957,7 +1957,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 
 				/* Otherwise return delta if it exists */
 				dpath = mymalloc(len);
-				if (row[5])
+				if (row[5] && strcmp(row[5], "0") != 0)
 					snprintf(dpath, len,
 						 "%s%s%s.ddz:%s",
 						 row[3],
