@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003 University of Utah and the Flux Group.
+ * Copyright (c) 2003-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -39,7 +39,7 @@
 #define FSFIXFAT	64		/* Fix file system FAT */
 
 int readboot(int fd, struct bootblock *boot);
-int readfat(int fd, struct bootblock *boot, int no, struct fatEntry **fp);
+int readfat(int fd, struct bootblock *boot, u_int no, struct fatEntry **fp);
 void fat_addskip(struct bootblock *boot, int startcl, int ncl);
 off_t fat_lseek(int fd, off_t off, int whence);
 ssize_t devread(int fd, void *buf, size_t nbytes);

@@ -17,13 +17,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Martin Husemann
- *	and Wolfgang Solfrank.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -40,9 +33,9 @@
 
 #include <sys/cdefs.h>
 #ifndef lint
-__RCSID("$NetBSD: fat.c,v 1.12 2000/10/10 20:24:52 is Exp $");
+__RCSID("$NetBSD: fat.c,v 1.18 2006/06/05 16:51:18 christos Exp $");
 static const char rcsid[] =
-  "$FreeBSD: src/sbin/fsck_msdosfs/fat.c,v 1.1.2.1 2001/08/01 05:47:56 obrien Exp $";
+  "$FreeBSD: releng/10.2/sbin/fsck_msdosfs/fat.c 268968 2014-07-21 23:23:20Z pfg $";
 #endif /* not lint */
 
 #include <stdlib.h>
@@ -53,18 +46,13 @@ static const char rcsid[] =
 
 #include "fat_glue.h"
 
-static int checkclnum __P((struct bootblock *, int, cl_t, cl_t *));
-static int _readfat __P((int, struct bootblock *, int, u_char **));
+static int checkclnum(struct bootblock *, u_int, cl_t, cl_t *);
 
 /*
  * Check a cluster number for valid value
  */
 static int
-checkclnum(boot, fat, cl, next)
-	struct bootblock *boot;
-	int fat;
-	cl_t cl;
-	cl_t *next;
+checkclnum(struct bootblock *boot, u_int fat, cl_t cl, cl_t *next)
 {
 	static cl_t first = 0;
 
@@ -87,30 +75,26 @@ checkclnum(boot, fat, cl, next)
  * Read a FAT from disk. Returns 1 if successful, 0 otherwise.
  */
 static int
-_readfat(fs, boot, no, buffer)
-	int fs;
-	struct bootblock *boot;
-	int no;
-	u_char **buffer;
+_readfat(int fs, struct bootblock *boot, u_int no, u_char **buffer)
 {
 	off_t off;
 
-	*buffer = malloc(boot->FATsecs * boot->BytesPerSec);
+	*buffer = malloc(boot->FATsecs * boot->bpbBytesPerSec);
 	if (*buffer == NULL) {
-		perror("No space for FAT");
+		perror("No space for FAT sectors");
 		return 0;
 	}
 
-	off = boot->ResSectors + no * boot->FATsecs;
-	off *= boot->BytesPerSec;
+	off = boot->bpbResSectors + no * boot->FATsecs;
+	off *= boot->bpbBytesPerSec;
 
 	if (lseek(fs, off, SEEK_SET) != off) {
 		perror("Unable to read FAT");
 		goto err;
 	}
 
-	if (read(fs, *buffer, boot->FATsecs * boot->BytesPerSec)
-	    != boot->FATsecs * boot->BytesPerSec) {
+	if ((size_t)read(fs, *buffer, boot->FATsecs * boot->bpbBytesPerSec)
+	    != boot->FATsecs * boot->bpbBytesPerSec) {
 		perror("Unable to read FAT");
 		goto err;
 	}
@@ -126,30 +110,28 @@ _readfat(fs, boot, no, buffer)
  * Read a FAT and decode it into internal format
  */
 int
-readfat(fs, boot, no, fp)
-	int fs;
-	struct bootblock *boot;
-	int no;
-	struct fatEntry **fp;
+readfat(int fs, struct bootblock *boot, u_int no, struct fatEntry **fp)
 {
 	struct fatEntry *fat;
 	u_char *buffer, *p;
 	cl_t cl;
 	int ret = FSOK;
+	size_t len;
 
 	boot->NumFree = boot->NumBad = 0;
 
 	if (!_readfat(fs, boot, no, &buffer))
 		return FSFATAL;
-		
-	fat = calloc(boot->NumClusters, sizeof(struct fatEntry));
+
+	fat = malloc(len = boot->NumClusters * sizeof(struct fatEntry));
 	if (fat == NULL) {
-		perror("No space for FAT");
+		perror("No space for FAT clusters");
 		free(buffer);
 		return FSFATAL;
 	}
+	(void)memset(fat, 0, len);
 
-	if (buffer[0] != boot->Media
+	if (buffer[0] != boot->bpbMedia
 	    || buffer[1] != 0xff || buffer[2] != 0xff
 	    || (boot->ClustMask == CLUST16_MASK && buffer[3] != 0xff)
 	    || (boot->ClustMask == CLUST32_MASK
@@ -160,10 +142,10 @@ readfat(fs, boot, no, fp)
 		/* Windows 95 OSR2 (and possibly any later) changes
 		 * the FAT signature to 0xXXffff7f for FAT16 and to
 		 * 0xXXffff0fffffff07 for FAT32 upon boot, to know that the
-		 * filesystem is dirty if it doesn't reboot cleanly.
+		 * file system is dirty if it doesn't reboot cleanly.
 		 * Check this special condition before errorring out.
 		 */
-		if (buffer[0] == boot->Media && buffer[1] == 0xff
+		if (buffer[0] == boot->bpbMedia && buffer[1] == 0xff
 		    && buffer[2] == 0xff
 		    && ((boot->ClustMask == CLUST16_MASK && buffer[3] == 0x7f)
 			|| (boot->ClustMask == CLUST32_MASK
@@ -176,7 +158,7 @@ readfat(fs, boot, no, fp)
 		}
 		else {
 			/* just some odd byte sequence in FAT */
-				
+
 			switch (boot->ClustMask) {
 			case CLUST32_MASK:
 				pwarn("%s (%02x%02x%02x%02x%02x%02x%02x%02x)\n",
@@ -249,9 +231,10 @@ readfat(fs, boot, no, fp)
 
  done:
 	free(buffer);
-	if (ret)
+	if (ret) {
 		free(fat);
-	else
+		*fp = NULL;
+	} else
 		*fp = fat;
 	return ret;
 }

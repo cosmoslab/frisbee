@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2003-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -63,10 +63,10 @@ read_fatslice(int slice, iz_type stype, iz_lba start, iz_size size,
 			boot.ClustMask == CLUST32_MASK ? 32 :
 			boot.ClustMask == CLUST16_MASK ? 16 : 12);
 
-	fatsecpersec = boot.BytesPerSec / secsize;
-	if (fatsecpersec * secsize != boot.BytesPerSec) {
+	fatsecpersec = boot.bpbBytesPerSec / secsize;
+	if (fatsecpersec * secsize != boot.bpbBytesPerSec) {
 		warnx("FAT Slice %d: FAT sector size (%d) not a multiple of %d",
-		      slice+1, boot.BytesPerSec, secsize);
+		      slice+1, boot.bpbBytesPerSec, secsize);
 		return 1;
 	}
 
@@ -86,8 +86,8 @@ fat_addskip(struct bootblock *boot, int startcl, int ncl)
 {
 	uint32_t start, size;
 
-	start = startcl * boot->SecPerClust + boot->ClusterOffset;
-	size = ncl * boot->SecPerClust;
+	start = startcl * boot->bpbSecPerClust + boot->ClusterOffset;
+	size = ncl * boot->bpbSecPerClust;
 	if (fatsecpersec != 1) {
 		start /= fatsecpersec;
 		size /= fatsecpersec;
