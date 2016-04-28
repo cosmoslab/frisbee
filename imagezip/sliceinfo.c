@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -52,6 +52,7 @@ static struct sliceinfo fsmap[] = {
 	{ IZTYPE_FAT16L_LBA,	"FAT16 LBA",	read_fatslice },
 	{ IZTYPE_FAT32,		"FAT32",	read_fatslice },
 	{ IZTYPE_FAT32_LBA,	"FAT32 LBA",	read_fatslice },
+	{ IZTYPE_EFISYSTEM,	"EFI System (FAT)",	read_fatslice },
 #endif
 	{ IZTYPE_EXT,		"DOSEXT",	0 },
 	{ IZTYPE_EXT_LBA,	"DOSEXT LBA",	0 },

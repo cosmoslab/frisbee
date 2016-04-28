@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -53,6 +53,7 @@ typedef uint16_t	iz_flags;
 #define IZTYPE_386BSD		0xa5	/* Free/NetBSD */
 #define IZTYPE_OPENBSD		0xa6	/* OpenBSD */
 #define IZTYPE_PROTECTIVE	0xee	/* GPT protective MBR */
+#define IZTYPE_EFISYSTEM	0xef	/* EFI system partition */
 
 /* These have no corresponding MBR type (should be 0x100 or above) */
 #define IZTYPE_FBSDBOOT		0xA501	/* FreeBSD Boot partition */
