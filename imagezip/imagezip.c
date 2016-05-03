@@ -1605,7 +1605,11 @@ mergeskips(int verbose)
  * The best sort technology available with less than 5 minutes work!
  */
 int
+#ifdef linux
+sfunc(const void *e1, const void *e2, void *rfunc)
+#else
 sfunc(void *rfunc, const void *e1, const void *e2)
+#endif
 {
 	int ((*rangecmp)(struct range *, struct range *)) = rfunc;
 	struct range *r1 = *(struct range **)e1;
@@ -1618,7 +1622,7 @@ sfunc(void *rfunc, const void *e1, const void *e2)
 }
 
 struct range *
-bettersort(struct range *head, int count,
+bettersort(struct range *head, size_t count,
 	       int (*rangecmp)(struct range *, struct range *))
 {
 	struct range **tarray, *nlist, **listp, *prange;
@@ -1635,7 +1639,11 @@ bettersort(struct range *head, int count,
 		i++;
 	}
 	assert(i == count);
+#ifdef linux
+	qsort_r(tarray, count, sizeof(struct range *), sfunc, rangecmp);
+#else
 	qsort_r(tarray, count, sizeof(struct range *), rangecmp, sfunc);
+#endif
 	listp = &nlist;
 	for (i = 0; i < count; i++) {
 		assert(tarray[i+1] == NULL ||
@@ -1665,18 +1673,20 @@ sortrange(struct range **headp, int domerge,
 
 #if USE_HACKSORT > 0
 	{
-		int count = 0;
+		size_t count = 0;
 		for (prange = head; prange; prange = prange->next)
 			count++;
-		fprintf(stderr, "sorting %d records\n", count);
+		fprintf(stderr, "sorting %u records\n", count);
 		if (count > 10000) {
 			head = bettersort(head, count, rangecmp);
-			for (prange = head; prange; prange = prange->next) {
-				if (prange->next)
-					assert(prange->start+prange->size <= prange->next->start);
+			if (head != NULL) {
+				for (prange = head; prange; prange = prange->next) {
+					if (prange->next)
+						assert(prange->start+prange->size <= prange->next->start);
+				}
+				*headp = head;
+				return;
 			}
-			*headp = head;
-			return;
 		}
 	}
 #endif
