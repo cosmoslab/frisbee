@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -24,22 +24,15 @@
 /*
  * "Grow" a testbed disk
  *
- * Used to expand the final (DOS) partition in a testbed image to
- * fill the remainder of the disk.  A typical testbed disk image
- * is sized to fit in the least-common-denominator disk we have,
- * currently 13GB.  This current image is laid out as:
+ * Used to expand the final (DOS) partition in a testbed image to fill
+ * the remainder of the disk. The current ("MBR3") image is laid out as:
  *
  *	       0 to       62: bootarea
- *	      63 to  6281414: FreeBSD (3GB)
- *	 6281415 to 12562829: Linux (3GB)
- *	12562830 to 12819869: Linux swap (128MB)
- *	12819870 to 26700029: unused
- *
- * for multi-OS disks, or:
- *
- *	       0 to       62: bootarea
- *	      63 to      N-1: some OS
- *	       N to 26700029: unused
+ *	      63 to     2047: unused
+ *	    2048 to 33556479: OS (16GB)
+ *	33556480 to 39847935: unused (3GB)
+ *	39847936 to 46139391: swap (3GB)
+ *	46139392 to NNNNNNNN: unused
  *
  * The goal of this program is to locate the final, unused partition and
  * resize it to match the actual disk size.  This program does *not* know
@@ -171,7 +164,7 @@ getdiskinfo(char *disk)
 #else
 #ifdef DIOCGMEDIASIZE
 	/*
-	 * FreeBSD 5.
+	 * FreeBSD 5 and beyond.
 	 *
 	 * Note we still use the contrived geometry here rather than the
 	 * simple "gimme the disk size" DIOCGMEDIASIZE.  Why?  I'm glad you
@@ -205,13 +198,18 @@ getdiskinfo(char *disk)
 			err(1, "%s: DIOCGMEDIASIZE", disk);
 		diskinfo.disksize = (unsigned long)(dsize / ssize);
 		if (ioctl(fd, DIOCGFWSECTORS, &nsect) < 0)
-			err(1, "%s: DIOCGFWSECTORS", disk);
+			nsect = 0;
 		diskinfo.spt = nsect;
 		if (ioctl(fd, DIOCGFWHEADS, &nhead) < 0)
-			err(1, "%s: DIOCGFWHEADS", disk);
+			nhead = 0;
 		diskinfo.tpc = nhead;
-		diskinfo.cpu = diskinfo.disksize / (nsect * nhead);
-		chs = diskinfo.cpu * diskinfo.tpc * diskinfo.spt;
+		if (nsect && nhead) {
+			diskinfo.cpu = diskinfo.disksize / (nsect * nhead);
+			chs = diskinfo.cpu * diskinfo.tpc * diskinfo.spt;
+		} else {
+			diskinfo.cpu = 0;
+			chs = diskinfo.disksize;
+		}
 	}
 #else
 #ifdef DIOCGDINFO
