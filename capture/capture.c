@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -174,6 +174,8 @@ int		   remotemode;
 int		   programmode;
 char		  *xendomain;
 int		   retryinterval = 5000;
+int		   maxfailures = 10;
+int		   failures;
 int		   upportnum = -1, upfd = -1, upfilefd = -1;
 char		   uptmpnam[64];
 size_t		   upfilesize = 0;
@@ -703,8 +705,9 @@ main(int argc, char **argv)
 		 * This mimics the behavior if the connection/program/domain
 		 * dies later and we auto-restart.
 		 *
-		 * XXX this can be bad if the caller gives us a bad argument
-		 * (command line, xen domain name) as we will loop forever.
+		 * Note that progmode only attempts a restart "maxfailures"
+		 * times before it dies. This prevents infinite retries due
+		 * to things like a bad command line argument.
 		 */
 		int isrestart = -1;
 	retry:
@@ -1789,8 +1792,11 @@ progmode(int isrestart)
 	 * this before blocking the signal so that it happens here rather
 	 * than gratuitously after we have done waitpid below.
 	 */
-	if (isrestart && progpid > 0)
-		usleep(100000);
+	if (isrestart && progpid > 0) {
+		int i;
+		for (i = 0; i < 10 && progpid > 0; i++)
+			usleep(100000);
+	}
 
 	/* avoid races with deadchild */
 	sigemptyset(&mask);
@@ -1831,13 +1837,14 @@ progmode(int isrestart)
 			int cc;
 
 			warning("%s: program (pid=%d) died immediately, "
-				"status=0x%x, output:",
+				"status=0x%x",
 				Devname, progpid, status);
-			fcntl(pipefds[0], F_SETFL, O_NONBLOCK);
-			cc = read(pipefds[0], buf, sizeof(buf)-1);
-			if (cc > 0) {
-				buf[cc] = '\0';
-				warning("%s ...", buf);
+			if (fcntl(pipefds[0], F_SETFL, O_NONBLOCK) == 0) {
+				cc = read(pipefds[0], buf, sizeof(buf)-1);
+				if (cc > 0) {
+					buf[cc] = '\0';
+					warning("  Output: %s ...", buf);
+				}
 			}
 			close(pipefds[0]);
 			close(pipefds[1]);
@@ -1883,7 +1890,14 @@ progmode(int isrestart)
 		exit(666);
 	}
  err:
+	if (rv) {
+		if (++failures > maxfailures)
+			die("sub-program failed to start %d consecutive times;"
+			    " aborting.", maxfailures);
+	} else
+		failures = 0;
 	sigprocmask(SIG_UNBLOCK, &mask, 0);
+
 	return rv;
 }
 
