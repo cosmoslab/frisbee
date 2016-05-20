@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -71,7 +71,7 @@ char *usagestr =
 void
 usage()
 {
-	fprintf(stderr, usagestr);
+	fprintf(stderr, "%s", usagestr);
 	exit(1);
 }
 
