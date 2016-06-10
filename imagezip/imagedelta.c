@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -714,6 +714,9 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
     return 0;
 }
  
+/*
+ * Set the modtime of dst to match that of src.
+ */
 static void
 setfiletime(char *dst, char *src)
 {
@@ -721,11 +724,6 @@ setfiletime(char *dst, char *src)
     struct stat sb;
     int cc;
 
-    /*
-     * Set the modtime of the hash file to match that of the image.
-     * This is a crude (but fast!) method for matching images with
-     * signatures.
-     */
     cc = stat(src, &sb);
     if (cc >= 0) {
 #ifdef linux
@@ -979,7 +977,13 @@ main(int argc, char **argv)
 	ndz_close(delta.ndz);
 
 	setfiletime(argv[2], argv[1]);
-	setfiletime(delta.sigfile, argv[1]);
+
+	/*
+	 * Set the modtime of the signature file to match that of the image.
+	 * This is a crude (but fast!) method for matching images with
+	 * signatures.
+	 */
+	setfiletime(delta.sigfile, argv[2]);
     } else {
 	fprintf(stderr, "Images %s and %s are identical, no delta produced!\n",
 		argv[0], argv[1]);
