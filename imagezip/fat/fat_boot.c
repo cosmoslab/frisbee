@@ -120,8 +120,8 @@ readboot(int dosfs, struct bootblock *boot)
 		    || fsinfo[0x1ff] != 0xaa
 		    || fsinfo[0x3fc]
 		    || fsinfo[0x3fd]
-		    || fsinfo[0x3fe] != 0x55
-		    || fsinfo[0x3ff] != 0xaa) {
+		    || (fsinfo[0x3fe] && fsinfo[0x3fe] != 0x55)
+		    || (fsinfo[0x3ff] && fsinfo[0x3ff] != 0xaa)) {
 			pwarn("Invalid signature in fsinfo block\n");
 			return FSFATAL;
 		}
