@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2015 University of Utah and the Flux Group.
+# Copyright (c) 2000-2016 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -64,7 +64,7 @@ endif
 
 CLIENTFLAGS	= $(CFLAGS)
 CLIENTLIBS	= 
-CLIENTOBJS	= disksize.o zapdisk.o
+CLIENTOBJS	= disksize.o erase.o zapdisk.o
 
 ifeq ($(WITH_MBR),1)
 CFLAGS		+= -DWITH_MBR -Imbr
@@ -86,6 +86,9 @@ zapdisk: $(CLIENTOBJS)
 
 disksize.o:	$(IMAGEZIPDIR)/disksize.c
 	$(CC) -c $(CFLAGS) -I$(IMAGEZIPDIR) -o disksize.o $<
+
+erase.o:	$(IMAGEZIPDIR)/erase.c
+	$(CC) -c $(CFLAGS) -I$(IMAGEZIPDIR) -o erase.o $<
 
 install:
 	$(INSTALL) zapdisk $(DESTDIR)$(BINDIR)/zapdisk
