@@ -1887,7 +1887,7 @@ progmode(int isrestart)
 
 		sigprocmask(SIG_UNBLOCK, &mask, 0);
 		execvp(programargv[1], &programargv[1]);
-		exit(666);
+		exit(66);
 	}
  err:
 	if (rv) {
