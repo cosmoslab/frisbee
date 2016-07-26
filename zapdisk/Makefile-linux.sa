@@ -67,11 +67,11 @@ CLIENTLIBS	=
 CLIENTOBJS	= disksize.o erase.o zapdisk.o
 
 ifeq ($(WITH_MBR),1)
-CFLAGS		+= -DWITH_MBR -Imbr
+LINUXOPTS	+= -DWITH_MBR -Imbr
 CLIENTOBJS	+= $(IMAGEZIPDIR)/mbr/mbr.o
 endif
 ifeq ($(WITH_GPT),1)
-CFLAGS		+= -DWITH_GPT -Igpt -Dcrc32=gpt_crc32 -DIMAGEZIP
+LINUXOPTS	+= -DWITH_GPT -Igpt -Dcrc32=gpt_crc32 -DIMAGEZIP
 CLIENTOBJS	+= $(IMAGEZIPDIR)/gpt/gpt.o $(IMAGEZIPDIR)/gpt/crc32.o $(IMAGEZIPDIR)/gpt/gpt_glue.o
 endif
 
