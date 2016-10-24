@@ -1680,6 +1680,9 @@ findchild(char *imageid, int ptype, int methods)
 			else if (ci->method == MS_METHOD_MULTICAST &&
 				 bestci->method == MS_METHOD_UNICAST)
 				bestci = ci;
+			else if (ci->method == MS_METHOD_UNICAST &&
+				 bestci->method == MS_METHOD_MULTICAST)
+				/* do nothing */;
 			else
 				FrisPfatal("multiple unicast servers for %s",
 					   imageid);
