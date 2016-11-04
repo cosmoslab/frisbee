@@ -708,6 +708,9 @@ main(int argc, char **argv)
 		 * Note that progmode only attempts a restart "maxfailures"
 		 * times before it dies. This prevents infinite retries due
 		 * to things like a bad command line argument.
+		 *
+		 * Also for progmode, we increase the retry interval
+		 * additively on each failure, resetting on success.
 		 */
 		int isrestart = -1;
 	retry:
@@ -723,8 +726,9 @@ main(int argc, char **argv)
 		else if (programmode) {
 			if (progmode(isrestart) != 0) {
 				warning("sub-program did not start;"
-					" waiting and trying again");
-				usleep(retryinterval * 1000);
+					" waiting %ds and trying again",
+					(failures * retryinterval) / 1000);
+				usleep((failures * retryinterval) * 1000);
 				goto retry;
 			}
 		}
@@ -1129,9 +1133,17 @@ capture(void)
 					else if (programmode) {
 						warning("sub-program died;"
 						" attempting to restart");
-						while (progmode(1) != 0)
-							usleep(retryinterval
+						while (progmode(1) != 0) {
+							warning("sub-program did not restart;"
+								" waiting %ds and trying again",
+								(failures *
+								 retryinterval)
+								/ 1000);
+							usleep((failures *
+								retryinterval)
 							       * 1000);
+						}
+
 					}
 					else {
 						warning("xen console pty closed;"
