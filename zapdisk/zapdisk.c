@@ -170,6 +170,10 @@ main(int argc, char **argv)
 	}
 #endif
 	if (erase) {
+#ifdef NO_ERASE
+		fprintf(stderr, "Erase operation not implemented!\n");
+		exit(1);
+#else
 		iz_lba start;
 		iz_size size;
 		extern uint64_t getdisksize(int);
@@ -206,6 +210,7 @@ main(int argc, char **argv)
 			exit(1);
 		}
 		exit(0);
+#endif
 	}
 
 	if (!gotbb) {

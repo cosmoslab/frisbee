@@ -34,6 +34,7 @@ IZSRCDIR	= $(TESTBED_SRCDIR)/os/imagezip
 #
 WITH_MBR	= 1
 WITH_GPT	= 1
+WITH_ERASE	= 1
 
 include $(OBJDIR)/Makeconf
 
@@ -47,15 +48,22 @@ ifeq ($(WITH_GPT),1)
 PARTLIBS	+= $(OBJDIR)/os/imagezip/gpt/libgpt.a
 PARTFLAGS	+= -DWITH_GPT
 endif
+ifeq ($(WITH_ERASE),1)
+EFLAGS		=
+EOBJS		= erase.o
+else
+EFLAGS		+= -DNO_ERASE
+EOBJS		= 
+endif
 
 all:
 
 include $(TESTBED_SRCDIR)/GNUmakerules
 
-CFLAGS		= -O -g $(LDSTATIC) $(PARTFLAGS)
+CFLAGS		= -O -g $(LDSTATIC) $(PARTFLAGS) $(EFLAGS)
 
-zapdisk: zapdisk.o disksize.o erase.o $(PARTLIBS)
-	$(CC) $(CFLAGS) zapdisk.o disksize.o erase.o $(PARTLIBS) -o zapdisk
+zapdisk: zapdisk.o disksize.o $(EOBJS) $(PARTLIBS)
+	$(CC) $(CFLAGS) zapdisk.o disksize.o $(EOBJS) $(PARTLIBS) -o zapdisk
 	cp zapdisk zapdisk.debug
 	strip zapdisk
 
