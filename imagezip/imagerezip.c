@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2016 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -687,12 +687,14 @@ unchunkify(struct ndz_rangemap *omap, struct ndz_range *range, void *arg)
     return 0;
 }
 
+#if 0
 static void
 chunkfunc(struct ndz_rangemap *map, void *ptr)
 {
     unsigned int chunkno = (uintptr_t)ptr;
     printf("chunkno=%u", chunkno);
 }
+#endif
 
 int
 main(int argc, char **argv)
