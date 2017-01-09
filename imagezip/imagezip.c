@@ -62,6 +62,9 @@
 #include "range.h"
 #ifdef WITH_HASH
 #include "hashmap/hashmap.h"
+#ifdef WITH_HASHALIGN
+#include "imagehash.h"
+#endif
 #endif
 
 /*
@@ -475,6 +478,12 @@ main(int argc, char *argv[])
 			compat = COMPRESSED_V3;
 			break;
 		case 'F':
+#ifdef WITH_HASHALIGN
+			if (strcmp(optarg, "ha") == 0) {
+				frangesize = -1;
+				break;
+			}
+#endif
 			frangesize = atoi(optarg);
 			if (frangesize < 0)
 				usage();
@@ -1546,7 +1555,66 @@ mergeskips(int verbose)
 		prevp = &skips;
 		while (*prevp) {
 			prange = *prevp;
+#ifdef WITH_HASHALIGN
+			/*
+			 * Free ranges should line up with hash ranges
+			 */
+			if (frangesize < 0) {
+				unsigned int hbsize, toff, tsize;
+				int didit = 0;
+
+				hbsize = bytestosec(HASHBLK_SIZE); /* XXX */
+				toff = prange->start % hbsize;
+				if (prange->size < hbsize ||
+				    (toff &&
+				     prange->size < (hbsize - toff) + hbsize))
+					goto dropall;
+
+				if (toff) {
+					tsize = hbsize - toff;
+					toff = prange->start;
+					
+					if (zerofrange)
+						addfixupfunc(zerofixup,
+							     sectobytes(toff),
+							     0,
+							     sectobytes(tsize),
+							     NULL, 0,
+							     RELOC_NONE);
+
+					prange->start += tsize;
+					prange->size -= tsize;
+					total += tsize;
+					didit++;
+				}
+				tsize = prange->size % hbsize;
+				if (tsize) {
+					toff = prange->start + prange->size
+						- tsize;
+					if (zerofrange)
+						addfixupfunc(zerofixup,
+							     sectobytes(toff),
+							     0,
+							     sectobytes(tsize),
+							     NULL, 0,
+							     RELOC_NONE);
+
+					prange->size -= tsize;
+					total += tsize;
+					didit++;
+				}
+				if (didit)
+					culled++;
+				assert(prange->size >= hbsize);
+				assert((prange->start % hbsize) == 0);
+				assert((prange->size % hbsize) == 0);
+				prevp = &prange->next;
+			} else
+#endif
 			if (prange->size < (uint32_t)frangesize) {
+#ifdef WITH_HASHALIGN
+			dropall:
+#endif
 				if (debug > 2)
 					fprintf(stderr,
 						"dropping range [%u-%u]\n",

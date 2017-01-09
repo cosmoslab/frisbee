@@ -113,6 +113,7 @@ WITH_FAT	= @WINSUPPORT@
 
 # Note: requires WITH_CRYPTO
 WITH_HASH	= 1
+WITH_HASHALIGN	= 0
 
 include $(OBJDIR)/Makeconf
 
@@ -234,6 +235,9 @@ SUBDIRCFLAGS	+= -DHASHSTATS
 SUBDIRS		+= hashmap
 ZIPLIBS		+= hashmap/libhashmap.a
 LIBS		+= -lcrypto $(PTHREADLIBS)
+ifeq ($(WITH_HASHALIGN),1)
+CFLAGS		+= -DWITH_HASHALIGN
+endif
 endif
 
 ifeq ($(WITH_RANGEMAP),1)
