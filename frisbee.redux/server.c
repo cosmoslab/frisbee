@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -1485,7 +1485,7 @@ compute_sendrate(void)
 
 	if (bandwidth != 0) {
 		/*
-		 * Convert Mbits/sec to blocks/sec
+		 * Convert bits/sec to blocks/sec
 		 */
 		blockspersec = bandwidth / wireblocksize;
 

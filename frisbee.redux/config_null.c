@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -87,7 +87,7 @@ null_read(void)
 	if (dynrate)
 		FrisLog("  max bandwidth = N/A");
 	else
-		FrisLog("  max bandwidth = %d Mb/sec",
+		FrisLog("  max bandwidth = %d Mbit/sec",
 			(int)(maxrate/1000000));
 
 	if (maxlinger < 0)
@@ -117,7 +117,7 @@ null_restore(void *state)
 	if (dynrate)
 		FrisLog("  max bandwidth = N/A");
 	else
-		FrisLog("  max bandwidth = %d MB/sec",
+		FrisLog("  max bandwidth = %d Mbit/sec",
 			(int)(maxrate/1000000));
 
 	if (maxlinger < 0)
