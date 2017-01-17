@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2015 University of Utah and the Flux Group.
+# Copyright (c) 2000-2017 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -46,6 +46,18 @@ WITH_SIGNING	= 1
 # Support direct sending of IGMP query/report messages.
 #
 WITH_IGMP	= 1
+
+#
+# XXX note that this option has totally changed from what it was originally.
+#
+# We now use this to compile Emulab event support into the server so that it
+# can forward frisbee progress info to interested subscribers on boss.
+#
+# Originally it was to support an event receiver on clients for benchmarking;
+# receiving events to start up syncronized with other instances and with a
+# specific set of parameters.
+#
+WITH_EVENTS	= 1
 
 SYSTEM	:= $(shell uname -s)
 
@@ -236,34 +248,27 @@ endif
 #CFLAGS		+= -DCONDVARS_WORK
 
 # Define this to a non-zero value to enable recording of trace data
-#CFLAGS		+= -DNEVENTS=500000
+#CFLAGS		+= -DTRACE_EVENTS=500000
 
 # Turn on client event handling
-# XXX renaming of PacketSend is to avoid a namespace collision with pubsub
-#CFLAGS		+= -DDOEVENTS -DPacketSend=_frisPacketSend
-#CLIENTOBJS	+= event.o $(OBJDIR)/lib/event/event.o $(OBJDIR)/lib/event/util.o
-#CLIENTLIBS	+= -lpubsub
-#EVENTFLAGS	= $(CFLAGS) -I/usr/local/include/pubsub -I$(TESTBED_SRCDIR)
+ifeq ($(WITH_EVENTS),1)
+CFLAGS		+= -DEMULAB_EVENTS -DBOSSNODE='"$(BOSSNODE)"'
+SERVEROBJS	+= event.o $(TESTBED_LIBOBJDIR)/event/event.o $(TESTBED_LIBOBJDIR)/event/util.o
+SERVERLIBS	+= -L/usr/local/lib -lpubsub -lcrypto
+EVENTFLAGS	= $(CFLAGS) -I/usr/local/include -I$(TESTBED_LIBSRCDIR)
+endif
 
 frisbee-debug: $(CLIENTOBJS) $(IUZDEPS)
 	$(CC) $(LDFLAGS) $(CLIENTFLAGS) $(CLIENTOBJS) $(CLIENTLIBS) $(IUZLIBS) -o $@
-#	cp frisbee frisbee.debug
-#	strip frisbee
 
 frisbeed-debug: $(SERVEROBJS)
 	$(CC) $(LDFLAGS) $(SERVERFLAGS) $(SERVEROBJS) $(SERVERLIBS) -o $@
-#	cp frisbeed frisbeed.debug
-#	strip frisbeed
 
 frisupload-debug: $(UPLOADOBJS)
 	$(CC) $(LDFLAGS) $(UPLOADFLAGS) $(UPLOADOBJS) $(UPLOADLIBS) -o $@
-#	cp frisupload frisupload.debug
-#	strip frisupload
 
 frisuploadd-debug: $(UPLOADDOBJS)
 	$(CC) $(LDFLAGS) $(UPLOADDFLAGS) $(UPLOADDOBJS) $(UPLOADDLIBS) -o $@
-#	cp frisuploadd frisuploadd.debug
-#	strip frisuploadd
 
 mfrisbeed-debug: $(MSERVEROBJS)
 	$(CC) $(LDFLAGS) $(MSERVERFLAGS) $(MSERVEROBJS) $(MSERVERLIBS) -o $@
@@ -324,12 +329,15 @@ client-install: client
 	$(INSTALL_PROGRAM) frisbee $(DESTDIR)/usr/local/bin/frisbee
 	$(INSTALL_PROGRAM) frisupload $(DESTDIR)/usr/local/bin/frisupload
 
-frisbee-mfs-install: client
+frisbee-mfs:
+	$(MAKE) WITH_EVENTS=0 client
+
+frisbee-mfs-install: frisbee-mfs
 	$(INSTALL_PROGRAM) frisbee $(DESTDIR)$(CLIENT_BINDIR)/frisbee
 	$(INSTALL_PROGRAM) frisupload $(DESTDIR)$(CLIENT_BINDIR)/frisupload
 
 clean:
-	/bin/rm -f *.o *.a *.debug
+	/bin/rm -f *.o *.a *-debug
 	/bin/rm -f frisbee frisbeed mfrisbeed frisupload frisuploadd
 	/bin/rm -f frisbee.tar frisbee.tar.gz
 	/bin/rm -rf frisbee-dist

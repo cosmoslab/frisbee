@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2002-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -25,7 +25,7 @@
 #include <sys/time.h>
 #include <netinet/in.h>
 
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 struct event {
 	struct timeval	tstamp;
 	struct in_addr	srcip;

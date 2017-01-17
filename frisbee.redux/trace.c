@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2002-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -32,11 +32,11 @@
 #include "trace.h"
 #include "log.h"
 
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 
-struct event eventlog[NEVENTS];
+struct event eventlog[TRACE_EVENTS];
 struct event *evptr = eventlog;
-struct event *evend = &eventlog[NEVENTS];
+struct event *evend = &eventlog[TRACE_EVENTS];
 int evlogging, evcount;
 pthread_mutex_t evlock;
 static int evisclient;
@@ -131,7 +131,8 @@ TraceDump(int serverrel, int level)
 				done = 1;
 				fprintf(fd, "%d of %d events, "
 					"start=%ld.%03ld, level=%d:\n",
-					evcount > NEVENTS ? NEVENTS : evcount,
+					evcount > TRACE_EVENTS ?
+					TRACE_EVENTS : evcount,
 					evcount, startt.tv_sec,
 					startt.tv_usec/1000, level);
 				/*

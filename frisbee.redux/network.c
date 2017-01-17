@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -819,10 +819,11 @@ PacketSend(Packet_t *p, int *resends)
  * multicast packets that are not destined for us, but for someone else.
  */
 void
-PacketReply(Packet_t *p)
+PacketReply(Packet_t *p, int firenforget)
 {
 	struct sockaddr_in to;
-	int		   len;
+	int		len;
+	int		fd = sock;
 
 	len = sizeof(p->hdr) + p->hdr.datalen;
 
@@ -831,10 +832,19 @@ PacketReply(Packet_t *p)
 	to.sin_addr.s_addr = p->hdr.srcip;
 	p->hdr.srcip       = myipaddr.s_addr;
 
-	while (sendto(sock, (void *)p, len, 0, 
+#ifdef USE_REUSEADDR_COMPAT
+	/* send out selfsock so the source IP is ours and not the MC addr */
+	if (selfsock >= 0)
+		fd = selfsock;
+#endif
+
+	while (sendto(fd, (void *)p, len, 0, 
 		      (struct sockaddr *)&to, sizeof(to)) < 0) {
 		if (errno != ENOBUFS && errno != EAGAIN)
-			FrisPfatal("PacketSend(sendto)");
+			FrisPfatal("PacketReply(sendto)");
+
+		if (firenforget)
+			break;
 
 		/*
 		 * ENOBUFS means we ran out of mbufs. Okay to sleep a bit
@@ -898,6 +908,10 @@ PacketValid(Packet_t *p, int nchunks)
 		break;
 	case PKTSUBTYPE_LEAVE2:
 		if (p->hdr.datalen < sizeof(p->msg.leave2))
+			return 0;
+		break;
+	case PKTSUBTYPE_PROGRESS:
+		if (p->hdr.datalen < sizeof(p->msg.progress.hdr))
 			return 0;
 		break;
 	default:

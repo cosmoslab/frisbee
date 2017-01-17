@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -242,6 +242,12 @@ typedef struct {
 	char	map[MAXCHUNKSIZE/CHAR_BIT];
 } BlockMap_t;
 
+typedef struct {
+	uint32_t	chunks_in;	/* Chunk successfully received */
+	uint32_t	chunks_out;	/* Chunk successfully written */
+	uint64_t	bytes_out;	/* Bytes written to disk */
+} __attribute__((__packed__)) ClientSummary_t;
+
 /*
  * Packet defs.
  */
@@ -326,6 +332,45 @@ typedef struct {
 			int32_t		elapsed;
 			ClientStats_t	stats;
 		} leave2;
+
+		/*
+		 * Report progress. The request from the server tells
+		 * the client how often and what to report. The reply
+		 * from the client contains the requested info.
+		 *
+		 * On request, "when" is measured in seconds, with zero
+		 * meaning "report one time right now". On reply, "when"
+		 * contains the local timestamp for the info reported.
+		 *
+		 * On request, "what" is a flag word currently what info
+		 * to report. On reply, it is the data that is included
+		 * (which should be the same). Currently this can be one
+		 * or more of:
+		 * - a summary (chunks received, bytes written),
+		 * - stats (same as reported by leave)
+		 *
+		 * On request, "seq" is an initial sequence number to
+		 * use in reports. On reply it is the current sequence
+		 * number, which is incremented for each report. This
+		 * can be used on the server side to see if reports are
+		 * being lost.
+		 *
+		 * Note that each client will skew the initial report
+		 * by some random amount to prevent all clients reporting
+		 * in sync.
+		 *
+		 * Requests can be multicast, replies are unicast.
+		 */
+		struct {
+			struct {
+				uint32_t clientid;
+				uint32_t when;
+				uint32_t what;
+				uint32_t seq;
+			} hdr;
+			ClientSummary_t	summary;
+			ClientStats_t	stats;
+		} progress;
 	} msg;
 } Packet_t;
 #define PKTTYPE_REQUEST		1
@@ -338,6 +383,11 @@ typedef struct {
 #define PKTSUBTYPE_LEAVE2	5
 #define PKTSUBTYPE_PREQUEST	6
 #define PKTSUBTYPE_JOIN2	7
+#define PKTSUBTYPE_PROGRESS	8
+
+/* types of progress reports */
+#define PKTPROGRESS_SUMMARY	1
+#define PKTPROGRESS_STATS	2
 
 #ifdef MASTER_SERVER
 #include <netinet/in.h>
@@ -454,7 +504,7 @@ unsigned long ClientNetID(void);
 int	PacketReceive(Packet_t *p);
 int	PacketRequest(Packet_t *p);
 void	PacketSend(Packet_t *p, int *resends);
-void	PacketReply(Packet_t *p);
+void	PacketReply(Packet_t *p, int firenforget);
 int	PacketValid(Packet_t *p, int nchunks);
 void	dump_network(void);
 #ifdef MASTER_SERVER

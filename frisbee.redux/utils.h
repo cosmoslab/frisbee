@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2011 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -88,6 +88,9 @@ int	BlockMapFirst(BlockMap_t *blockmap);
 int	BlockMapApply(BlockMap_t *blockmap, int chunk,
 		      int (*func)(int, int, int, void *), void *farg);
 void	ClientStatsDump(unsigned int id, ClientStats_t *stats);
+#ifdef EMULAB_EVENTS
+char	*extract_imageid(char *opath);
+#endif
 #ifdef MASTER_SERVER
 char	*GetMSError(int error);
 char	*GetMSMethods(int methods);

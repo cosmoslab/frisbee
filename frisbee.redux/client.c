@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -49,14 +49,6 @@
 #include "utils.h"
 #include "trace.h"
 
-#ifdef DOEVENTS
-#include "event.h"
-
-static char *eventserver;
-static Event_t event;
-static int exitstatus;
-#endif
-
 /* Tunable constants */
 int		maxchunkbufs = DEFCHUNKBUFS;
 int		maxwritebufmem = DEFWRITEBUFMEM;
@@ -87,12 +79,14 @@ int		askonly;
 int		busywait = 0;
 char		*proxyfor = NULL;
 static struct timeval stamp;
+static uint32_t	clientid;
 static struct in_addr serverip;
 int		servertimo = 0;
 #ifdef MASTER_SERVER
 static int	xfermethods = MS_METHOD_MULTICAST;
 #endif
 int		forcedirectio = 0;
+int		heartbeat = 0;
 
 /* Forward Decls */
 static void	PlayFrisbee(void);
@@ -158,6 +152,8 @@ Chunk_t		*Chunks;		/* Chunk descriptors */
 ChunkBuffer_t   *ChunkBuffer;		/* The cache */
 int		*ChunkRequestList;	/* Randomized chunk request order */
 int		TotalChunkCount;	/* Total number of chunks in file */
+int		ChunksReceived;		/* Chunks received (for reporting) */
+int		ChunksDecompressed;	/* Chunks decomp'ed (for reporting) */
 #ifdef PASSIVE
 int		ChunksEnroute;		/* Total useful chunks enroute */
 #endif
@@ -165,10 +161,11 @@ int		ChunksEnroute;		/* Total useful chunks enroute */
 static pthread_mutex_t	chunkbuf_mutex;
 static pthread_cond_t	chunkbuf_cond;
 #endif
-static pthread_t child_pid;
+static pthread_mutex_t	heartbeat_mutex;
+static pthread_t child_pid, heartbeat_pid;
 static long child_error;
 
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 int blocksrecv, goodblocksrecv;
 #endif
 
@@ -240,7 +237,7 @@ void (*DiskStatusCallback)();
 static void
 WriterStatusCallback(int isbusy)
 {
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 	uint32_t hi, lo;
 
 	if (zero) {
@@ -264,7 +261,7 @@ main(int argc, char **argv)
 	char	*sig_keyfile = 0, *enc_keyfile = 0, *uuidstr = 0;
 	int	islocalproxy = 0;
 
-	while ((ch = getopt(argc, argv, "dqhp:m:s:i:tbznU:r:E:D:C:W:S:T:M:R:I:ONc:e:u:K:B:F:Q:P:X:fk:")) != -1)
+	while ((ch = getopt(argc, argv, "dqhp:m:s:i:tbznU:r:E:D:C:W:S:T:M:R:I:ONc:e:u:K:B:F:Q:P:X:fk:H:")) != -1)
 		switch(ch) {
 		case 'd':
 			debug++;
@@ -278,12 +275,6 @@ main(int argc, char **argv)
 			broadcast++;
 			break;
 			
-#ifdef DOEVENTS
-		case 'E':
-			eventserver = optarg;
-			break;
-#endif
-
 		case 'p':
 			portnum = atoi(optarg);
 			break;
@@ -457,6 +448,13 @@ main(int argc, char **argv)
 			forcedirectio++;
 			break;
 
+		case 'H':
+			heartbeat = atoi(optarg);
+			/* XXX cannot sleep more that 4295 sec due to fsleep */
+			if (heartbeat < 0 || heartbeat > 3600)
+				heartbeat = 3600;
+			break;
+
 		case 'h':
 		case '?':
 		default:
@@ -581,113 +579,6 @@ main(int argc, char **argv)
 #endif
 	ClientNetInit(portnum);
 
-#ifdef DOEVENTS
-	if (eventserver != NULL && EventInit(eventserver) != 0) {
-		FrisLog("Failed to initialize event system, events ignored");
-		eventserver = NULL;
-	}
-	if (eventserver != NULL) {
-		FrisLog("Waiting for START event...");
-		EventWait(EV_ANY, &event);
-		if (event.type != EV_START)
-			goto done;
-
-	again:
-		if (event.data.start.startdelay > 0)
-			startdelay = event.data.start.startdelay;
-		else
-			startdelay = 0;
-		if (event.data.start.startat > 0)
-			startat = event.data.start.startat;
-		else
-			startat = 0;
-		if (event.data.start.pkttimeout >= 0)
-			pkttimeout = event.data.start.pkttimeout;
-		else
-			pkttimeout = PKTRCV_TIMEOUT;
-		if (event.data.start.idletimer >= 0)
-			idletimer = event.data.start.idletimer;
-		else
-			idletimer = CLIENT_IDLETIMER_COUNT;
-		if (event.data.start.chunkbufs >= 0 &&
-		    event.data.start.chunkbufs <= MAXCHUNKBUFS)
-			maxchunkbufs = event.data.start.chunkbufs;
-		else
-			maxchunkbufs = DEFCHUNKBUFS;
-		if (event.data.start.writebufmem >= 0 &&
-		    event.data.start.writebufmem < MAXWRITEBUFMEM)
-			maxwritebufmem = event.data.start.writebufmem;
-		else
-			maxwritebufmem = DEFWRITEBUFMEM;
-		if (event.data.start.maxmem >= 0 &&
-		    event.data.start.maxmem < MAXMEMUSE)
-			maxmem = event.data.start.maxmem;
-		else
-			maxmem = 0;
-		if (event.data.start.readahead >= 0 &&
-		    event.data.start.readahead <= maxchunkbufs)
-			maxreadahead = event.data.start.readahead;
-		else
-			maxreadahead = MAXREADAHEAD;
-		if (event.data.start.inprogress >= 0 &&
-		    event.data.start.inprogress <= maxchunkbufs)
-			maxinprogress = event.data.start.inprogress;
-		else
-			maxinprogress = MAXINPROGRESS;
-		if (event.data.start.redodelay >= 0)
-			redodelay = event.data.start.redodelay;
-		else
-			redodelay = CLIENT_REQUEST_REDO_DELAY;
-		if (event.data.start.idledelay >= 0)
-			idledelay = event.data.start.idledelay;
-		else
-			idledelay = CLIENT_WRITER_IDLE_DELAY;
-
-		if (event.data.start.slice >= 0)
-			slice = event.data.start.slice;
-		else
-			slice = 0;
-		if (event.data.start.zerofill >= 0)
-			zero = event.data.start.zerofill;
-		else
-			zero = 0;
-		if (event.data.start.randomize >= 0)
-			randomize = event.data.start.randomize;
-		else
-			randomize = 1;
-		if (event.data.start.nothreads >= 0)
-			nothreads = event.data.start.nothreads;
-		else
-			nothreads = 0;
-		if (event.data.start.dostype >= 0)
-			dostype = event.data.start.dostype;
-		else
-			dostype = -1;
-		if (event.data.start.debug >= 0)
-			debug = event.data.start.debug;
-		else
-			debug = 0;
-		if (event.data.start.trace >= 0)
-			tracing = event.data.start.trace;
-		else
-			tracing = 0;
-		if (event.data.start.traceprefix[0] > 0)
-			strncpy(traceprefix, event.data.start.traceprefix, 64);
-		else
-			traceprefix[0] = 0;
-
-		FrisLog("Starting: slice=%d, startat=%d, startdelay=%d, zero=%d, "
-			"randomize=%d, nothreads=%d, debug=%d, tracing=%d, "
-			"pkttimeout=%d, idletimer=%d, idledelay=%d, redodelay=%d, "
-			"maxmem=%d, chunkbufs=%d, maxwritebumfem=%d, "
-			"maxreadahead=%d, maxinprogress=%d",
-			slice, startat, startdelay, zero, randomize, nothreads,
-			debug, tracing, pkttimeout, idletimer, idledelay, redodelay,
-			maxmem, maxchunkbufs, maxwritebufmem,
-			maxreadahead, maxinprogress);
-	}
-#endif
-
 	redodelay = sleeptime(redodelay, "request retry delay", 0);
 	idledelay = sleeptime(idledelay, "writer idle delay", 0);
 
@@ -743,23 +634,6 @@ main(int argc, char **argv)
 	}
 
 	ImageUnzipQuit();
-
-#ifdef DOEVENTS
-	if (eventserver != NULL) {
-		FrisLog("Waiting for START/STOP event...");
-		EventWait(EV_ANY, &event);
-		if (event.type == EV_START) {
-#ifdef STATS
-			memset(&Stats, 0, sizeof(Stats));
-#endif
-			goto again;
-		}
-	done:
-		if (event.type == EV_STOP && event.data.stop.exitstatus >= 0)
-			exitstatus = event.data.stop.exitstatus;
-		exit(exitstatus);
-	}
-#endif
 
 	exit(0);
 }
@@ -820,7 +694,7 @@ ClientRecvThread(void *arg)
 	STCounter = servertimo * TIMEOUT_HZ;
 
 	while (1) {
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 		static int needstamp = 1;
 		struct timeval pstamp;
 		if (needstamp) {
@@ -878,7 +752,7 @@ ClientRecvThread(void *arg)
 					DOSTAT(recvidles++);
 				CLEVENT(2, EV_CLIRTIMO,
 					pstamp.tv_sec, pstamp.tv_usec, 0, 0);
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 				needstamp = 1;
 #endif
 #ifdef PASSIVE
@@ -937,7 +811,7 @@ ClientRecvThread(void *arg)
 			CLEVENT(BackOff ? 1 : (p->msg.block.block==0 ? 3 : 4),
 				EV_CLIGOTPKT, pstamp.tv_sec, pstamp.tv_usec,
 				goodblocksrecv, blocksrecv);
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 			needstamp = 1;
 #endif
 			BackOff = 0;
@@ -1021,6 +895,11 @@ ClientRecvThread(void *arg)
 					     RequestStamp, 0);
 			break;
 
+
+		/* XXX don't handle requests yet */
+		case PKTSUBTYPE_PROGRESS:
+			break;
+
 		case PKTSUBTYPE_JOIN:
 		case PKTSUBTYPE_JOIN2:
 		case PKTSUBTYPE_LEAVE:
@@ -1072,7 +951,7 @@ ChunkerStartup(void)
 	int		chunkcount = TotalChunkCount;
 	int		i, wasidle = 0;
 	static int	gotone;
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 	uint32_t	idleus = 0;
 #endif
 
@@ -1127,9 +1006,24 @@ ChunkerStartup(void)
 #ifndef linux
 	atexit(myexit);
 #endif
+
+	/*
+	 * Start up a heartbeat thread to make periodic progress reports
+	 * to our server.
+	 */
+	if (heartbeat) {
+		void *ClientReportThread(void *);
+
+		pthread_mutex_init(&heartbeat_mutex, 0);
+		if (pthread_create(&heartbeat_pid, NULL,
+				   ClientReportThread, (void *)0)) {
+			FrisFatal("Failed to create heartbeat thread!");
+		}
+	}
+
 	if (pthread_create(&child_pid, NULL,
 			   ClientRecvThread, (void *)0)) {
-		FrisFatal("Failed to create pthread!");
+		FrisFatal("Failed to create network receive thread!");
 	}
 
 	/*
@@ -1165,21 +1059,12 @@ ChunkerStartup(void)
 				pthread_mutex_unlock(&chunkbuf_mutex);
 #endif
 				pthread_join(child_pid, &ignored);
+				if (heartbeat) {
+					pthread_cancel(heartbeat_pid);
+					pthread_join(heartbeat_pid, &ignored);
+				}
 				_exit(child_error);
 			}
-
-#ifdef DOEVENTS
-			Event_t event;
-			if (eventserver != NULL &&
-			    EventCheck(&event) && event.type == EV_STOP) {
-#ifdef CONDVARS_WORK
-				pthread_mutex_unlock(&chunkbuf_mutex);
-#endif
-				FrisLog("Aborted after %d chunks",
-					TotalChunkCount-chunkcount);
-				break;
-			}
-#endif
 			if (!wasidle) {
 				CLEVENT(1, EV_CLIDCIDLE, 0, 0, 0, 0);
 				if (debug > 1)
@@ -1189,14 +1074,14 @@ ChunkerStartup(void)
 				DOSTAT(nochunksready++);
 #ifdef CONDVARS_WORK
 			{
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 				struct timeval _istamp, _eistamp;
 				gettimeofday(&_istamp, 0);
 #endif
 				pthread_cond_wait(&chunkbuf_cond,
 						  &chunkbuf_mutex);
 				pthread_mutex_unlock(&chunkbuf_mutex);
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 				gettimeofday(&_eistamp, 0);
 				timersub(&_eistamp, &_istamp, &_eistamp);
 				/* XXX yes, this can wrap */
@@ -1207,7 +1092,7 @@ ChunkerStartup(void)
 			}
 #else
 			fsleep(idledelay);
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 			/* XXX yes, this can wrap */
 			idleus += idledelay;
 #endif
@@ -1233,7 +1118,7 @@ ChunkerStartup(void)
 			ChunkBuffer[i].thischunk, idleus,
 			decompblocks, writeridles);
 		wasidle = 0;
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 		idleus = 0;
 #endif
 
@@ -1257,6 +1142,7 @@ ChunkerStartup(void)
 		 * Okay, free the slot up for another chunk.
 		 */
 		ChunkBuffer[i].state = CHUNK_EMPTY;
+		ChunksDecompressed++;
 		chunkcount--;
 	}
 	/*
@@ -1274,14 +1160,13 @@ ChunkerStartup(void)
 	if (ImageUnzipFlush())
 		FrisPfatal("ImageUnzipFlush failed");
 
-#ifdef STATS
-	{
-		Stats.u.v1.decompblocks = decompblocks;
-		Stats.u.v1.writeridles = writeridles;
-		Stats.u.v1.ebyteswritten = totaledata;
-		Stats.u.v1.rbyteswritten = totalrdata;
+	/*
+	 * Kill the heartbeat thread now that everything is done
+	 */
+	if (heartbeat) {
+		pthread_cancel(heartbeat_pid);
+		pthread_join(heartbeat_pid, &ignored);
 	}
-#endif
 
 	free(ChunkBuffer);
 	free(ChunkRequestList);
@@ -1420,7 +1305,7 @@ GotBlock(Packet_t *p)
 	static int lastnoroomchunk = -1, lastnoroomblocks, inprogress;
 	int	nfull = 0, nfill = 0; 
 
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 	blocksrecv++;
 #endif
 #ifndef OLD_SCHOOL
@@ -1487,7 +1372,7 @@ GotBlock(Packet_t *p)
 				assert(Chunks[dchunk].done == 0);
 				assert(Chunks[dchunk].seen == 1);
 
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 				{
 				int dblocks = BlockMapIsAlloc(&ChunkBuffer[dubious].blockmap, 0, CHUNKSIZE);
 				goodblocksrecv -= dblocks;
@@ -1588,7 +1473,7 @@ GotBlock(Packet_t *p)
 	ChunkBuffer[i].blockcount--;
 	memcpy(ChunkBuffer[i].blocks[block].data,
 	       p->msg.block.buf, BlockSize(chunk, block));
-#ifdef NEVENTS
+#ifdef TRACE_EVENTS
 	goodblocksrecv++;
 
 	/*
@@ -1640,6 +1525,7 @@ GotBlock(Packet_t *p)
 		 * we are done for better or worse at this point.
 		 */
 		Chunks[chunk].done = 1;
+		ChunksReceived++;
 
 #ifdef PASSIVE
 		/*
@@ -1696,7 +1582,12 @@ RequestMissing(int chunk, BlockMap_t *map, int count)
 	if (csize < MAXCHUNKSIZE)
 		BlockMapClear(&p->msg.prequest.blockmap,
 			      csize, MAXCHUNKSIZE - csize);
-	PacketSend(p, 0);
+	if (heartbeat) {
+		pthread_mutex_lock(&heartbeat_mutex);
+		PacketSend(p, 0);
+		pthread_mutex_unlock(&heartbeat_mutex);
+	} else
+		PacketSend(p, 0);
 #ifdef STATS
 	assert(count == BlockMapIsAlloc(&p->msg.prequest.blockmap, 0, CHUNKSIZE));
 	if (count == 0)
@@ -1756,7 +1647,12 @@ RequestRange(int chunk, int block, int count)
 	p->msg.request.chunk = chunk;
 	p->msg.request.block = block;
 	p->msg.request.count = count;
-	PacketSend(p, 0);
+	if (heartbeat) {
+		pthread_mutex_lock(&heartbeat_mutex);
+		PacketSend(p, 0);
+		pthread_mutex_unlock(&heartbeat_mutex);
+	} else
+		PacketSend(p, 0);
 	CLEVENT(1, EV_CLIREQ, chunk, block, count, 0);
 	DOSTAT(requests++);
 
@@ -1868,6 +1764,151 @@ RequestChunk(int timedout)
 	}
 }
 
+#ifdef STATS
+static void
+FillStats(ClientStats_t *st, struct timeval *rstamp)
+{
+	/* From global stats struct */
+	memcpy(st, &Stats, sizeof(Stats));
+
+	/* From imageunzip */
+	st->u.v1.decompblocks = decompblocks;
+	st->u.v1.writeridles = writeridles;
+	st->u.v1.ebyteswritten = totaledata;
+	st->u.v1.rbyteswritten = totalrdata;
+
+	st->version            = CLIENT_STATS_VERSION;
+	st->u.v1.runsec        = rstamp->tv_sec;
+	st->u.v1.runmsec       = rstamp->tv_usec / 1000;
+	st->u.v1.chunkbufs     = maxchunkbufs;
+	st->u.v1.writebufmem   = maxwritebufmem;
+	st->u.v1.maxreadahead  = maxreadahead;
+	st->u.v1.maxinprogress = maxinprogress;
+	st->u.v1.pkttimeout    = pkttimeout;
+	st->u.v1.startdelay    = startdelay;
+	st->u.v1.idletimer     = idletimer;
+	st->u.v1.idledelay     = idledelay;
+	st->u.v1.redodelay     = redodelay;
+	st->u.v1.randomize     = randomize;
+}
+#endif
+
+#if 0
+/*
+ * Process a progress report request.
+ *
+ * We will either set (or update) our report interval or send an immediate
+ * progress report with the requested info.
+ *
+ * Returns the interval at which to make further reports (in seconds),
+ * zero if no further reports should be made.
+ */
+static int
+HandleProgress(Packet_t *p)
+{
+	uint32_t who = pkt.hdr.srcip;
+	uint32_t what = pkt.msg.progress.hdr.what;
+	uint32_t when = pkt.msg.progress.hdr.when;
+	uint32_t seq = pkt.msg.progress.hdr.seq;
+
+	if (when == 0)
+		SendProgressReport(who, what, seq);
+	else if (when > 10000)
+		when = 10000;
+
+	return (int)when;
+}
+#endif
+
+/*
+ * Send a progress report to our server.
+ */
+void
+SendProgressReport(uint32_t who, uint32_t what, uint32_t seq)
+{
+	Packet_t pkt;
+	static uint32_t _who = 0, _what = 0, _seq = 0;
+	struct timeval rstamp;
+
+	if (who != 0) {
+		_who = who;
+		_what = what;
+		_seq = seq;
+	}
+	if (_who == 0)
+		return;
+
+	gettimeofday(&rstamp, 0);
+	memset(&pkt, 0, sizeof pkt);
+
+	pkt.hdr.type = PKTTYPE_REPLY;
+	pkt.hdr.subtype = PKTSUBTYPE_PROGRESS;
+	pkt.hdr.datalen = _what ?
+		sizeof(pkt.msg.progress) : sizeof(pkt.msg.progress.hdr);
+	/* XXX set to server, PacketReply uses this as the to address */
+	pkt.hdr.srcip = _who;
+
+	pkt.msg.progress.hdr.clientid = clientid;
+	pkt.msg.progress.hdr.when = rstamp.tv_sec;
+	pkt.msg.progress.hdr.what = _what;
+	pkt.msg.progress.hdr.seq  = _seq++;
+	if ((_what & PKTPROGRESS_SUMMARY) != 0) {
+		pkt.msg.progress.summary.chunks_in = ChunksReceived;
+		pkt.msg.progress.summary.chunks_out = ChunksDecompressed;
+		pkt.msg.progress.summary.bytes_out = totalrdata;
+	}
+#ifdef STATS
+	if ((_what & PKTPROGRESS_STATS) != 0) {
+		timersub(&rstamp, &stamp, &rstamp);
+		FillStats(&pkt.msg.progress.stats, &rstamp);
+	}
+#endif
+
+	pthread_mutex_lock(&heartbeat_mutex);
+	PacketReply(&pkt, 1);
+	pthread_mutex_unlock(&heartbeat_mutex);
+}
+
+/*
+ * For now the reporting mechanism is one way. The protocol is designed
+ * such that the server can make requests to make an immediate report or
+ * to change the reporting interval, but we don't do that yet. If the client
+ * '-H <interval>' option is specified, we just make make unsolicited
+ * reports at the specified interval. Simple.
+ */
+void *
+ClientReportThread(void *arg)
+{
+	uint32_t sleepiv = heartbeat * 1000000;
+	uint32_t who, what, seq;
+
+	/*
+	 * XXX we don't want to multicast these packets so make sure we
+	 * know who the server is.
+	 */
+	if (serverip.s_addr == 0) {
+		FrisLog("WARNING: no server to send heartbeats to; "
+			"heartbeat reporting disabled");
+	}
+	who = serverip.s_addr;
+	what = PKTPROGRESS_SUMMARY;
+	seq = 1;
+
+	/* Delay a random amount so clients don't report in sync */
+	fsleep(random() % 5000000);
+
+	if (debug)
+		FrisLog("Heartbeat pthread starting up ...");
+
+	while (1) {
+		fsleep(sleepiv);
+		SendProgressReport(who, what, seq);
+
+		/* XXX don't reset on every call */
+		who = 0;
+	}
+}
+
 /*
  * Join the Frisbee team, and then go into the main loop above.
  */
@@ -1876,7 +1917,6 @@ PlayFrisbee(void)
 {
 	Packet_t	packet, *p = &packet;
 	struct timeval  estamp, timeo;
-	unsigned int	myid;
 	int		delay, rv, checkid = 0;
 	int32_t		jtype = 0;
 
@@ -1899,7 +1939,7 @@ PlayFrisbee(void)
 	 * but perhaps might be useful for determining when a client has
 	 * crashed and returned.
 	 */
-	myid = random();
+	clientid = random();
 	
 	/*
 	 * To avoid a blast of messages from a large number of clients,
@@ -1934,15 +1974,7 @@ PlayFrisbee(void)
 
 		gettimeofday(&now, 0);
 		if (rv != 0 && timercmp(&timeo, &now, <=)) {
-#ifdef DOEVENTS
-			Event_t event;
-			if (eventserver != NULL &&
-			    EventCheck(&event) && event.type == EV_STOP) {
-				FrisLog("Aborted during JOIN");
-				return;
-			}
-#endif
-			CLEVENT(1, EV_CLIJOINREQ, myid, 0, 0, 0);
+			CLEVENT(1, EV_CLIJOINREQ, clientid, 0, 0, 0);
 			DOSTAT(joinattempts++);
 			p->hdr.type = PKTTYPE_REQUEST;
 			/*
@@ -1960,17 +1992,22 @@ PlayFrisbee(void)
 			if (!nodecompress) {
 				jtype = p->hdr.subtype = PKTSUBTYPE_JOIN;
 				p->hdr.datalen = sizeof(p->msg.join);
-				p->msg.join.clientid = myid;
+				p->msg.join.clientid = clientid;
 				checkid = 0;
 			} else {
 				jtype = p->hdr.subtype = PKTSUBTYPE_JOIN2;
 				p->hdr.datalen = sizeof(p->msg.join2);
-				p->msg.join2.clientid = myid;
+				p->msg.join2.clientid = clientid;
 				p->msg.join2.chunksize = MAXCHUNKSIZE;
 				p->msg.join2.blocksize = MAXBLOCKSIZE;
 				checkid = 1;
 			}
-			PacketSend(p, 0);
+			if (heartbeat) {
+				pthread_mutex_lock(&heartbeat_mutex);
+				PacketSend(p, 0);
+				pthread_mutex_unlock(&heartbeat_mutex);
+			} else
+				PacketSend(p, 0);
 			timeo.tv_sec = 0;
 			timeo.tv_usec = 500000;
 			timeradd(&timeo, &now, &timeo);
@@ -2005,7 +2042,7 @@ PlayFrisbee(void)
 		if (rv == 0 &&
 		    p->hdr.subtype == jtype &&
 		    p->hdr.type == PKTTYPE_REPLY &&
-		    (!checkid || p->msg.join.clientid == myid)) {
+		    (!checkid || p->msg.join.clientid == clientid)) {
 			if (jtype == PKTSUBTYPE_JOIN) {
 				p->msg.join2.chunksize = MAXCHUNKSIZE;
 				p->msg.join2.blocksize = MAXBLOCKSIZE;
@@ -2060,7 +2097,7 @@ PlayFrisbee(void)
 	FrisLog("Joined the team after %d sec. ID is %u. "
 		"File is %d chunks (%lld bytes)",
 		timeo.tv_sec - stamp.tv_sec,
-		myid, TotalChunkCount, p->msg.join2.bytecount);
+		clientid, TotalChunkCount, p->msg.join2.bytecount);
 
 	ChunkerStartup();
 
@@ -2072,41 +2109,30 @@ PlayFrisbee(void)
 	 * the server gets it. All the server does with it is print a
 	 * timestamp, and that is not critical to operation.
 	 */
-	CLEVENT(1, EV_CLILEAVE, myid, estamp.tv_sec,
+	CLEVENT(1, EV_CLILEAVE, clientid, estamp.tv_sec,
 		(Stats.u.v1.rbyteswritten >> 32), Stats.u.v1.rbyteswritten);
 #ifdef STATS
 	p->hdr.type       = PKTTYPE_REQUEST;
 	p->hdr.subtype    = PKTSUBTYPE_LEAVE2;
 	p->hdr.datalen    = sizeof(p->msg.leave2);
-	p->msg.leave2.clientid = myid;
+	p->msg.leave2.clientid = clientid;
 	p->msg.leave2.elapsed  = estamp.tv_sec;
-	Stats.version            = CLIENT_STATS_VERSION;
-	Stats.u.v1.runsec        = estamp.tv_sec;
-	Stats.u.v1.runmsec       = estamp.tv_usec / 1000;
-	Stats.u.v1.chunkbufs     = maxchunkbufs;
-	Stats.u.v1.writebufmem   = maxwritebufmem;
-	Stats.u.v1.maxreadahead  = maxreadahead;
-	Stats.u.v1.maxinprogress = maxinprogress;
-	Stats.u.v1.pkttimeout    = pkttimeout;
-	Stats.u.v1.startdelay    = startdelay;
-	Stats.u.v1.idletimer     = idletimer;
-	Stats.u.v1.idledelay     = idledelay;
-	Stats.u.v1.redodelay     = redodelay;
-	Stats.u.v1.randomize     = randomize;
-	p->msg.leave2.stats      = Stats;
+	FillStats(&p->msg.leave2.stats, &estamp);
+	/* N.B. heartbeat thread is gone, not need for mutex */
 	PacketSend(p, 0);
 
 	if (!quiet) {
 		FrisLog("");
-		ClientStatsDump(myid, &Stats);
+		ClientStatsDump(clientid, &p->msg.leave2.stats);
 		FrisLog("");
 	}
 #else
 	p->hdr.type       = PKTTYPE_REQUEST;
 	p->hdr.subtype    = PKTSUBTYPE_LEAVE;
 	p->hdr.datalen    = sizeof(p->msg.leave);
-	p->msg.leave.clientid = myid;
+	p->msg.leave.clientid = clientid;
 	p->msg.leave.elapsed  = estamp.tv_sec;
+	/* N.B. heartbeat thread is gone, not need for mutex */
 	PacketSend(p, 0);
 #endif
 	FrisLog("Left the team after %ld seconds on the field!",

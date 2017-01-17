@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -632,6 +632,137 @@ ClientStatsDump(unsigned int id, ClientStats_t *stats)
 		FrisLog("Unknown stats version %d", stats->version);
 		break;
 	}
+}
+#endif
+
+#ifdef EMULAB_EVENTS
+static int
+split(char *str, char *elems[], int nelems)
+{
+	char *token;
+	int i;
+
+	if (nelems <= 0 || strlen(str) == 0)
+		return 0;
+	i = 0;
+	while ((token = strsep(&str, "/")) != NULL) {
+		if (token[0] == '\0')
+			continue;
+		elems[i] = token;
+		if (++i == nelems)
+			break;
+	}
+
+	return i;
+}
+
+/*
+ * This is a big horrible hack to convert an image pathname back into
+ * an Emulab imageid of the form: <pid>/<imageid>[:<version>][,<sig>]
+ * It is ifdef'ed under EMULAB_EVENTS because we only use it in the
+ * heartbeat event reporting code.
+ *
+ * We recognize five styles of image paths:
+ *
+ * 1. /usr/testbed/images/<blah>
+ *    A standard image where pid will be 'emulab-ops' and the rest in <blah>
+ * 2. /usr/testbed/images/<imageid>/<blah>
+ *    A "directory image" style standard image.
+ * 3. /proj/<pid>/images/<blah>
+ *    A user image where pid is explicit and the rest in <blah>
+ * 4. /proj/<pid>/images/<imageid>/<blah>
+ *    A user image in "directory image" format
+ * 5. /z/image_cache/<pid>/<imageid>[:<version>][,sig]
+ *    A subboss cached image. pid and imageid are explicit!
+ *
+ * For #1-4 <blah> will be of the form:
+ *    <imageid>.ndz[:<version>][.sig]
+ *
+ * Anything that does not start with a '/' is assumed to already be an
+ * Emulab imageid.
+ *
+ * Returns a dynamically allocated string containing the Emulab imageid
+ * (which should be freed by the caller) or "UNKNOWN/UNKNOWN" if the string
+ * is unparsable by our rules.
+ */
+char *
+extract_imageid(char *opath)
+{
+	static char std_prefix[] = "/usr/testbed/images";
+	static char usr_prefix[] = "/proj/";
+	static char subboss_prefix[] = "/z/image_cache/";
+	char *buf, *path, *comps[8];
+	char *pid, *imageid, *vers, *sig;
+	int ncomps, len;
+
+	path = strdup(opath);
+	if (path[0] != '/')
+		return path;
+
+	pid = imageid = "UNKNOWN";
+	vers = sig = "";
+
+	/* XXX see if it is a signature file (ends in .sig) */
+	sig = strstr(path, ".sig");
+	if (sig == NULL || sig[4] != '\0')
+		sig = "";
+	else {
+		sig[0] = '\0';
+		sig = ",sig";
+	}
+
+	ncomps = split(path, comps, 8);
+
+	/* #5: /z/image_cache/<pid>/<imageid>[,sig] */
+	if (strncmp(opath, subboss_prefix, strlen(subboss_prefix)) == 0 &&
+	    ncomps == 4) {
+		pid = comps[2];
+		imageid = comps[3];
+		vers = sig = "";
+	}
+	else {
+		/* for the remaining cases, determine pid and "blah" */
+		char *blah = NULL;
+
+		if (strncmp(opath, std_prefix, strlen(std_prefix)) == 0) {
+			pid = "emulab-ops";
+
+			/* #1: /usr/testbed/images/<blah> */
+			if (ncomps == 4)
+				blah = comps[3];
+			/* #2: /usr/testbed/images/<imageid>/blah */
+			else if (ncomps == 5)
+				blah = comps[4];
+		} else if (strncmp(opath, usr_prefix, strlen(usr_prefix)) == 0) {
+			/* #3: /proj/<pid>/images/<blah> */
+			if (ncomps == 4) {
+				pid = comps[1];
+				blah = comps[3];
+			}
+			/* #3: /proj/<pid>/images/<imageid>/<blah> */
+			else if (ncomps == 5) {
+				pid = comps[1];
+				blah = comps[4];
+			}
+		}
+
+		/* blah: <imageid>.ndz[:<version>] */
+		if (blah) {
+			imageid = blah;
+			vers = strstr(blah, ".ndz");
+			if (vers) {
+				vers[0] = '\0';
+				vers += 4;
+			}
+		}
+	}
+
+	len = strlen(pid) + strlen(imageid) + strlen(vers) + strlen(sig) + 2;
+	if ((buf = malloc(len)) != NULL)
+		sprintf(buf, "%s/%s%s%s", pid, imageid, vers, sig);
+
+	free(path);
+	return buf;
 }
 #endif
 

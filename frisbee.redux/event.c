@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2002-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -23,8 +23,10 @@
 
 /*
  * Testbed event system interface
- * Allow starting multiple clients in a synchronized way.
+ * Supports sending of periodic events.
  */
+
+#ifdef EMULAB_EVENTS
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,344 +39,141 @@
 #include <arpa/inet.h>
 #include <sys/time.h> 
 
-#include "lib/libtb/tbdefs.h"
-#include "lib/event/event.h"
+//#include "libtb/tbdefs.h"
+#include "event/event.h"
 
 #include "decls.h"
 #include "log.h"
 #include "event.h"
 
-//#define EVENTDEBUG
-
-static Event_t		lastevent;
 static event_handle_t	ehandle;
-
-static int		gotevent;
-static int		clientnum;
+static address_tuple_t	tuple;
+static char		*eserver;
 
 static int
-useclient(int clinum, char *buf)
+EventReinit(void)
 {
-	char *cp;
-	int low, high;
+	if (ehandle == NULL) {
+		if (eserver == NULL)
+			return 1;
 
-	cp = buf;
-	if (cp != NULL) {
-		while ((cp = strsep(&buf, ",")) != NULL) {
-			if (sscanf(cp, "%d-%d", &low, &high) == 2) {
-				if (clinum >= low && clinum <= high)
-					return 1;
-				continue;
-			}
-			if (sscanf(cp, "%d", &low) == 1) {
-				if (clinum == low)
-					return 1;
-				continue;
-			}
+		ehandle = event_register(eserver, 0);
+		if (ehandle == NULL) {
+			FrisWarning("could not register with event server %s",
+				    eserver);
+			return 1;
+		}
+
+		tuple = address_tuple_alloc();
+		if (tuple == NULL) {
+			FrisWarning("could not allocate an address tuple");
+			EventDeinit();
+			return 1;
 		}
 	}
+
 	return 0;
-}
-
-/*
- * type==START
- *	STAGGER=N PKTTIMEOUT=N IDLETIMER=N READAHEAD=N INPROGRESS=N REDODELAY=N
- * type==STOP
- *	STAGGER=N
- */
-static int
-parse_event(Event_t *event, char *etype, char *buf)
-{
-	char *cp;
-	int val;
-	char str[STRSIZE+1];
-	int skipping = 0;
-
-	memset(event, -1, sizeof *event);
-
-	if (strcmp(etype, TBDB_EVENTTYPE_START) == 0)
-		event->type = EV_START;
-	else if (strcmp(etype, TBDB_EVENTTYPE_STOP) == 0)
-		event->type = EV_STOP;
-	else
-		return 1;
-
-	cp = buf;
-	if (cp != NULL) {
-		while ((cp = strsep(&buf, " ")) != NULL) {
-			/*
-			 * Hideous Hack Alert!
-			 *
-			 * Assume hostname is of the form 'c-<num>.<domain>'
-			 * and use <num> to determine our client number.
-			 * We use that number and compare to the useclients
-			 * string to determine if we should process this event.
-			 * If not, we ignore this event.
-			 */
-			if (sscanf(cp, "USECLIENTS=%s", str) == 1) {
-				if (!useclient(clientnum, str))
-					skipping = 1;
-				else
-					skipping = 0;
-				continue;
-			}
-			if (sscanf(cp, "SKIPCLIENTS=%s", str) == 1) {
-				if (useclient(clientnum, str)) {
-					gotevent = 0;
-					return 0;
-				}
-				continue;
-			}
-			if (skipping)
-				continue;
-
-			if (sscanf(cp, "STARTDELAY=%d", &val) == 1) {
-				event->data.start.startdelay = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "STARTAT=%d", &val) == 1) {
-				event->data.start.startat = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "PKTTIMEOUT=%d", &val) == 1) {
-				event->data.start.pkttimeout = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "IDLETIMER=%d", &val) == 1) {
-				event->data.start.idletimer = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "CHUNKBUFS=%d", &val) == 1) {
-				event->data.start.chunkbufs = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "WRITEBUFMEM=%d", &val) == 1) {
-				event->data.start.writebufmem = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "MAXMEM=%d", &val) == 1) {
-				event->data.start.maxmem = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "READAHEAD=%d", &val) == 1) {
-				event->data.start.readahead = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "INPROGRESS=%d", &val) == 1) {
-				event->data.start.inprogress = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "REDODELAY=%d", &val) == 1) {
-				event->data.start.redodelay = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "IDLEDELAY=%d", &val) == 1) {
-				event->data.start.idledelay = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "SLICE=%d", &val) == 1) {
-				event->data.start.slice = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "ZEROFILL=%d", &val) == 1) {
-				event->data.start.zerofill = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "RANDOMIZE=%d", &val) == 1) {
-				event->data.start.randomize = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "NOTHREADS=%d", &val) == 1) {
-				event->data.start.nothreads = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "DOSTYPE=%d", &val) == 1) {
-				event->data.start.dostype = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "DEBUG=%d", &val) == 1) {
-				event->data.start.debug = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "TRACE=%d", &val) == 1) {
-				event->data.start.trace = val;
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "TRACEPREFIX=%s", str) == 1) {
-				strncpy(event->data.start.traceprefix,
-					str, STRSIZE-1);
-				gotevent = 1;
-				continue; 
-			}
-			if (sscanf(cp, "EXITSTATUS=%d", &val) == 1) {
-				event->data.stop.exitstatus = val;
-				gotevent = 1;
-				continue; 
-			}
-		}
-	}
-	return 0;
-}
-
-static void
-callback(event_handle_t handle, event_notification_t notification, void *data)
-{
-	char		buf[7][64];
-	char		args[256];
-	int		len = 64;
-
-	buf[0][0] = buf[1][0] = buf[2][0] = buf[3][0] = 0;
-	buf[4][0] = buf[5][0] = buf[6][0] = 0;
-	event_notification_get_site(handle, notification, buf[0], len);
-	event_notification_get_expt(handle, notification, buf[1], len);
-	event_notification_get_group(handle, notification, buf[2], len);
-	event_notification_get_host(handle, notification, buf[3], len);
-	event_notification_get_objtype(handle, notification, buf[4], len);
-	event_notification_get_objname(handle, notification, buf[5], len);
-	event_notification_get_eventtype(handle, notification, buf[6], len);
-	event_notification_get_arguments(handle, notification,
-					 args, sizeof(args));
-
-#ifdef EVENTDEBUG
-	{
-		struct timeval now;
-		static int ecount;
-
-		gettimeofday(&now, NULL);
-		fprintf(stderr, "Event %d: %lu.%03lu %s %s %s %s %s %s %s %s\n",
-			++ecount, now.tv_sec, now.tv_usec / 1000,
-			buf[0], buf[1], buf[2],
-			buf[3], buf[4], buf[5], buf[6], args);
-	}
-#endif
-	if (parse_event(&lastevent, buf[6], args))
-		FrisLog("bogus event '%s %s' ignored", buf[6], args);
 }
 
 int
 EventInit(char *server)
 {
-	char buf[BUFSIZ], ipbuf[BUFSIZ];
-	struct hostent *he;
-	struct in_addr myip;
-	char *ipaddr;
-	address_tuple_t	tuple;
-	    
+	char buf[BUFSIZ];
+
 	if (server == NULL) {
 		FrisWarning("no event server specified");
 		return 1;
 	}
 
-	if (gethostname(buf, sizeof(buf)) < 0) {
-		FrisPwarning("could not get hostname");
-		return 1;
-	}
-
-	if ((he = gethostbyname(buf)) == NULL) {
-		FrisWarning("could not get IP address from hostname");
-		return 1;
-	}
-
-	memcpy((char *)&myip, he->h_addr, he->h_length);
-	strcpy(ipbuf, inet_ntoa(myip));
-	ipaddr = ipbuf;
-
-	/*
-	 * Hideous Hack Alert!
-	 *
-	 * Assume our hostname is of the form 'c-<num>.<domain>'
-	 * and use <num> to determine our client number.
-	 * We use that number later to compare to the MAXCLIENTS
-	 * field to determine if we should process an event.
-	 */
-	if (sscanf(buf, "c-%d.", &clientnum) != 1) {
-		FrisWarning("could not determine client number from hostname %s",
-			    buf);
-		return 1;
-	} else if (debug)
-		FrisLog("client number %d for event handling", clientnum);
-
 	/*
 	 * Convert server/port to elvin thing.
 	 */
 	snprintf(buf, sizeof(buf), "elvin://%s", server);
-	server = buf;
+	eserver = strdup(buf);
 
-	/*
-	 * Construct an address tuple for subscribing to events for
-	 * this node.
-	 */
-	tuple = address_tuple_alloc();
-	if (tuple == NULL) {
-		FrisWarning("could not allocate an address tuple");
-		return 1;
-	}
-	tuple->host	 = ADDRESSTUPLE_ANY; /* ipaddr; */
-	tuple->site      = ADDRESSTUPLE_ANY;
-	tuple->group     = ADDRESSTUPLE_ANY;
-	tuple->expt      = ADDRESSTUPLE_ANY;
-	tuple->objtype   = TBDB_OBJECTTYPE_CUSTOM;
-	tuple->objname   = ADDRESSTUPLE_ANY;
-	tuple->eventtype = ADDRESSTUPLE_ANY;
-
-	/*
-	 * Register with the event system. 
-	 */
-	ehandle = event_register(server, 0);
-	if (ehandle == NULL) {
-		FrisWarning("could not register with event system");
-		address_tuple_free(tuple);
-		return 1;
-	}
-	
-	/*
-	 * Subscribe to the event we specified above.
-	 */
-	if (!event_subscribe(ehandle, callback, tuple, NULL)) {
-		FrisWarning("could not subscribe to FRISBEE events");
-		address_tuple_free(tuple);
-		return 1;
-	}
-	address_tuple_free(tuple);
-	return 0;
-}
-
-int
-EventCheck(Event_t *event)
-{
-	int rv;
-
-	gotevent = 0;
-	rv = event_poll(ehandle);
-	if (rv)
-		FrisFatal("event_poll failed, err=%d\n", rv);
-	if (gotevent)
-		memcpy(event, &lastevent, sizeof lastevent);
-	return gotevent;
+	return EventReinit();
 }
 
 void
-EventWait(int eventtype, Event_t *event)
+EventDeinit(void)
 {
-	while (EventCheck(event) == 0 ||
-	       (eventtype != EV_ANY && event->type != eventtype))
-		/* sleep? */;
+	if (ehandle != NULL) {
+		if (tuple != NULL) {
+			address_tuple_free(tuple);
+			tuple = NULL;
+		}
+		event_unregister(ehandle);
+		ehandle = NULL;
+	}
 }
+
+int
+EventSendClientReport(char *node, char *image, uint32_t tstamp, uint32_t seq,
+		      ClientSummary_t *summary, ClientStats_t *stats)
+{
+	event_notification_t	notification;
+
+	/*
+	 * In case we got disconnected
+	 */
+	if (ehandle == NULL && EventReinit())
+		return 1;
+
+	tuple->host      = BOSSNODE;
+	tuple->objtype   = "FRISBEESTATUS";
+	tuple->objname   = node;
+	tuple->eventtype = image;
+
+	notification = event_notification_alloc(ehandle, tuple);
+	if (notification == NULL) {
+		FrisWarning("EventSend: unable to allocate notification!");
+		return 1;
+	}
+
+	/*
+	 * Insert interesting key/value pairs:
+	 *
+	 * Always:
+	 *   TSTAMP:      int32, unix timestamp of report from client
+	 *   SEQUENCE:    int32, sequence number of report
+	 *
+	 * From summary (if present):
+	 *   CHUNKS_RECV:   int32, chunks successfully received by client
+	 *   CHUNKS_DECOMP: int32, chunks successfully decompressed
+	 *   BYTES_WRITTEN: int64, bytes written to disk
+	 *
+	 * From stats (if present):
+	 *   nothing right now as client does not pass this.
+	 */
+	(void) event_notification_put_int32(ehandle, notification,
+					    "TSTAMP", tstamp);
+	(void) event_notification_put_int32(ehandle, notification,
+					    "SEQUENCE", seq);
+	if (summary != NULL) {
+		(void) event_notification_put_int32(ehandle, notification,
+						    "CHUNKS_RECV",
+						    summary->chunks_in);
+		(void) event_notification_put_int32(ehandle, notification,
+						    "CHUNKS_DECOMP",
+						    summary->chunks_out);
+		(void) event_notification_put_int64(ehandle, notification,
+						    "BYTES_WRITTEN",
+						    summary->bytes_out);
+	}
+
+	if (event_notify(ehandle, notification) == 0) {
+		event_notification_free(ehandle, notification);
+
+		/*
+		 * Disconnect from the event system, so that we will
+		 * try reconnecting next time around.
+		 */
+		EventDeinit();
+		return 1;
+	}
+
+	event_notification_free(ehandle, notification);
+
+	return 0;
+}
+#endif
