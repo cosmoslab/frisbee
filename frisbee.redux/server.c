@@ -498,6 +498,7 @@ ClientJoin(Packet_t *p, int version)
 			if (j != -1) {
 				clients[j].id = clientid;
 				clients[j].ip = ipaddr.s_addr;
+				clients[j].lastseq = 0;
 			}
 		}
 	}
@@ -536,8 +537,8 @@ ClientLeave(Packet_t *p)
 
 		if (i >= 0) {
 			activeclients--;
-			clients[i].id = 0;
-			clients[i].ip = 0;
+			clients[i].id = clients[i].ip = 0;
+			clients[i].lastseq = 0;
 			FrisLog("%s (id %u, image %s): leaves at %s, "
 				"ran for %d seconds.  %d active clients",
 				inet_ntoa(ipaddr), clientid, filename,
@@ -573,8 +574,8 @@ ClientLeave2(Packet_t *p)
 		int i = findclient(clientid);
 
 		if (i >= 0) {
-			clients[i].id = 0;
-			clients[i].ip = 0;
+			clients[i].id = clients[i].ip = 0;
+			clients[i].lastseq = 0;
 			activeclients--;
 			FrisLog("%s (id %u, image %s): leaves at %s, "
 				"ran for %d seconds.  %d active clients",
@@ -685,6 +686,14 @@ ClientReport(Packet_t *p)
 
 	tstamp = p->msg.progress.hdr.when;
 	seq = p->msg.progress.hdr.seq;
+
+	/*
+	 * For a proxied request, we report the node we are proxying
+	 * on behalf of rather than the source of the packet.
+	 */
+	if (p->msg.progress.hdr.who != 0 &&
+	    p->msg.progress.hdr.who != p->hdr.srcip)
+		ipaddr.s_addr = p->msg.progress.hdr.who;
 
 	if (p->msg.progress.hdr.what == 0) {
 		FrisLog("%s (id %u): reports at %u",

@@ -78,6 +78,7 @@ char		*imageid;
 int		askonly;
 int		busywait = 0;
 char		*proxyfor = NULL;
+struct in_addr	proxyip;
 static struct timeval stamp;
 static uint32_t	clientid;
 static struct in_addr serverip;
@@ -493,12 +494,10 @@ main(int argc, char **argv)
 		timo = servertimo;
 
 		if (proxyfor) {
-			struct in_addr in;
-
-			if (!GetIP(proxyfor, &in))
+			if (!GetIP(proxyfor, &proxyip))
 				FrisFatal("Could not resolve host '%s'\n",
 					  proxyfor);
-			host = ntohl(in.s_addr);
+			host = ntohl(proxyip.s_addr);
 
 			/*
 			 * XXX make a note if localhost is the server.
@@ -1824,18 +1823,23 @@ HandleProgress(Packet_t *p)
  * Send a progress report to our server.
  */
 void
-SendProgressReport(uint32_t who, uint32_t what, uint32_t seq)
+SendProgressReport(uint32_t dst, uint16_t what, uint16_t seq)
 {
 	Packet_t pkt;
-	static uint32_t _who = 0, _what = 0, _seq = 0;
+	static uint32_t _dst = 0, _who = 0;
+	static uint16_t _what = 0, _seq = 0;
 	struct timeval rstamp;
 
-	if (who != 0) {
-		_who = who;
+	if (dst != 0) {
+		_dst = dst;
+		if (proxyfor)
+			_who = proxyip.s_addr;
+		else
+			_who = htonl(ClientNetID());
 		_what = what;
 		_seq = seq;
 	}
-	if (_who == 0)
+	if (_dst == 0)
 		return;
 
 	gettimeofday(&rstamp, 0);
@@ -1846,9 +1850,10 @@ SendProgressReport(uint32_t who, uint32_t what, uint32_t seq)
 	pkt.hdr.datalen = _what ?
 		sizeof(pkt.msg.progress) : sizeof(pkt.msg.progress.hdr);
 	/* XXX set to server, PacketReply uses this as the to address */
-	pkt.hdr.srcip = _who;
+	pkt.hdr.srcip = _dst;
 
 	pkt.msg.progress.hdr.clientid = clientid;
+	pkt.msg.progress.hdr.who = _who;
 	pkt.msg.progress.hdr.when = rstamp.tv_sec;
 	pkt.msg.progress.hdr.what = _what;
 	pkt.msg.progress.hdr.seq  = _seq++;
@@ -1880,7 +1885,8 @@ void *
 ClientReportThread(void *arg)
 {
 	uint32_t sleepiv = heartbeat * 1000000;
-	uint32_t who, what, seq;
+	uint32_t dst;
+	uint16_t what, seq;
 
 	/*
 	 * XXX we don't want to multicast these packets so make sure we
@@ -1890,7 +1896,7 @@ ClientReportThread(void *arg)
 		FrisLog("WARNING: no server to send heartbeats to; "
 			"heartbeat reporting disabled");
 	}
-	who = serverip.s_addr;
+	dst = serverip.s_addr;
 	what = PKTPROGRESS_SUMMARY;
 	seq = 1;
 
@@ -1902,10 +1908,10 @@ ClientReportThread(void *arg)
 
 	while (1) {
 		fsleep(sleepiv);
-		SendProgressReport(who, what, seq);
+		SendProgressReport(dst, what, seq);
 
 		/* XXX don't reset on every call */
-		who = 0;
+		dst = 0;
 	}
 }
 

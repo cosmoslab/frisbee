@@ -338,6 +338,13 @@ typedef struct {
 		 * the client how often and what to report. The reply
 		 * from the client contains the requested info.
 		 *
+		 * On request, "who" is not used. On reply, it is the
+		 * network order IPv4 address of the client on whose
+		 * behalf we are reporting. Normally, this is just the
+		 * IP of the machine running frisbee, but when -P is
+		 * used, it is the IP we are proxying for (typically
+		 * a VM).
+		 *
 		 * On request, "when" is measured in seconds, with zero
 		 * meaning "report one time right now". On reply, "when"
 		 * contains the local timestamp for the info reported.
@@ -353,7 +360,8 @@ typedef struct {
 		 * use in reports. On reply it is the current sequence
 		 * number, which is incremented for each report. This
 		 * can be used on the server side to see if reports are
-		 * being lost.
+		 * being lost. Note that the sequence number is only a
+		 * 16 bit value and will wrap eventually. Deal with it.
 		 *
 		 * Note that each client will skew the initial report
 		 * by some random amount to prevent all clients reporting
@@ -364,9 +372,10 @@ typedef struct {
 		struct {
 			struct {
 				uint32_t clientid;
+				uint32_t who;
 				uint32_t when;
-				uint32_t what;
-				uint32_t seq;
+				uint16_t what;
+				uint16_t seq;
 			} hdr;
 			ClientSummary_t	summary;
 			ClientStats_t	stats;
