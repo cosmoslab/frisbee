@@ -59,6 +59,7 @@ struct emulab_configstate {
 	int image_maxrate_std;	/* sitevar:images/frisbee/maxrate_std (in Mb/s) */
 	int image_maxrate_usr;	/* sitevar:images/frisbee/maxrate_usr (in Mb/s) */
 	int image_maxlinger;	/* sitevar:images/frisbee/maxlinger (in sec) */
+	int image_clientreport;	/* sitevar:images/frisbee/heartbeat (in sec) */
 };
 
 /* Extra info associated with a image information entry */
@@ -131,6 +132,8 @@ static uint32_t get_maxrate_dyn = 0;		/* non-zero means use dynamic */
 static uint32_t get_maxrate_std = 72000000;	/* zero means no limit */
 static uint32_t get_maxrate_usr = 54000000;	/* zero means no limit */
 static int      get_maxlinger = 3600;		/* zero means forever */
+static int	get_clientreport = 0;		/* zero means none */
+static char *	get_eserver = "localhost";	/* not a sitevar right now */
 
 /* Standard image directory: assumed to be "TBROOT/images" */
 static char *STDIMAGEDIR;
@@ -264,6 +267,21 @@ emulab_read(void)
 		FrisLog("  image_get_maxrate_usr = %d Mbit/sec",
 			(int)(get_maxrate_usr/1000000));
 
+	val = emulab_getsitevar("images/frisbee/heartbeat");
+	if (val) {
+		ival = atoi(val);
+		if (ival < 0)
+			ival = 0;
+		get_clientreport = ival;
+		free(val);
+	}
+	if (get_clientreport > 0) {
+		FrisLog("  clients report progress every %d seconds",
+			get_clientreport);
+		if (get_eserver)
+			FrisLog("  progress events sent to %s", get_eserver);
+	}
+
 	val = emulab_getsitevar("images/frisbee/maxlinger");
 	if (val) {
 		ival = atoi(val);
@@ -295,6 +313,7 @@ emulab_save(void)
 	cs->image_maxrate_std = get_maxrate_std;
 	cs->image_maxrate_usr = get_maxrate_usr;
 	cs->image_maxlinger = get_maxlinger;
+	cs->image_clientreport = get_clientreport;
 
 	return (void *)cs;
 }
@@ -328,6 +347,13 @@ emulab_restore(void *state)
 	else
 		FrisLog("  image_get_maxrate_usr = %d Mbit/sec",
 			(int)(get_maxrate_usr/1000000));
+	get_clientreport = cs->image_clientreport;
+	if (get_clientreport > 0) {
+		FrisLog("  clients report progress every %d seconds",
+			get_clientreport);
+		if (get_eserver)
+			FrisLog("  progress events sent to %s", get_eserver);
+	}
 	get_maxlinger = cs->image_maxlinger;
 	if (get_maxlinger == -1)
 		FrisLog("  server exits after last client leaves");
@@ -399,6 +425,20 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 		 get_maxrate_dyn ? "-D " : "",
 		 isindir(STDIMAGEDIR, ii->path) ?
 		 get_maxrate_std : get_maxrate_usr);
+
+	/*
+	 * for client reporting we set the interval and the event server
+	 */
+	if (get_clientreport > 0) {
+		int len = strlen(str);
+		snprintf(&str[len], sizeof(str) - len, " -H %d",
+			 get_clientreport);
+		if (get_eserver) {
+			len = strlen(str);
+			snprintf(&str[len], sizeof(str) - len, " -E %s",
+				 get_eserver);
+		}
+	}
 #if 0
 	/*
 	 * Should not be needed anymore. If the multicast group is getting

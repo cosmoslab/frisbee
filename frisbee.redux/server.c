@@ -72,6 +72,7 @@ struct in_addr	mcastif;
 char	       *addrfilename;
 char	       *filename;
 char	       *hserver;
+unsigned int	hinterval;
 struct timeval  IdleTimeStamp, FirstReq, LastReq;
 volatile int	activeclients;
 
@@ -1000,6 +1001,28 @@ PlayFrisbee(void)
 				p->msg.join2.bytecount = FileInfo.filesize;
 			}
 			PacketSend(p, 0);
+
+			/*
+			 * Arrange for clients to report at the indicated interval.
+			 * Note that this request is broadcast, but only the
+			 * indicated client should effect the changes indicated.
+			 *
+			 * XXX for now we just hardwire the type.
+			 */
+			if (hinterval > 0) {
+				if (debug)
+					FrisLog("sending PROGRESS request to %u",
+						clientid);
+				p->hdr.type = PKTTYPE_REQUEST;
+				p->hdr.subtype = PKTSUBTYPE_PROGRESS;
+				p->hdr.datalen = sizeof(p->msg.progress.hdr);
+				p->msg.progress.hdr.clientid = clientid;
+				p->msg.progress.hdr.who = 0;
+				p->msg.progress.hdr.when = hinterval;
+				p->msg.progress.hdr.what = PKTPROGRESS_SUMMARY;
+				p->msg.progress.hdr.seq = 1;
+				PacketSend(p, 0);
+			}
 			continue;
 		}
 
@@ -1199,7 +1222,7 @@ main(int argc, char **argv)
 	off_t		fsize;
 	void		*ignored;
 
-	while ((ch = getopt(argc, argv, "dhp:k:m:i:tbDT:R:B:G:L:W:K:A:E:")) != -1)
+	while ((ch = getopt(argc, argv, "dhp:k:m:i:tbDT:R:B:G:L:W:K:A:E:H:")) != -1)
 		switch(ch) {
 		case 'b':
 			broadcast++;
@@ -1286,6 +1309,14 @@ main(int argc, char **argv)
 			fprintf(stderr, "Not compiled for Emulab events\n");
 			exit(1);
 #endif
+		case 'H':
+			/*
+			 * For now this is just the reporting interval.
+			 */
+			hinterval = atoi(optarg);
+			if (hinterval > 3600)
+				hinterval = 3600;
+			break;
 
 		case 'h':
 		case '?':

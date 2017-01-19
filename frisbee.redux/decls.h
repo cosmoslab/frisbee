@@ -255,7 +255,7 @@ typedef struct {
 	struct {
 		int32_t		type;
 		int32_t		subtype;
-		int32_t 	datalen; /* Useful amount of data in packet */
+		uint32_t 	datalen; /* Useful amount of data in packet */
 		uint32_t	srcip;   /* Filled in by network level. */
 	} hdr;
 	union {

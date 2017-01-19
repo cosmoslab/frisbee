@@ -629,7 +629,7 @@ PacketReceive(Packet_t *p)
 	/*
 	 * Basic integrity checks
 	 */
-	if (mlen < sizeof(p->hdr) + p->hdr.datalen) {
+	if ((uint32_t)mlen < sizeof(p->hdr) + p->hdr.datalen) {
 		FrisLog("Bad message length (%d != %d)",
 			mlen, p->hdr.datalen);
 		return 1;
@@ -654,9 +654,21 @@ PacketReceive(Packet_t *p)
 	/*
 	 * XXX accept packets from the MC address. This will be the case with
 	 * newer clients that bind to the MC address instead of INADDR_ANY.
+	 *
+	 * Note that on a client, certain packets should only come from the
+	 * server. These include: BLOCK replies and PROGRESS requests.
+	 * Don't rewrite the address in these cases so that the following
+	 * check will catch them (or a later caller check on hdr.srcip).
 	 */
-	if (from.sin_addr.s_addr == mcastaddr.s_addr)
-		from.sin_addr.s_addr = p->hdr.srcip;
+	if (from.sin_addr.s_addr == mcastaddr.s_addr) {
+		if (isclient &&
+		    (p->hdr.subtype == PKTSUBTYPE_BLOCK ||
+		     (p->hdr.subtype == PKTSUBTYPE_PROGRESS &&
+		      p->hdr.type == PKTTYPE_REQUEST)))
+			;
+		else
+			from.sin_addr.s_addr = p->hdr.srcip;
+	}
 
 	if (p->hdr.srcip != from.sin_addr.s_addr) {
 		FrisLog("Bad message source (%x != %x)",

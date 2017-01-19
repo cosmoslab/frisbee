@@ -54,6 +54,8 @@ char *imagedir = NULL;
 static char *rimagedir;
 static uint32_t maxrate = 100000000;
 static int dynrate = 0;
+static char *eserver = NULL;
+static int clientreport = 0;
 
 /*
  * We use a small server inactive timeout since we no longer have
@@ -90,6 +92,13 @@ null_read(void)
 		FrisLog("  max bandwidth = %d Mbit/sec",
 			(int)(maxrate/1000000));
 
+	if (clientreport > 0) {
+		FrisLog("  clients report progress every %d seconds",
+			clientreport);
+		if (eserver)
+			FrisLog("  progress events sent to %s", eserver);
+	}
+
 	if (maxlinger < 0)
 		FrisLog("  server exits after last client leaves");
 	else if (maxlinger == 0)
@@ -119,6 +128,13 @@ null_restore(void *state)
 	else
 		FrisLog("  max bandwidth = %d Mbit/sec",
 			(int)(maxrate/1000000));
+
+	if (clientreport > 0) {
+		FrisLog("  clients report progress every %d seconds",
+			clientreport);
+		if (eserver)
+			FrisLog("  progress events sent to %s", eserver);
+	}
 
 	if (maxlinger < 0)
 		FrisLog("  server exits after last client leaves");
@@ -170,6 +186,16 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 	snprintf(str, sizeof str, " %s-W %u",
 		 dynrate ? "-D " : "", maxrate);
 	strcat(str, " -K 15");
+	if (clientreport > 0) {
+		int len = strlen(str);
+		snprintf(&str[len], sizeof(str) - len, " -H %d",
+			 clientreport);
+		if (eserver) {
+			len = strlen(str);
+			snprintf(&str[len], sizeof(str) - len, " -E %s",
+				 eserver);
+		}
+	}
 	ai->imageinfo[ix].get_options = mystrdup(str);
 
 	/* and whack the put_* fields */
@@ -782,6 +808,8 @@ null_init(char *opts)
 	 *   bandwidth=NNNNNNNN  Max bandwidth of a server
 	 *   dynamicbw=(1|0)	 Use dynamic bandwidth control
 	 *   maxlinger=N	 Server lingers for N seconds after last req
+	 *   report=N		 Clients report progress every N seconds
+	 *   eventserver=host	 Host to sent client report events to
 	 */
 	if (opts && opts[0]) {
 		char *opt;
@@ -792,7 +820,7 @@ null_init(char *opts)
 			if (cp) {
 				*cp = 0;
 				if (strcmp(opt, "mcaddr") == 0)
-					DEFAULT_MCADDR = cp + 1;
+					DEFAULT_MCADDR = mystrdup(cp + 1);
 				else if (strcmp(opt, "bandwidth") == 0)
 					maxrate = (uint32_t)
 						strtol(cp+1, NULL, 10);
@@ -802,9 +830,20 @@ null_init(char *opts)
 						1 : 0;
 				else if (strcmp(opt, "maxlinger") == 0)
 					maxlinger = strtol(cp+1, NULL, 10);
+				else if (strcmp(opt, "report") == 0)
+					clientreport = strtol(cp+1, NULL, 10);
+				else if (strcmp(opt, "eventserver") == 0)
+					eserver = mystrdup(cp + 1);
 			}
 		}
 		free(opts);
+	}
+
+	/* XXX we should attempt to validate the event server here */
+	if (eserver && clientreport == 0) {
+		FrisError("null_init: no report interval specified, event server disabled");
+		free(eserver);
+		eserver = NULL;
 	}
 
 	if (imagedir == NULL)

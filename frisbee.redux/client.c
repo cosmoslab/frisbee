@@ -89,8 +89,14 @@ static int	xfermethods = MS_METHOD_MULTICAST;
 int		forcedirectio = 0;
 int		heartbeat = 0;
 
+static uint32_t hb_interval;
+static uint32_t	hb_dst, hb_who;
+static uint16_t	hb_what;
+static uint16_t	hb_seq;
+
 /* Forward Decls */
 static void	PlayFrisbee(void);
+static void	HandleProgress(Packet_t *p);
 static int	GotBlock(Packet_t *p);
 static void	RequestChunk(int timedout);
 static int	RequestStamp(int chunk, int block, int count, void *arg);
@@ -161,6 +167,7 @@ int		ChunksEnroute;		/* Total useful chunks enroute */
 #ifdef CONDVARS_WORK
 static pthread_mutex_t	chunkbuf_mutex;
 static pthread_cond_t	chunkbuf_cond;
+static pthread_cond_t	heartbeat_cond;
 #endif
 static pthread_mutex_t	heartbeat_mutex;
 static pthread_t child_pid, heartbeat_pid;
@@ -450,10 +457,19 @@ main(int argc, char **argv)
 			break;
 
 		case 'H':
-			heartbeat = atoi(optarg);
+			/*
+			 * Zero means enable heartbeats but let the server
+			 * tell us the parameters.
+			 * Non-zero is for compatability and we default to
+			 * summaries at the specified interval.
+			 */
+			heartbeat = 1;
+			hb_interval = atoi(optarg);
 			/* XXX cannot sleep more that 4295 sec due to fsleep */
-			if (heartbeat < 0 || heartbeat > 3600)
-				heartbeat = 3600;
+			if (hb_interval > 4295)
+				hb_interval = 4295;
+			if (hb_interval > 0)
+				hb_what = PKTPROGRESS_SUMMARY;
 			break;
 
 		case 'h':
@@ -802,9 +818,10 @@ ClientRecvThread(void *arg)
 			if (serverip.s_addr != 0 &&
 			    serverip.s_addr != p->hdr.srcip) {
 				struct in_addr tmp = { p->hdr.srcip };
-				FrisLog("received BLOCK from non-server %s",
-					inet_ntoa(tmp));
-				continue;
+				if (debug)
+					FrisLog("BLOCK msg from non-server %s",
+						inet_ntoa(tmp));
+				break;
 			}
 
 			CLEVENT(BackOff ? 1 : (p->msg.block.block==0 ? 3 : 4),
@@ -895,8 +912,23 @@ ClientRecvThread(void *arg)
 			break;
 
 
-		/* XXX don't handle requests yet */
 		case PKTSUBTYPE_PROGRESS:
+			/*
+			 * Only process REQUESTs that come from our server
+			 * and targeted to our clientid or to all clients.
+			 */
+			if (p->hdr.type == PKTTYPE_REQUEST) {
+				if (serverip.s_addr != 0 &&
+				    serverip.s_addr != p->hdr.srcip) {
+					struct in_addr tmp = { p->hdr.srcip };
+					if (debug)
+						FrisLog("PROGRESS request from non-server %s",
+							inet_ntoa(tmp));
+				}
+				else if (p->msg.progress.hdr.clientid == 0 ||
+					 p->msg.progress.hdr.clientid == clientid)
+					HandleProgress(p);
+			}
 			break;
 
 		case PKTSUBTYPE_JOIN:
@@ -1014,6 +1046,9 @@ ChunkerStartup(void)
 		void *ClientReportThread(void *);
 
 		pthread_mutex_init(&heartbeat_mutex, 0);
+#ifdef CONDVARS_WORK
+		pthread_cond_init(&heartbeat_cond, 0);
+#endif
 		if (pthread_create(&heartbeat_pid, NULL,
 				   ClientReportThread, (void *)0)) {
 			FrisFatal("Failed to create heartbeat thread!");
@@ -1792,85 +1827,105 @@ FillStats(ClientStats_t *st, struct timeval *rstamp)
 }
 #endif
 
-#if 0
-/*
- * Process a progress report request.
- *
- * We will either set (or update) our report interval or send an immediate
- * progress report with the requested info.
- *
- * Returns the interval at which to make further reports (in seconds),
- * zero if no further reports should be made.
- */
-static int
-HandleProgress(Packet_t *p)
-{
-	uint32_t who = pkt.hdr.srcip;
-	uint32_t what = pkt.msg.progress.hdr.what;
-	uint32_t when = pkt.msg.progress.hdr.when;
-	uint32_t seq = pkt.msg.progress.hdr.seq;
-
-	if (when == 0)
-		SendProgressReport(who, what, seq);
-	else if (when > 10000)
-		when = 10000;
-
-	return (int)when;
-}
-#endif
-
 /*
  * Send a progress report to our server.
+ * Caller should hold the heartbeat_mutex to avoid race with other packet
+ * sends and with changes to the reporting params.
  */
 void
-SendProgressReport(uint32_t dst, uint16_t what, uint16_t seq)
+SendProgressReport(void)
 {
 	Packet_t pkt;
-	static uint32_t _dst = 0, _who = 0;
-	static uint16_t _what = 0, _seq = 0;
 	struct timeval rstamp;
 
-	if (dst != 0) {
-		_dst = dst;
+	/* One-time initialization */
+	if (hb_dst == 0) {
+		assert(serverip.s_addr != 0);
+
+		hb_dst = serverip.s_addr;
 		if (proxyfor)
-			_who = proxyip.s_addr;
+			hb_who = proxyip.s_addr;
 		else
-			_who = htonl(ClientNetID());
-		_what = what;
-		_seq = seq;
+			hb_who = htonl(ClientNetID());
 	}
-	if (_dst == 0)
-		return;
 
 	gettimeofday(&rstamp, 0);
 	memset(&pkt, 0, sizeof pkt);
 
 	pkt.hdr.type = PKTTYPE_REPLY;
 	pkt.hdr.subtype = PKTSUBTYPE_PROGRESS;
-	pkt.hdr.datalen = _what ?
+	pkt.hdr.datalen = hb_what ?
 		sizeof(pkt.msg.progress) : sizeof(pkt.msg.progress.hdr);
 	/* XXX set to server, PacketReply uses this as the to address */
-	pkt.hdr.srcip = _dst;
+	pkt.hdr.srcip = hb_dst;
 
 	pkt.msg.progress.hdr.clientid = clientid;
-	pkt.msg.progress.hdr.who = _who;
+	pkt.msg.progress.hdr.who = hb_who;
 	pkt.msg.progress.hdr.when = rstamp.tv_sec;
-	pkt.msg.progress.hdr.what = _what;
-	pkt.msg.progress.hdr.seq  = _seq++;
-	if ((_what & PKTPROGRESS_SUMMARY) != 0) {
+	pkt.msg.progress.hdr.what = hb_what;
+	pkt.msg.progress.hdr.seq  = hb_seq++;
+	if ((hb_what & PKTPROGRESS_SUMMARY) != 0) {
 		pkt.msg.progress.summary.chunks_in = ChunksReceived;
 		pkt.msg.progress.summary.chunks_out = ChunksDecompressed;
 		pkt.msg.progress.summary.bytes_out = totalrdata;
 	}
 #ifdef STATS
-	if ((_what & PKTPROGRESS_STATS) != 0) {
+	if ((hb_what & PKTPROGRESS_STATS) != 0) {
 		timersub(&rstamp, &stamp, &rstamp);
 		FillStats(&pkt.msg.progress.stats, &rstamp);
 	}
 #endif
 
-	pthread_mutex_lock(&heartbeat_mutex);
 	PacketReply(&pkt, 1);
+}
+
+/*
+ * Process a progress report request.
+ *
+ * We will either set (or update) our report interval or send an immediate
+ * progress report with the requested info.
+ */
+static void
+HandleProgress(Packet_t *p)
+{
+	uint32_t when = p->msg.progress.hdr.when;
+	uint16_t what = p->msg.progress.hdr.what;
+	uint16_t seq = p->msg.progress.hdr.seq;
+
+	/* Heatbeat thread has to be running */
+	if (!heartbeat)
+		return;
+
+	/* XXX gotta have a unicast server IP */
+	if (serverip.s_addr == 0)
+		return;
+
+	/* XXX cannot sleep more that 4295 sec due to fsleep */
+	if (when > 4295)
+		when = 4295;
+
+	/* keep only the relevant bits */
+	what &= (PKTPROGRESS_SUMMARY|PKTPROGRESS_STATS);
+	
+	pthread_mutex_lock(&heartbeat_mutex);
+
+#ifdef CONDVARS_WORK
+	/* thread was disabled; wake it up */
+	if (hb_interval == 0 && when > 0)
+		pthread_cond_signal(&chunkbuf_cond);
+#endif
+
+	hb_interval = when;
+	hb_what = what;
+
+	/* only reset sequence number if not already set */
+	if (hb_seq == 0)
+		hb_seq = seq;
+
+	/* fire off a one-time report (this also disables periodic reports) */
+	if (when == 0)
+		SendProgressReport();
+
 	pthread_mutex_unlock(&heartbeat_mutex);
 }
 
@@ -1884,10 +1939,6 @@ SendProgressReport(uint32_t dst, uint16_t what, uint16_t seq)
 void *
 ClientReportThread(void *arg)
 {
-	uint32_t sleepiv = heartbeat * 1000000;
-	uint32_t dst;
-	uint16_t what, seq;
-
 	/*
 	 * XXX we don't want to multicast these packets so make sure we
 	 * know who the server is.
@@ -1896,9 +1947,8 @@ ClientReportThread(void *arg)
 		FrisLog("WARNING: no server to send heartbeats to; "
 			"heartbeat reporting disabled");
 	}
-	dst = serverip.s_addr;
-	what = PKTPROGRESS_SUMMARY;
-	seq = 1;
+	hb_dst = serverip.s_addr;
+	hb_seq = 1;
 
 	/* Delay a random amount so clients don't report in sync */
 	fsleep(random() % 5000000);
@@ -1906,12 +1956,25 @@ ClientReportThread(void *arg)
 	if (debug)
 		FrisLog("Heartbeat pthread starting up ...");
 
+	pthread_mutex_lock(&heartbeat_mutex);
 	while (1) {
-		fsleep(sleepiv);
-		SendProgressReport(dst, what, seq);
+		uint32_t iv = hb_interval;
 
-		/* XXX don't reset on every call */
-		dst = 0;
+		if (iv == 0) {
+#ifdef CONDVARS_WORK
+			pthread_cond_wait(&heartbeat_cond, &heartbeat_mutex);
+#else
+			pthread_mutex_unlock(&heartbeat_mutex);
+			fsleep(1000000);
+			pthread_mutex_lock(&heartbeat_mutex);
+#endif
+			continue;
+		}
+		pthread_mutex_unlock(&heartbeat_mutex);
+		fsleep(iv * 1000000);
+		pthread_mutex_lock(&heartbeat_mutex);
+
+		SendProgressReport();
 	}
 }
 
