@@ -38,6 +38,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/time.h> 
+#include <inttypes.h>
 
 //#include "libtb/tbdefs.h"
 #include "event/event.h"
@@ -107,6 +108,31 @@ EventDeinit(void)
 	}
 }
 
+/*
+ * Put a signed 32-bit int into a notification.
+ *
+ * XXX we actually encode these all as strings since our Perl SWIG wrappers
+ * are broken for handling OUT reference params. This is easier than fixing
+ * the SWIG code.
+ */
+static inline void
+putint32(event_handle_t hand, event_notification_t note, char *key, uint32_t val)
+{
+	char valbuf[12];
+
+	snprintf(valbuf, sizeof valbuf, "%"PRIu32, val);
+	(void) event_notification_put_string(hand, note, key, valbuf);
+}
+
+static inline void
+putint64(event_handle_t hand, event_notification_t note, char *key, uint64_t val)
+{
+	char valbuf[24];
+
+	snprintf(valbuf, sizeof valbuf, "%"PRIu64, val);
+	(void) event_notification_put_string(hand, note, key, valbuf);
+}
+
 int
 EventSendClientReport(char *node, char *image, uint32_t tstamp, uint32_t seq,
 		      ClientSummary_t *summary, ClientStats_t *stats)
@@ -145,20 +171,15 @@ EventSendClientReport(char *node, char *image, uint32_t tstamp, uint32_t seq,
 	 * From stats (if present):
 	 *   nothing right now as client does not pass this.
 	 */
-	(void) event_notification_put_int32(ehandle, notification,
-					    "TSTAMP", tstamp);
-	(void) event_notification_put_int32(ehandle, notification,
-					    "SEQUENCE", seq);
+	putint32(ehandle, notification, "TSTAMP", tstamp);
+	putint32(ehandle, notification, "SEQUENCE", seq);
 	if (summary != NULL) {
-		(void) event_notification_put_int32(ehandle, notification,
-						    "CHUNKS_RECV",
-						    summary->chunks_in);
-		(void) event_notification_put_int32(ehandle, notification,
-						    "CHUNKS_DECOMP",
-						    summary->chunks_out);
-		(void) event_notification_put_int64(ehandle, notification,
-						    "BYTES_WRITTEN",
-						    summary->bytes_out);
+		putint32(ehandle, notification, "CHUNKS_RECV",
+			 summary->chunks_in);
+		putint32(ehandle, notification, "CHUNKS_DECOMP",
+			 summary->chunks_out);
+		putint64(ehandle, notification, "BYTES_WRITTEN",
+			 summary->bytes_out);
 	}
 
 	if (event_notify(ehandle, notification) == 0) {
