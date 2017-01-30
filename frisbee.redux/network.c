@@ -935,6 +935,15 @@ PacketValid(Packet_t *p, int nchunks)
 
 /*
  * Functions for communicating with the master server.
+ *
+ * TODO: protocol for negotiating the protocol version:
+ * On the client, send a request with our current version and:
+ *   - get a version error back: server must be V01, so redo with V01
+ *   - otherwise header reply contains version
+ *     if not our version, must be a lower version, so redo with that version
+ * On the server:
+ *   - version less than our current version, use that version
+ *   - version greater than ours, reply with our version 
  */
 #ifdef MASTER_SERVER
 int

@@ -421,6 +421,21 @@ typedef struct {
 	uint8_t		imageid[MS_MAXIDLEN];
 } __attribute__((__packed__)) GetRequest;
 
+/*
+ * TODO for V2 replies:
+ *  - include mtime as distinct field, not as a signature
+ *    (chances are, when we start using a different signature type, we will
+ *    still want to know the mtime; e.g., for a cached copy),
+ *  - include latest version num of image, if request is for unversioned image
+ *    (this is so that requests for "emulab-ops/foo" to a subboss can be
+ *    translated into the a request for the correct version),
+ *  - first/last sectors covered by image as well as sector size
+ *    (this would enable us to build a partition table entry on-the-fly for
+ *    the partition we are writing the image to.)
+ *  - uncompressed size of data in the image
+ *    (gives the client a metric for estimating "time remaining" when
+ *    laying down an image),
+ */
 typedef struct {
 	uint8_t		method;
 	uint8_t		isrunning;
