@@ -1847,6 +1847,7 @@ SendProgressReport(void)
 			hb_who = proxyip.s_addr;
 		else
 			hb_who = htonl(ClientNetID());
+		hb_seq = 1;
 	}
 
 	gettimeofday(&rstamp, 0);
@@ -1947,8 +1948,6 @@ ClientReportThread(void *arg)
 		FrisLog("WARNING: no server to send heartbeats to; "
 			"heartbeat reporting disabled");
 	}
-	hb_dst = serverip.s_addr;
-	hb_seq = 1;
 
 	/* Delay a random amount so clients don't report in sync */
 	fsleep(random() % 5000000);
