@@ -1672,9 +1672,17 @@ compute_sendrate(void)
 	int clockres, wireblocksize, minburst;
 
 	if (burstinterval == 0) {
-		burstsize = 1;
-		FrisLog("Maximum send bandwidth unlimited");
-		return;
+		if (!dynburst) {
+			burstsize = 1;
+			FrisLog("Maximum send bandwidth unlimited");
+			return;
+		}
+		/*
+		 * XXX in order for dynamic rate adjustment to work, we
+		 * have to have burstsize/rate params set. So we just pick
+		 * a high bandwidth cap here (10Gb/sec).
+		 */
+		bandwidth = 10000000000;
 	}
 
 	/* clock resolution in usec */
@@ -1734,7 +1742,7 @@ compute_sendrate(void)
 #endif
 	}
 
-	if (burstsize * sizeof(Packet_t) > GetSockbufSize()) {
+	if (!dynburst && burstsize * sizeof(Packet_t) > GetSockbufSize()) {
 		FrisWarning("NOTE: burst size exceeds socket buffer size, "
 			    "may drop packets");
 	}

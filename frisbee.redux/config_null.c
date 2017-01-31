@@ -86,8 +86,8 @@ null_read(void)
 {
 	/* "Reading" the config file is a no-op. Just echo settings. */
 	FrisLog("  dynamic bandwidth = %s", dynrate ? "true" : "false");
-	if (dynrate)
-		FrisLog("  max bandwidth = N/A");
+	if (maxrate == 0)
+		FrisLog("  max bandwidth = unlimited");
 	else
 		FrisLog("  max bandwidth = %d Mbit/sec",
 			(int)(maxrate/1000000));
@@ -123,8 +123,8 @@ static int
 null_restore(void *state)
 {
 	FrisLog("  dynamic bandwidth = %s", dynrate ? "true" : "false");
-	if (dynrate)
-		FrisLog("  max bandwidth = N/A");
+	if (maxrate == 0)
+		FrisLog("  max bandwidth = unlimited");
 	else
 		FrisLog("  max bandwidth = %d Mbit/sec",
 			(int)(maxrate/1000000));
@@ -182,9 +182,18 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 	/* get_timeout */
 	ai->imageinfo[ix].get_timeout = maxlinger;
 
-	/* get_options */
-	snprintf(str, sizeof str, " %s-W %u",
-		 dynrate ? "-D " : "", maxrate);
+	/*
+	 * get_options:
+	 *  - maxrate of zero means unlimited.
+	 *  - for dynamic rate adjustment, we use the std/usr
+	 *    bandwidth value as the maximum bandwidth.
+	 */
+	if (maxrate)
+		snprintf(str, sizeof str, " -W %u", maxrate);
+	else
+		snprintf(str, sizeof str, " -G 0");
+	if (dynrate)
+		strcat(str, " -D");
 	strcat(str, " -K 15");
 	if (clientreport > 0) {
 		int len = strlen(str);
@@ -810,6 +819,21 @@ null_init(char *opts)
 	 *   maxlinger=N	 Server lingers for N seconds after last req
 	 *   report=N		 Clients report progress every N seconds
 	 *   eventserver=host	 Host to sent client report events to
+	 *
+	 * Dependencies:
+	 *
+	 *   If "bandwidth" is zero, max bandwidth is unlimited.
+	 *
+	 *   "maxlinger" should be at least as long as "report" to ensure
+	 *   you don't exit between reports.
+	 *
+	 *   If reporting is disabled, then "maxlinger" should be set higher
+	 *   (say, 3-5 minutes) to account for clients with lots of memory
+	 *   that download all the chunks well before they finish writing
+	 *   them to disk. Not critical, but you could lose client stats.
+	 *
+	 *   If "report" is non-zero but "eventserver" is not set, reports
+	 *   are only logged to the server log.
 	 */
 	if (opts && opts[0]) {
 		char *opt;

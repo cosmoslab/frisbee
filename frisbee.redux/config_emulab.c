@@ -247,8 +247,8 @@ emulab_read(void)
 			get_maxrate_std = (uint32_t)ival;
 		free(val);
 	}
-	if (get_maxrate_dyn)
-		FrisLog("  image_get_maxrate_std = N/A");
+	if (get_maxrate_std == 0)
+		FrisLog("  image_get_maxrate_std = unlimited");
 	else
 		FrisLog("  image_get_maxrate_std = %d Mbit/sec",
 			(int)(get_maxrate_std/1000000));
@@ -261,8 +261,8 @@ emulab_read(void)
 			get_maxrate_usr = (uint32_t)ival;
 		free(val);
 	}
-	if (get_maxrate_dyn)
-		FrisLog("  image_get_maxrate_usr = N/A");
+	if (get_maxrate_usr == 0)
+		FrisLog("  image_get_maxrate_usr = unlimited");
 	else
 		FrisLog("  image_get_maxrate_usr = %d Mbit/sec",
 			(int)(get_maxrate_usr/1000000));
@@ -336,14 +336,14 @@ emulab_restore(void *state)
 	FrisLog("  image_get_maxrate_dyn = %s",
 		get_maxrate_dyn ? "true" : "false");
 	get_maxrate_std = cs->image_maxrate_std;
-	if (get_maxrate_dyn)
-		FrisLog("  image_get_maxrate_std = N/A");
+	if (get_maxrate_std == 0)
+		FrisLog("  image_get_maxrate_std = unlimited");
 	else
 		FrisLog("  image_get_maxrate_std = %d Mbit/sec",
 			(int)(get_maxrate_std/1000000));
 	get_maxrate_usr = cs->image_maxrate_usr;
-	if (get_maxrate_dyn)
-		FrisLog("  image_get_maxrate_usr = N/A");
+	if (get_maxrate_usr == 0)
+		FrisLog("  image_get_maxrate_usr = unlimited");
 	else
 		FrisLog("  image_get_maxrate_usr = %d Mbit/sec",
 			(int)(get_maxrate_usr/1000000));
@@ -387,6 +387,7 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 {
 	struct config_imageinfo *ii = &ai->imageinfo[ix];
 	char str[256];
+	int maxrate;
 
 	/* get_methods */
 	ii->get_methods = CONFIG_IMAGE_MCAST;
@@ -418,13 +419,19 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 		ii->get_timeout = 60;
 
 	/*
-	 * get_options: for dynamic rate adjustment, we use the std/usr
-	 * bandwidth value as the maximum bandwidth.
+	 * get_options:
+	 *  - max std/usr rate of zero means unlimited.
+	 *  - for dynamic rate adjustment, we use the std/usr
+	 *    bandwidth value as the maximum bandwidth.
 	 */
-	snprintf(str, sizeof str, " %s-W %u",
-		 get_maxrate_dyn ? "-D " : "",
-		 isindir(STDIMAGEDIR, ii->path) ?
-		 get_maxrate_std : get_maxrate_usr);
+	maxrate = isindir(STDIMAGEDIR, ii->path) ?
+		get_maxrate_std : get_maxrate_usr;
+	if (maxrate)
+		snprintf(str, sizeof str, " -W %u", maxrate);
+	else
+		snprintf(str, sizeof str, " -G 0");
+	if (get_maxrate_dyn)
+		strcat(str, " -D");
 
 	/*
 	 * for client reporting we set the interval and the event server
