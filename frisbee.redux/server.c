@@ -74,7 +74,7 @@ char	       *filename;
 char	       *hserver;
 unsigned int	hinterval;
 struct timeval  IdleTimeStamp, FirstReq, LastReq;
-volatile int	activeclients;
+volatile int	activeclients, totalclients;
 
 /* Forward decls */
 void		quit(int);
@@ -85,18 +85,25 @@ static void	compute_sendrate(void);
 static void	dumpstats(void);
 static int	findclient(uint32_t id);
 
+/*
+ * Progress tracking.
+ *
+ * Since JOIN/LEAVE messages are UDP like everything else and can be lost,
+ * this is not definitive.
+ */
+#define MAXCLIENTS 1024	/* not a real limit, just for stats */
+static struct {
+	unsigned int id;
+	unsigned int ip;
+	unsigned int lastseq;
+} clients[MAXCLIENTS];
+static int nextclientix = 0, maxclientnum = 0;
+
 #ifdef STATS
 /*
  * Track duplicate chunks/joins for stats gathering
  */
 char		*chunkmap;
-
-#define MAXCLIENTS 256	/* not a real limit, just for stats */
-struct {
-	unsigned int id;
-	unsigned int ip;
-	unsigned int lastseq;
-} clients[MAXCLIENTS];
 
 /*
  * Stats gathering.
@@ -469,44 +476,66 @@ ClientJoin(Packet_t *p, int version)
 {
 	struct in_addr	ipaddr   = { p->hdr.srcip };
 	unsigned int    clientid = p->msg.join.clientid;
+	int		i, j;
 
 	EVENT(1, EV_JOINREQ, ipaddr, clientid, version, 0, 0);
 	WorkQueueEnqueueJoin(version, clientid);
-#ifdef STATS
-	{
-		int i, j = -1;
 
-		for (i = 0; i < MAXCLIENTS; i++) {
-			if (clients[i].id == clientid) {
-				if (clients[i].ip != ipaddr.s_addr) {
-					FrisLog("%s reuses active client id",
-						inet_ntoa(ipaddr));
-					clients[i].ip = ipaddr.s_addr;
+	/*
+	 * Sanity check the new client.
+	 */
+	j = -1;
+	for (i = 0; i < nextclientix; i++) {
+		if (clients[i].id == clientid) {
+			if (clients[i].ip != ipaddr.s_addr) {
+				FrisLog("%s reuses active client id",
+					inet_ntoa(ipaddr));
+				clients[i].ip = ipaddr.s_addr;
+			}
+			break;
+		}
+		if (clients[i].ip == ipaddr.s_addr) {
+			int k;
+
+			FrisLog("%s rejoins with different cid, ocid=%u",
+				inet_ntoa(ipaddr), clients[i].id);
+
+			/*
+			 * Index is assumed to be unique, so look for other
+			 * users. We just report it now.
+			 */
+			for (k = i + 1; k < nextclientix; k++)
+				if (clients[k].id == clients[i].id) {
+					FrisLog("%s also using cid; "
+						"pooch screwed",
+						clients[k].ip);
 				}
-				break;
-			}
-			if (clients[i].ip == ipaddr.s_addr) {
-				FrisLog("%s rejoins with different cid, ocid=%u",
-					inet_ntoa(ipaddr), clients[i].id);
-				clients[i].id = clientid;
-				break;
-			}
-			if (j == -1 && clients[i].id == 0)
-				j = i;
+
+			clients[i].id = clientid;
+			break;
 		}
-		if (i == MAXCLIENTS) {
+		if (j == -1 && clients[i].id == 0)
+			j = i;
+	}
+	if (i == nextclientix) {
+		if (j == -1 && nextclientix < MAXCLIENTS) {
+			j = nextclientix++;
+			if (nextclientix > maxclientnum)
+				maxclientnum = nextclientix;
+		}
+		if (j != -1) {
 			activeclients++;
-			if (j != -1) {
-				clients[j].id = clientid;
-				clients[j].ip = ipaddr.s_addr;
-				clients[j].lastseq = 0;
-			}
+			totalclients++;
+			clients[j].id = clientid;
+			clients[j].ip = ipaddr.s_addr;
+			clients[j].lastseq = 0;
+		} else {
+			FrisLog("more than %d clients, not tracking %s",
+				MAXCLIENTS, inet_ntoa(ipaddr));
 		}
+		i = j;
 	}
 	DOSTAT(joinrep++);
-#else
-	activeclients++;
-#endif
 
 	EVENT(1, EV_JOINREP, ipaddr, CHUNKSIZE, BLOCKSIZE,
 	      (FileInfo.filesize >> 32), FileInfo.filesize);
@@ -529,33 +558,25 @@ ClientLeave(Packet_t *p)
 {
 	struct in_addr	ipaddr = { p->hdr.srcip };
 	unsigned int clientid = p->msg.leave.clientid;
+	int i;
 
 	EVENT(1, EV_LEAVEMSG, ipaddr, clientid, p->msg.leave.elapsed, 0, 0);
 
-#ifdef STATS
-	{
-		int i = findclient(clientid);
-
-		if (i >= 0) {
-			activeclients--;
-			clients[i].id = clients[i].ip = 0;
-			clients[i].lastseq = 0;
-			FrisLog("%s (id %u, image %s): leaves at %s, "
-				"ran for %d seconds.  %d active clients",
-				inet_ntoa(ipaddr), clientid, filename,
-				CurrentTimeString(),
-				p->msg.leave.elapsed, activeclients);
-		} else
-			FrisLog("%s (id %u): spurious leave ignored",
-				inet_ntoa(ipaddr), clientid);
-	}
-#else
-	activeclients--;
-	FrisLog("%s (id %u, image %s): leaves at %s, ran for %d seconds.  "
-		"%d active clients",
-		inet_ntoa(ipaddr), clientid, filename, CurrentTimeString(),
-		p->msg.leave.elapsed, activeclients);
-#endif
+	i = findclient(clientid);
+	if (i >= 0) {
+		clients[i].id = clients[i].ip = 0;
+		clients[i].lastseq = 0;
+		if (nextclientix == i + 1)
+			nextclientix = i;
+		activeclients--;
+		FrisLog("%s (id %u, image %s): leaves at %s, "
+			"ran for %d seconds.  %d active clients",
+			inet_ntoa(ipaddr), clientid, filename,
+			CurrentTimeString(), p->msg.leave.elapsed,
+			activeclients);
+	} else
+		FrisLog("%s (id %u): spurious leave ignored",
+			inet_ntoa(ipaddr), clientid);
 }
 
 /*
@@ -567,34 +588,28 @@ ClientLeave2(Packet_t *p)
 {
 	struct in_addr	ipaddr = { p->hdr.srcip };
 	unsigned int clientid = p->msg.leave2.clientid;
+	int i;
 
 	EVENT(1, EV_LEAVEMSG, ipaddr, clientid, p->msg.leave2.elapsed, 0, 0);
 
+	i = findclient(clientid);
+	if (i >= 0) {
+		clients[i].id = clients[i].ip = 0;
+		clients[i].lastseq = 0;
+		if (nextclientix == i + 1)
+			nextclientix = i;
+		activeclients--;
+		FrisLog("%s (id %u, image %s): leaves at %s, "
+			"ran for %d seconds.  %d active clients",
+			inet_ntoa(ipaddr), clientid, filename,
+			CurrentTimeString(), p->msg.leave2.elapsed,
+			activeclients);
 #ifdef STATS
-	{
-		int i = findclient(clientid);
-
-		if (i >= 0) {
-			clients[i].id = clients[i].ip = 0;
-			clients[i].lastseq = 0;
-			activeclients--;
-			FrisLog("%s (id %u, image %s): leaves at %s, "
-				"ran for %d seconds.  %d active clients",
-				inet_ntoa(ipaddr), clientid, filename,
-				CurrentTimeString(),
-				p->msg.leave2.elapsed, activeclients);
-			ClientStatsDump(clientid, &p->msg.leave2.stats);
-		} else
-			FrisLog("%s (id %u): spurious leave ignored",
-				inet_ntoa(ipaddr), clientid);
-	}
-#else
-	activeclients--;
-	FrisLog("%s (id %u, image %s): leaves at %s, ran for %d seconds.  "
-		"%d active clients",
-		inet_ntoa(ipaddr), clientid, filename, CurrentTimeString(),
-		p->msg.leave2.elapsed, activeclients);
+		ClientStatsDump(clientid, &p->msg.leave2.stats);
 #endif
+	} else
+		FrisLog("%s (id %u): spurious leave ignored",
+			inet_ntoa(ipaddr), clientid);
 }
 
 /*
@@ -667,10 +682,8 @@ ClientReport(Packet_t *p)
 	uint32_t seq = 0, tstamp = 0;
 	ClientSummary_t *sump = NULL;
 	ClientStats_t *statp = NULL;
-#ifdef STATS
 	uint32_t lastseq;
 	int i;
-#endif
 
 	if (p->hdr.type != PKTTYPE_REPLY ||
 	    p->msg.progress.hdr.clientid == 0 ||
@@ -678,12 +691,15 @@ ClientReport(Packet_t *p)
 	    (p->msg.progress.hdr.what != 0 &&
 	     p->hdr.datalen < sizeof(p->msg.progress)))
 		return;
-#ifdef STATS
+
 	if ((i = findclient(p->msg.progress.hdr.clientid)) < 0)
 		return;
+
 	lastseq = clients[i].lastseq;
-#endif
 	DOSTAT(reportslogged++);
+
+	/* XXX keep the server alive */
+	gettimeofday(&IdleTimeStamp, 0);
 
 	tstamp = p->msg.progress.hdr.when;
 	seq = p->msg.progress.hdr.seq;
@@ -723,13 +739,11 @@ ClientReport(Packet_t *p)
 #endif
 	}
 
-#ifdef STATS
 	if (seq != lastseq + 1)
 		FrisLog("%s (id %u): lost reports: last=%u, this=%u",
 			inet_ntoa(ipaddr),
 			p->msg.progress.hdr.clientid, lastseq, seq);
 	clients[i].lastseq = seq;
-#endif
 
 #ifdef EMULAB_EVENTS
 	/*
@@ -914,27 +928,27 @@ PlayFrisbee(void)
 				continue;
 			}
 			
-#ifdef STATS
 			/* If less than zero, exit when last client leaves */
 			if (timeout < 0 &&
-			    Stats.joins > 0 && activeclients == 0) {
+			    totalclients > 0 && activeclients == 0) {
 				fsleep(2000000);
 				FrisLog("Last client left!");
 				break;
 			}
-#endif
 
 			if (idlelastloop) {
 				if (timeout > 0 &&
 				    stamp.tv_sec - IdleTimeStamp.tv_sec >
 				    timeout) {
-					FrisLog("No requests for %d seconds!",
-						timeout);
+					FrisLog("No requests or reports "
+						"for %d seconds "
+						"(%d remaining clients)",
+						timeout, activeclients);
 					break;
 				}
 			} else {
 				DOSTAT(goesidle++);
-				IdleTimeStamp = stamp;
+				IdleTimeStamp.tv_sec = stamp.tv_sec;
 				idlelastloop = 1;
 			}
 			continue;
@@ -1499,30 +1513,19 @@ mypread(int fd, void *buf, size_t nbytes, off_t offset)
 	return count;
 }
 
-#ifdef STATS
 static int
 findclient(uint32_t id)
 {
 	int i;
 
-	for (i = 0; i < MAXCLIENTS; i++)
+	for (i = 0; i < nextclientix; i++)
 		if (clients[i].id == id)
 			return i;
 	return -1;
 }
-#endif
 
 #define LINK_OVERHEAD	(14+4+8+12)	/* ethernet (hdr+CRC+preamble+gap) */
 #define IP_OVERHEAD	(20+8)		/* IP + UDP hdrs */
-
-static unsigned long
-compute_bandwidth(int bsize, int binterval)
-{
-	int wireblocksize = (sizeof(Packet_t)+IP_OVERHEAD+LINK_OVERHEAD) * 8;
-	double burstspersec = 1000000.0 / binterval;
-
-	return (unsigned long)(burstspersec*bsize*wireblocksize);
-}
 
 #define LOSS_INTERVAL	500	/* interval in which we collect data (ms) */
 #define MULT_DECREASE	0.90	/* mult factor to decrease burst rate */
@@ -1743,6 +1746,17 @@ compute_sendrate(void)
 			burstsize, burstinterval);
 }
 
+#ifdef STATS
+static unsigned long
+compute_bandwidth(int bsize, int binterval)
+{
+	int wireblocksize = (sizeof(Packet_t)+IP_OVERHEAD+LINK_OVERHEAD) * 8;
+	double burstspersec = 1000000.0 / binterval;
+
+	return (unsigned long)(burstspersec*bsize*wireblocksize);
+}
+#endif
+
 static void
 dumpstats(void)
 {
@@ -1773,6 +1787,8 @@ dumpstats(void)
 	FrisLog("  user/sys CPU time: %d.%03d/%d.%03d",
 		ru.ru_utime.tv_sec, ru.ru_utime.tv_usec/1000,
 		ru.ru_stime.tv_sec, ru.ru_stime.tv_usec/1000);
+	FrisLog("  max/total clients: %d/%d",
+		maxclientnum, totalclients);
 	FrisLog("  msgs in/out:       %d/%d",
 		Stats.msgin, Stats.joinrep + Stats.blockssent);
 	FrisLog("  joins/leaves:      %d/%d", Stats.joins, Stats.leaves);

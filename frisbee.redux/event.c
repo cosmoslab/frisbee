@@ -124,15 +124,6 @@ putint32(event_handle_t hand, event_notification_t note, char *key, uint32_t val
 	(void) event_notification_put_string(hand, note, key, valbuf);
 }
 
-static inline void
-putint64(event_handle_t hand, event_notification_t note, char *key, uint64_t val)
-{
-	char valbuf[24];
-
-	snprintf(valbuf, sizeof valbuf, "%"PRIu64, val);
-	(void) event_notification_put_string(hand, note, key, valbuf);
-}
-
 int
 EventSendClientReport(char *node, char *image, uint32_t tstamp, uint32_t seq,
 		      ClientSummary_t *summary, ClientStats_t *stats)
@@ -164,9 +155,9 @@ EventSendClientReport(char *node, char *image, uint32_t tstamp, uint32_t seq,
 	 *   SEQUENCE:    int32, sequence number of report
 	 *
 	 * From summary (if present):
-	 *   CHUNKS_RECV:   int32, chunks successfully received by client
-	 *   CHUNKS_DECOMP: int32, chunks successfully decompressed
-	 *   BYTES_WRITTEN: int64, bytes written to disk
+	 *   CHUNKS_RECV:    int32, chunks successfully received by client
+	 *   CHUNKS_DECOMP:  int32, chunks successfully decompressed
+	 *   MBYTES_WRITTEN: int32, mebibytes written to disk
 	 *
 	 * From stats (if present):
 	 *   nothing right now as client does not pass this.
@@ -178,8 +169,8 @@ EventSendClientReport(char *node, char *image, uint32_t tstamp, uint32_t seq,
 			 summary->chunks_in);
 		putint32(ehandle, notification, "CHUNKS_DECOMP",
 			 summary->chunks_out);
-		putint64(ehandle, notification, "BYTES_WRITTEN",
-			 summary->bytes_out);
+		putint32(ehandle, notification, "MBYTES_WRITTEN",
+			 (uint32_t)(summary->bytes_out / (1024*1024)));
 	}
 
 	if (event_notify(ehandle, notification) == 0) {
