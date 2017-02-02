@@ -1,3 +1,26 @@
+/*
+ * Copyright (c) 2010-2017 University of Utah and the Flux Group.
+ * 
+ * {{{EMULAB-LICENSE
+ * 
+ * This file is part of the Emulab network testbed software.
+ * 
+ * This file is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or (at
+ * your option) any later version.
+ * 
+ * This file is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public
+ * License for more details.
+ * 
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this file.  If not, see <http://www.gnu.org/licenses/>.
+ * 
+ * }}}
+ */
+
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -34,6 +57,7 @@ struct config_imageinfo {
 	int put_timeout;	/* max time to allow PUT server to run */
 	int put_itimeout;	/* max time to allow per-socket-op to run */
 	char *put_oldversion;	/* where to save the old version */
+	char *pget_options;	/* options for parent-fetch client */
 	void *extra;		/* config-type specific info */
 };
 

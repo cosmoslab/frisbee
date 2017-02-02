@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -329,6 +329,8 @@ free_imageinfo(struct config_imageinfo *ii)
 			free(ii->put_oldversion);
 		if (ii->put_options)
 			free(ii->put_options);
+		if (ii->pget_options)
+			free(ii->pget_options);
 		free(ii);
 	}
 }
@@ -381,6 +383,9 @@ copy_imageinfo(struct config_imageinfo *ii)
 	nii->put_maxsize = ii->put_maxsize;
 	nii->put_timeout = ii->put_timeout;
 	nii->put_itimeout = ii->put_itimeout;
+	if (ii->pget_options &&
+	    (nii->pget_options = strdup(ii->pget_options)) == NULL)
+		goto fail;
 	/* XXX don't care about extra right now */
 	return nii;
 
@@ -1849,9 +1854,11 @@ startchild(struct childinfo *ci)
 		}
 		case PTYPE_CLIENT:
 			pname = FRISBEE_CLIENT;
+			opts = ci->imageinfo->pget_options ?
+				ci->imageinfo->pget_options : "";
 			snprintf(argbuf, sizeof argbuf,
-				 "%s -N -S %s -i %s %s %s -m %s %s %s",
-				 pname, servstr, ifacestr,
+				 "%s -N -S %s -i %s %s %s %s -m %s %s %s",
+				 pname, servstr, ifacestr, opts,
 				 debug > 1 ? "" : "-q",
 				 ci->method == CONFIG_IMAGE_UCAST ? "-O" :
 				 (ci->method == CONFIG_IMAGE_BCAST ? "-b" : ""),

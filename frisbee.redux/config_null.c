@@ -213,6 +213,18 @@ set_get_values(struct config_host_authinfo *ai, int ix)
 	ai->imageinfo[ix].put_itimeout = 0;
 	ai->imageinfo[ix].put_oldversion = NULL;
 	ai->imageinfo[ix].put_options = NULL;
+
+	/*
+	 * parent GET options:
+	 *  - if we are making client reports, make sure that our downloads
+	 *    from a parent enable those.
+	 *    XXX right now, the server always dictates the interval.
+	 */
+	if (clientreport > 0) {
+		snprintf(str, sizeof str, " -H 0");
+		ai->imageinfo[ix].pget_options = mystrdup(str);
+	} else
+		ai->imageinfo[ix].pget_options = NULL;
 }
 
 /*
@@ -244,6 +256,9 @@ set_put_values(struct config_host_authinfo *ai, int ix)
 	ii->get_methods = 0;
 	ii->get_timeout = 0;
 	ii->get_options = NULL;
+
+	/* and pget fields */
+	ii->pget_options = NULL;
 }
 
 #define FREE(p) { if (p) free(p); }
@@ -268,6 +283,7 @@ null_free_host_authinfo(struct config_host_authinfo *ai)
 			FREE(ai->imageinfo[i].get_options);
 			FREE(ai->imageinfo[i].put_oldversion);
 			FREE(ai->imageinfo[i].put_options);
+			FREE(ai->imageinfo[i].pget_options);
 			FREE(ai->imageinfo[i].extra);
 		}
 		free(ai->imageinfo);

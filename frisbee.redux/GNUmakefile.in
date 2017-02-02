@@ -322,6 +322,8 @@ install:	$(INSTALL_SBINDIR)/mfrisbeed $(INSTALL_SBINDIR)/frisbeed $(INSTALL_SBIN
 
 subboss-install: subboss
 	$(MAKE) WITH_MSERVER_EMULAB=0 install
+	$(INSTALL_PROGRAM) frisbee $(DESTDIR)/usr/local/bin/frisbee
+	$(INSTALL_PROGRAM) frisupload $(DESTDIR)/usr/local/bin/frisupload
 
 client: frisbee frisupload
 
