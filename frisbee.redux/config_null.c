@@ -830,6 +830,8 @@ null_init(char *opts)
 	/*
 	 * Options:
 	 *   mcaddr=A.B.C.D      MC base address
+	 *   mcportbase=N	 MC base portnum (0 for any ephem)
+	 *   mcportnum=N	 Number of MC ports (0 for all above base)
 	 *   bandwidth=NNNNNNNN  Max bandwidth of a server
 	 *   dynamicbw=(1|0)	 Use dynamic bandwidth control
 	 *   maxlinger=N	 Server lingers for N seconds after last req
@@ -861,6 +863,10 @@ null_init(char *opts)
 				*cp = 0;
 				if (strcmp(opt, "mcaddr") == 0)
 					DEFAULT_MCADDR = mystrdup(cp + 1);
+				else if (strcmp(opt, "mcportbase") == 0)
+					DEFAULT_MCPORT = mystrdup(cp + 1);
+				else if (strcmp(opt, "mcportnum") == 0)
+					DEFAULT_MCNUMPORT = mystrdup(cp + 1);
 				else if (strcmp(opt, "bandwidth") == 0)
 					maxrate = (uint32_t)
 						strtol(cp+1, NULL, 10);
