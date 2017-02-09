@@ -34,6 +34,9 @@
 #include <sys/cdefs.h>
 #ifndef lint
 __RCSID("$NetBSD: boot.c,v 1.11 2006/06/05 16:51:18 christos Exp ");
+#ifdef __clang__ /* Fix warning about unused variable */
+__attribute__((unused))
+#endif
 static const char rcsid[] =
   "$FreeBSD: releng/10.2/sbin/fsck_msdosfs/boot.c 241807 2012-10-21 12:01:19Z uqs $";
 #endif /* not lint */
