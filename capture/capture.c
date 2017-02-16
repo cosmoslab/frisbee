@@ -1050,11 +1050,13 @@ capture(void)
 			fdcount = ptyfd;
 		FD_SET(ptyfd, &sfds);
 	}
+#ifdef  USESOCKETS
 	if (xsfd >= 0) {
 		if (fdcount < xsfd)
 			fdcount = xsfd;
 		FD_SET(xsfd, &sfds);
 	}
+#endif
 
 	fdcount++;
 
@@ -1303,6 +1305,7 @@ capture(void)
 			send_to_device(buf, cc);
 			sigprocmask(SIG_SETMASK, &omask, NULL);
 		}
+#ifdef  USESOCKETS
 		if (xsfd >= 0 && FD_ISSET(xsfd, &fds)) {
 			if (debug > 1)
 				fprintf(stderr,
@@ -1324,6 +1327,7 @@ capture(void)
 					fdcount = xsfd + 1;
 			}
 		}
+#endif
 	}
 }
 #endif
