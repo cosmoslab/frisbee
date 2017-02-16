@@ -1,7 +1,7 @@
 // SetIterator.h
 
 /*
- * Copyright (c) 2004 University of Utah and the Flux Group.
+ * Copyright (c) 2004-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -98,12 +98,14 @@ public:
 public:
     SetIterator(T const & first, T const & second)
     {
+	currentSet = FIRST_SET;
         reset(first, second);
     }
 
     SetIterator(T const & first, T const & second,
                 Compare const & newPredicate)
     {
+	currentSet = FIRST_SET;
         reset(first, second, newPredicate);
     }
 
