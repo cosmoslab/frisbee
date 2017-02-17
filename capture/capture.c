@@ -2009,13 +2009,12 @@ findproc(char *cmd)
 	char buf[128], outbuf[128];
 	int cpid = -1;
 
-	snprintf(buf, sizeof(buf),
-		 "ps -ax -o pid -o command | grep '[0-9] %s'", cmd);
+	snprintf(buf, sizeof(buf), "pgrep -f '^%s'", cmd);
 	if (backtick(buf, outbuf, sizeof(outbuf)) == 0) {
 		char *pstr, *estr;
-		for (pstr = outbuf; !isdigit(*pstr); pstr++)
+		for (pstr = outbuf; *pstr && !isdigit(*pstr); pstr++)
 			;
-		for (estr = pstr; isdigit(*estr); estr++)
+		for (estr = pstr; *estr && isdigit(*estr); estr++)
 			;
 		*estr = '\0';
 		if (*pstr != '\0')
@@ -2143,8 +2142,17 @@ xenmode(int isrestart)
 			if ((cp = index(outbuf, '\n')) != 0)
 				*cp = '\0';
 			pty = outbuf;
+		} else {
+			sleep(2);
+			if (backtick(cmdbuf, outbuf, sizeof(outbuf)) == 0) {
+				if ((cp = index(outbuf, '\n')) != 0)
+					*cp = '\0';
+				pty = outbuf;
+			} else {
+				warning("%s: HVM with no serial device!",
+					xendomain);
+			}
 		}
-
 		if (pty && xenwatch(domid) != 0)
 			warning("%s: could not start watcher", xendomain);
 	}
