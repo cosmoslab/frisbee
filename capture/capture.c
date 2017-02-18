@@ -1964,7 +1964,8 @@ progmode(int isrestart)
  */
 #define XEN_XL	"/usr/sbin/xl"
 #define XEN_XSR	"/usr/sbin/xenstore-read"
-#define XEN_XSW	"/usr/sbin/xenstore-watch"
+#define XEN_XSW	 "/usr/sbin/xenstore-watch"
+#define XEN_XSW2 "/usr/bin/xenstore-watch"
 
 /*
  * Capture output from a shell command.
@@ -2043,9 +2044,18 @@ xenwatch(int domid)
 	static int lastdomid = 0;
 	static int lastpid = -1;
 	static FILE *xs = NULL;
+	static char *watch = XEN_XSW;
+	static int called;
 	char buf[128];
 	int flags, cc;
 
+	if (!called) {
+		struct stat sb;
+
+		if (stat(XEN_XSW, &sb) < 0)
+			watch = XEN_XSW2;
+		called++;
+	}
 	if (domid != lastdomid && xsfd >= 0) {
 		assert(fileno(xs) == xsfd);
 		if (lastpid > 0) {
@@ -2060,7 +2070,7 @@ xenwatch(int domid)
 	if (xs == NULL) {
 		assert(xsfd == -1);
 		snprintf(buf, sizeof(buf),
-			 "%s /local/domain/%d/console", XEN_XSW, domid);
+			 "%s /local/domain/%d/console", watch, domid);
 		xs = popen(buf, "r");
 		if (xs == NULL) {
 			warning("Could not start console watcher");
