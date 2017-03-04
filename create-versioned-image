@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 
 #
-# Copyright (c) 2000-2015 University of Utah and the Flux Group.
+# Copyright (c) 2000-2017 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -139,9 +139,11 @@ my $localdir = "/local";
 my $impotent = 0;
 my $verbose = 0;
 my $isxen   = 0;
+my $domfs   = 0;
 
 sub process_image($);
 sub mysystem($);
+sub nukemfs();
 
 my %iinfo = ();
 
@@ -176,6 +178,10 @@ sub map_diskname($)
     # work at the moment, but if device names change again
     # it could break.
     if ($^O eq 'linux') {
+	# XXX hack for NVMe
+	if ($dtype eq "nvd") {
+	    return "/dev/nvme${dunit}n1";
+	}
 	$dtype = "sd";
 	$dunit -= 4
 	    if ($dtype eq 'ad' && $dunit > 3);
@@ -405,7 +411,6 @@ if (defined($options{"v"})) {
 }
 if (defined($options{"x"})) {
     $isxen = 1;
-    $localdir = "/capture/" . $options{"x"} . "/frisbee";
 }
 if (defined($options{"f"})) {
     my $pfile = $options{"f"};
@@ -436,8 +441,13 @@ if (defined($options{"f"})) {
 # Consistency checks
 #
 my $dofrisbee = 0;
+my $gotbs = 0;
 foreach my $iid (sort keys %iinfo) {
-    if (!(defined($iinfo{$iid}{'disk'}) || defined($iinfo{$iid}{'bsref'}))) {
+    if (defined($iinfo{$iid}{'disk'})) {
+	;
+    } elsif (defined($iinfo{$iid}{'bsref'})) {
+	$gotbs++;
+    } else {
 	print STDERR "Must specify disk or blockstore\n";
 	exit(1);
     }
@@ -462,12 +472,27 @@ foreach my $iid (sort keys %iinfo) {
 }
 
 #
+# See if we need to create a local tmp dir, possibly as an MFS.
+# For a vnode we are running in dom0 and can use local disk.
+# For a blockstore we are running in the regular OS and can use /tmp.
+# Otherwise, if we are using frisbee we will have to create an MFS.
+#
+if ($isxen) {
+    $localdir = "/capture/" . $options{"x"} . "/frisbee";
+} elsif ($gotbs) {
+    $localdir = "/tmp/bstore/frisbee";
+} elsif ($dofrisbee) {
+    $domfs = 1;
+}
+
+#
 # For uniformity, all sigfiles are rooted here.
 # For method=frisbee, the actual files will be here.
 # For method=file, a symlink to the actual file will be here.
 #
 if (! -e $localdir && mysystem("$sudo mkdir -p $localdir")) {
     print STDERR "Could not create $localdir\n";
+    $domfs = 0;
     exit(1);
 }
 
@@ -482,14 +507,15 @@ if (! -e $localdir && mysystem("$sudo mkdir -p $localdir")) {
 # memory filesystem is too much for our older machines--let's go
 # with 64MB for now.
 #
-my $MEMFS_SIZE = "64m";
-if ($dofrisbee) {
+if ($domfs) {
+    my $MEMFS_SIZE = "64m";
+
     if ($^O eq 'linux') {
-	if (!$isxen &&
-	    mysystem("$sudo mount -t tmpfs -o size=$MEMFS_SIZE tmpfs $localdir")) {
+	if (mysystem("$sudo mount -t tmpfs -o size=$MEMFS_SIZE tmpfs $localdir")) {
 	    print STDERR "Could not create $MEMFS_SIZE byte local MFS\n";
 
 	    # XXX try NFS instead
+	    $domfs = 0;
 	    exit(1);
 	}
     } else {
@@ -499,6 +525,7 @@ if ($dofrisbee) {
 	    print STDERR "Could not create $MEMFS_SIZE byte local MFS\n";
 
 	    # XXX try NFS instead
+	    $domfs = 0;
 	    exit(1);
 	}
     }
@@ -516,23 +543,14 @@ foreach my $iid (sort keys %iinfo) {
     process_image($iid);
 }
 
+exit(0);
+
 #
 # Get rid of any extra FS.
 #
-if ($dofrisbee) {
-    if ($^O eq 'linux') {
-	if (!$isxen && mysystem("$sudo umount $localdir")) {
-	    print STDERR "WARNING: could not destroy local MFS\n";
-	}
-    } else {
-	if (mysystem("$sudo umount $localdir") ||
-	    mysystem("$sudo mdconfig -d -u 4")) {
-	    print STDERR "WARNING: could not destroy local MFS\n";
-	}
-    }
+sub nukemfs()
+{
 }
-
-exit(0);
 
 sub fetch($$)
 {
@@ -799,4 +817,20 @@ sub mysystem($)
     print STDERR "Doing: '$cmd' ...\n"
 	if ($verbose);
     return system($cmd);
+}
+
+# Get rid of any MFS we created
+END {
+    if ($domfs) {
+	if ($^O eq 'linux') {
+	    if (mysystem("$sudo umount $localdir")) {
+		print STDERR "WARNING: could not destroy local MFS\n";
+	    }
+	} else {
+	    if (mysystem("$sudo umount $localdir") ||
+		mysystem("$sudo mdconfig -d -u 4")) {
+		print STDERR "WARNING: could not destroy local MFS\n";
+	    }
+	}
+    }
 }

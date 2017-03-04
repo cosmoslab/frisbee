@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 
 #
-# Copyright (c) 2000-2015 University of Utah and the Flux Group.
+# Copyright (c) 2000-2017 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -250,6 +250,12 @@ else {
     if ($^O eq 'linux') {
 	$device =~ m#/dev/(\D+)(\d+)#;
 	($dtype, $dunit) = ($1, $2);
+
+	# XXX hack for NVMe
+	if ($dtype eq "nvd") {
+	    return "/dev/nvme${dunit}n1";
+	}
+
 	$dunit -= 4 if ($dtype eq 'ad' && $dunit > 3);
 	$dunit =~ y/01234567/abcdefgh/;
 
