@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -457,7 +457,6 @@ usage(void)
         "               image location is accessible by the caller.\n"
         "  -N           Do not attempt to verify the upload.\n"
     	"  -s           Use encryption.\n\n"
-#if 0
         "or:\n\n"
         "upload [options] -S <server> -p <port> <file-to-upload>\n"
         "Upload without using the master server. Here -S and -p identify\n"
@@ -468,7 +467,6 @@ usage(void)
         "  -k <size>    Specify the socket buffer size to use (1M by default)\n"
         "  -T <timeout> Time in seconds to wait for the upload to finish.\n"
     	"  -s           Use encryption.\n\n"
-#endif
     	"\n\n";
     	fprintf(stderr, "Frisbee upload/download client\n%s", usagestr);
 	exit(1);

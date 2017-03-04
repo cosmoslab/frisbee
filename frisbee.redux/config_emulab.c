@@ -1583,9 +1583,11 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	assert(res != NULL);
 
 	nrows = mysql_num_rows(res);
-	if (nrows > MAXGIDS)
+	if (nrows > MAXGIDS) {
 		FrisWarning("User '%s' in more than %d groups, truncating list",
 			    ei->sname, MAXGIDS);
+		nrows = MAXGIDS;
+	}
 	for (i = 0; i < nrows; i++) {
 		row = mysql_fetch_row(res);
 		if (get != NULL) {

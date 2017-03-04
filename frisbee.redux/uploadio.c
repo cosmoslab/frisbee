@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -398,7 +398,7 @@ SOCK_Read(int sockfd, void *buf, int num, conn *conn)
 		if ((nread = read(sockfd, ptr, nio)) < 0) {
 			if (errno == EINTR)
 				nread = 0; /* and call read() again */
-			else if (errno == EWOULDBLOCK) {
+			else if (errno == EWOULDBLOCK || errno == ETIMEDOUT) {
 				conn->flags |= CONN_TIMEDOUT;
 				break;
 			} else
