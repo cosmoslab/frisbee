@@ -223,6 +223,11 @@ ENHANCEMENTS:
    saving an extra copy of data. In addition to saving data copies, it would
    make more efficient use of space.
 
+11.Uploader: add option to compute image file hash as we upload the file.
+   In Emulab we keep a SHA1 hash of the image to verify its integrity and
+   right now we run sha1 on the image after we have downloaded and written
+   it to disk.
+
 PROBLEMS:
 
 1. Have seen the clients run out of socket buffer space causing them
