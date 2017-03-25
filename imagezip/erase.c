@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 University of Utah and the Flux Group.
+ * Copyright (c) 2016-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -47,11 +47,11 @@
 
 #ifdef DIOCGDELETE
 typedef off_t blk_t;
-int cmd = DIOCGDELETE;
+unsigned cmd = DIOCGDELETE;
 #endif
 #ifdef BLKDISCARD
 typedef uint64_t blk_t;
-int cmd = BLKDISCARD;
+unsigned cmd = BLKDISCARD;
 #endif
 
 static blk_t ebsize = -1;
