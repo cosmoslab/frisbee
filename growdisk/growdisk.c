@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2016 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2017 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -204,8 +204,10 @@ getdiskinfo(char *disk)
 			nhead = 0;
 		diskinfo.tpc = nhead;
 		if (nsect && nhead) {
+			/* make sure we truncate to a "cylinder" boundary */
 			diskinfo.cpu = diskinfo.disksize / (nsect * nhead);
-			chs = diskinfo.cpu * diskinfo.tpc * diskinfo.spt;
+			chs = (unsigned long)diskinfo.cpu *
+				diskinfo.tpc * diskinfo.spt;
 		} else {
 			diskinfo.cpu = 0;
 			chs = diskinfo.disksize;
