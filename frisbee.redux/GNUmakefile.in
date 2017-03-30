@@ -68,20 +68,17 @@ FBSDMAJ := $(basename $(FBSDREL))
 
 WITH_LTHREADS	= 0
 
+ifeq ($(FBSDMAJ),4)
+WITH_LTHREADS	= 1
+endif
+ifeq ($(FBSDMAJ),5)
 # XXX 5.3 and linuxthreads don't see to get along
-# 7.0 and beyond should not need it
 ifneq ($(FBSDREL),5.3)
-ifneq ($(FBSDMAJ),7)
-ifneq ($(FBSDMAJ),8)
-ifneq ($(FBSDMAJ),9)
-ifneq ($(FBSDMAJ),10)
-ifneq ($(FBSDMAJ),11)
 WITH_LTHREADS	= 1
 endif
 endif
-endif
-endif
-endif
+ifeq ($(FBSDMAJ),6)
+WITH_LTHREADS	= 1
 endif
 endif
 
