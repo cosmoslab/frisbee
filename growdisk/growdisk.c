@@ -76,6 +76,8 @@ struct diskinfo {
 	struct dospart *parts;
 } diskinfo;
 
+#define MAXSECT	((unsigned long)0xFFFFFFFF)
+
 char optionstr[] =
 "[-fhvW] [disk]\n"
 "Create or extend a DOS partition to contain all trailing unallocated space\n"
@@ -345,6 +347,16 @@ tweakdiskinfo(char *disk)
 	}
 	dp = &diskinfo.parts[lastunused];
 
+	/*
+	 * XXX since we are still in MBR-land, we cannot have a partition
+	 * larger than 4G - 1 sectors.
+	 */
+	if ((unsigned long)(diskinfo.disksize-firstfree) > MAXSECT) {
+		warnx("WARNING! Disk has %lu sectors, "
+		      "will only use %lu", diskinfo.disksize, MAXSECT);
+		diskinfo.disksize = MAXSECT + firstfree;
+	}
+	
 	if (fdisk) {
 		printf("p %d %d %ld %ld\n",
 		       lastunused+1, dp->dp_typ ? dp->dp_typ : DOSPTYP_386BSD,
