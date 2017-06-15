@@ -1131,6 +1131,7 @@ capture(void)
 				if (remotemode || programmode || xendomain) {
 					FD_CLR(devfd, &sfds);
 					close(devfd);
+					devfd = -1;
 					if (remotemode) {
 						warning("remote socket closed;"
 						" attempting to reconnect");
@@ -1154,8 +1155,9 @@ capture(void)
 
 					}
 					else {
-						warning("xen console pty closed;"
-							" attempting to reopen");
+						warning("xen console %s closed;"
+							" attempting to reopen",
+							Devname);
 						if (xsfd >= 0)
 							FD_CLR(xsfd, &sfds);
 						while (xenmode(1) != 0)
@@ -1167,9 +1169,11 @@ capture(void)
 								fdcount = xsfd + 1;
 						}
 					}
-					FD_SET(devfd, &sfds);
-					if (devfd >= fdcount)
-						fdcount = devfd + 1;
+					if (devfd >= 0) {
+						FD_SET(devfd, &sfds);
+						if (devfd >= fdcount)
+							fdcount = devfd + 1;
+					}
 					continue;
 				}
 #endif
@@ -2185,14 +2189,21 @@ xenmode(int isrestart)
 
 	if (Devname && strcmp(pty, Devname) != 0) {
 		free(Devname);
-		if (devfd >= 0) {
+		if (devfd >= 0)
 			close(devfd);
-		}
 		Devname = newstr(pty);
-		dolog(LOG_INFO,
-		      "%s (domid %d) using '%s'", xendomain, domid, Devname);
 		if (rawmode(Devname, speed))
 			return -1;
+		dolog(LOG_INFO,
+		      "%s (domid %d) using '%s' (%d)",
+		      xendomain, domid, Devname, devfd);
+	} else if (isrestart && Devname) {
+		/* XXX devfd may have been closed before call, must reopen */
+		if (devfd < 0 && rawmode(Devname, speed))
+			return -1;
+		dolog(LOG_INFO,
+		      "%s (domid %d) re-using '%s' (%d)",
+		      xendomain, domid, Devname, devfd);
 	}
 
 	return 0;
