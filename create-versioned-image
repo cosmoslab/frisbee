@@ -100,6 +100,11 @@ use Getopt::Std;
 # PROXY=<vnodeid>
 #    The proxy argument for use on XEN, when acting on behalf of a container.
 #
+# BSNAME=<blockstore>
+#    The image we are creating is for a local blockstore identified by
+#    the given name. Uses the blockstore support library to extract what
+#    specific device to image.
+#
 
 sub usage()
 {
