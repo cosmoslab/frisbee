@@ -1706,7 +1706,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		} else {
 			/* Find all images that this pid/gid can PUT */
 			res = mydb_query("SELECT i.pid,i.gid,i.imagename,"
-					 "v.path,i.imageid,v.version"
+					 "v.path,i.imageid,v.version,NULL"
 					 " FROM images as i"
 					 " LEFT JOIN image_versions as v on "
 					 "    v.imageid=i.imageid and "
@@ -1715,7 +1715,7 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 					 " AND (i.gid='%s' OR"
 					 "     (i.gid=i.pid AND v.shared=1))"
 					 " ORDER BY i.pid,i.gid,i.imagename",
-					 6, ei->pid, ei->gid);
+					 7, ei->pid, ei->gid);
 		}
 		assert(res != NULL);
 
