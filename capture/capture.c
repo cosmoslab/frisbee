@@ -174,6 +174,8 @@ int		   remotemode;
 int		   programmode;
 char		  *xendomain;
 int		   retryinterval = 5000;
+int		   maxretries = 0;
+int		   nomodpath = 0;
 int		   maxfailures = 10;
 int		   failures;
 int		   upportnum = -1, upfd = -1, upfilefd = -1;
@@ -381,7 +383,7 @@ main(int argc, char **argv)
 	else
 		Progname = *argv;
 
-	while ((op = getopt(argc, argv, "rds:Hb:ip:c:T:aonu:v:PmMLCl:X:R:")) != EOF)
+	while ((op = getopt(argc, argv, "rds:Hb:ip:c:T:aonu:v:PmMLCl:X:R:y:A")) != EOF)
 		switch (op) {
 #ifdef	USESOCKETS
 #ifdef  WITHSSL
@@ -427,6 +429,12 @@ main(int argc, char **argv)
 					"NOT seconds; must be >= 100\n");
 				usage();
 			}
+			break;
+		case 'y':
+			maxretries = atoi(optarg);
+			break;
+		case 'A':
+			nomodpath = 1;
 			break;
 #endif /* USESOCKETS */
 		case 'H':
@@ -510,6 +518,8 @@ main(int argc, char **argv)
 	}
 	else if (xendomain)
 		strcpy(strbuf, xendomain);
+	else if (nomodpath)
+		strcpy(strbuf, argv[1]);
 	else
 		(void) snprintf(strbuf, sizeof(strbuf),
 				DEVNAME, DEVPATH, argv[1]);
@@ -997,6 +1007,8 @@ capture(void)
 	sigset_t omask;
 	char buf[BUFSIZE];
 	struct timeval timeout;
+	int nretries;
+
 
 	/*
 	 * XXX for now we make both directions non-blocking.  This is a
@@ -1128,7 +1140,8 @@ capture(void)
 					Machine, cc);
 			if (cc <= 0) {
 #ifdef  USESOCKETS
-				if (remotemode || programmode || xendomain) {
+				if (remotemode || programmode || xendomain
+				    || maxretries) {
 					FD_CLR(devfd, &sfds);
 					close(devfd);
 					devfd = -1;
@@ -1154,7 +1167,7 @@ capture(void)
 						}
 
 					}
-					else {
+					else if (xendomain) {
 						warning("xen console %s closed;"
 							" attempting to reopen",
 							Devname);
@@ -1167,6 +1180,22 @@ capture(void)
 							FD_SET(xsfd, &sfds);
 							if (xsfd >= fdcount)
 								fdcount = xsfd + 1;
+						}
+					}
+					else {
+						warning("devfd %s closed;"
+							" attempting to reopen",
+							Devname);
+						nretries = 0;
+						while (rawmode(Devname,speed) != 0) {
+							if (maxretries > 0
+							    && nretries > maxretries) {
+								die("%s: failed to reopen (%d tries)",
+								    Devname,nretries);
+							}
+							++nretries;
+							usleep(retryinterval
+							       * 1000);
 						}
 					}
 					if (devfd >= 0) {
