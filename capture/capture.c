@@ -164,6 +164,7 @@ char   **programargv;
 #define programmode 0
 #define xendomain 0
 #define retryinterval 0
+#define nomodpath 0
 #else
 char		  *Bossnode = BOSSNODE;
 struct sockaddr_in Bossaddr;
