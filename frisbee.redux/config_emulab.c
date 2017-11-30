@@ -1390,10 +1390,11 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			return 1;
 		}
 
-		/* Must be inner boss, subboss or shared host to proxy */
+		/* Must be inner boss, subboss or virtnode host to proxy */
 		if (strcmp(role, "innerboss") &&
 		    strcmp(role, "subboss") && 
-		    strcmp(role, "sharedhost")) {
+		    strcmp(role, "sharedhost") &&
+		    strcmp(role, "virthost")) {
 			free(proxy);
 			free(role);
 			emulab_free_host_authinfo(get);
@@ -1480,7 +1481,8 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 					 "  AND r1.eid=r2.eid",
 					 1, proxy, node);
 			assert(res != NULL);
-		} else if (strcmp(role, "sharedhost") == 0) {
+		} else if (strcmp(role, "sharedhost") == 0 ||
+			   strcmp(role, "virthost") == 0) {
 			res = mydb_query("SELECT node_id"
 					 " FROM nodes"
 					 " WHERE phys_nodeid='%s'"
