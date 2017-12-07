@@ -765,6 +765,9 @@ sub process_image($)
 	exit(4);
     }
 
+    # XXX make sure there is no stale imagezip.stat file
+    unlink("$localdir/imagezip.stat");
+
     if (mysystem("$cmd")) {
 	$retval = $?;
     }
