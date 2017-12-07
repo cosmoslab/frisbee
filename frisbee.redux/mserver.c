@@ -1311,8 +1311,8 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		if (!S_ISREG(sb.st_mode)) {
 			rv = MS_ERROR_INVALID;
 			FrisWarning("%s: client %s %s failed: "
-				    "existing target is not a regular file",
-				    imageid, clientip, op);
+				    "existing target (%s) is not a regular file",
+				    imageid, clientip, op, ii->path);
 			msg->body.putreply.error = rv;
 			goto reply;
 		}
