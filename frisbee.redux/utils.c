@@ -746,11 +746,11 @@ extract_imageid(char *opath)
 			}
 		}
 
-		/* blah: <imageid>.ndz[:<version>] */
+		/* blah: <imageid>.{ddz,ndz}[:<version>] */
 		if (blah) {
 			imageid = blah;
-			vers = strstr(blah, ".ndz");
-			if (vers) {
+			if ((vers = strstr(blah, ".ndz")) != NULL ||
+			    (vers = strstr(blah, ".ddz")) != NULL) {
 				vers[0] = '\0';
 				vers += 4;
 			}
