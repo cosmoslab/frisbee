@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2017 University of Utah and the Flux Group.
+# Copyright (c) 2000-2018 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -251,7 +251,7 @@ endif
 ifeq ($(WITH_EVENTS),1)
 CFLAGS		+= -DEMULAB_EVENTS -DBOSSNODE='"$(BOSSNODE)"'
 SERVEROBJS	+= event.o $(TESTBED_LIBOBJDIR)/event/event.o $(TESTBED_LIBOBJDIR)/event/util.o
-SERVERLIBS	+= -L/usr/local/lib -lpubsub -lcrypto
+SERVERLIBS	+= -L/usr/local/lib -lpubsub -lssl -lcrypto -lcrypt
 EVENTFLAGS	= $(CFLAGS) -I/usr/local/include -I$(TESTBED_LIBSRCDIR)
 endif
 
