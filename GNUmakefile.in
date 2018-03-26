@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2017 University of Utah and the Flux Group.
+# Copyright (c) 2000-2018 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -32,7 +32,7 @@ SYSTEM	       := $(shell uname -s)
 
 include $(OBJDIR)/Makeconf
 
-SUBDIRS	= syncd dijkstra genhostsfile imagezip frisbee.redux capture
+SUBDIRS	= syncd dijkstra genhostsfile imagezip frisbee.redux capture bootinfo
 ifeq ($(SYSTEM),FreeBSD)
 SUBDIRS += growdisk
 endif
