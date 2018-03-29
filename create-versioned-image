@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 
 #
-# Copyright (c) 2000-2017 University of Utah and the Flux Group.
+# Copyright (c) 2000-2018 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -187,9 +187,11 @@ sub map_diskname($)
 	if ($dtype eq "nvd") {
 	    return "/dev/nvme${dunit}n1";
 	}
+	# XXX hack for FreeBSD SATA
+	if ($dtype eq 'ad' && $dunit > 3) {
+	    $dunit -= 4
+	}
 	$dtype = "sd";
-	$dunit -= 4
-	    if ($dtype eq 'ad' && $dunit > 3);
 	$dunit =~ y/01234567/abcdefgh/;
 
 	#
