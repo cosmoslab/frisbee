@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2017 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -1264,12 +1264,19 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	 * They gave us an mtime and it is "bad", return an error.
 	 * XXX somewhat arbitrary: cannot set a time in the future.
 	 * XXX cut them some slack on the future time thing, up to 10s okay.
+	 * XXX even more slack, just warn and set time to our current time.
 	 */
 	if (mtime) {
 		struct timeval now;
 
 		gettimeofday(&now, NULL);
 		if (mtime > (now.tv_sec + 10)) {
+#if 1
+			FrisWarning("%s: attempt to set mtime in the future "
+				    "(%u > %u), setting to current time\n",
+				    imageid, mtime, now.tv_sec);
+			mtime = 0;
+#else
 			rv = MS_ERROR_BADMTIME;
 			FrisWarning("%s: client %s %s failed: "
 				    "attempt to set mtime in the future "
@@ -1277,6 +1284,7 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 				    imageid, clientip, op, mtime, now.tv_sec);
 			msg->body.putreply.error = rv;
 			goto reply;
+#endif
 		}
 	}
 
