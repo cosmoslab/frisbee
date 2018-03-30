@@ -327,7 +327,7 @@ install:	$(INSTALL_SBINDIR)/mfrisbeed $(INSTALL_SBINDIR)/frisbeed $(INSTALL_SBIN
 
 control-install: control
 	$(INSTALL_PROGRAM) mfrisbeed $(INSTALL_SBINDIR)/mfrisbeed
-	$(INSTALL_PROGRAM) frisupload $(INSTALL_SBINDIR)/frisupload
+	$(INSTALL_PROGRAM) frisuploadd $(INSTALL_SBINDIR)/frisuploadd
 
 subboss-install: subboss
 	$(MAKE) WITH_MSERVER_EMULAB=0 install
