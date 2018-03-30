@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2017 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -945,7 +945,9 @@ allow_stddirs(char *imageid,
 		ci->ngids = ei->ngids;
 		set_put_values(put, 0);
 		ci->extra = NULL;
-	}
+	} else if (put != NULL && debug)
+		FrisInfo("authfail: image '%s' not in acceptable directory for '%s/%s'",
+			 imageid, ei->pid, ei->gid);
 	if (get != NULL &&
 	    ((fdir = isindir(shdir, fpath)) ||
 	     (fdir = isindir(pdir, fpath)) ||
@@ -981,7 +983,9 @@ allow_stddirs(char *imageid,
 		ci->ngids = ei->ngids;
 		set_get_values(get, 0);
 		ci->extra = NULL;
-	}
+	} else if (get != NULL && debug)
+		FrisInfo("authfail: image '%s' not in acceptable directory for '%s/%s'",
+			 imageid, ei->pid, ei->gid);
 
  done:
 	free(pdir);
@@ -1376,6 +1380,9 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 #endif
 		proxy = emulab_nodeid(req);
 		if (proxy == NULL) {
+			if (debug)
+				FrisInfo("authfail: node %s not found",
+					 inet_ntoa(*req));
 			emulab_free_host_authinfo(get);
 			emulab_free_host_authinfo(put);
 			return 1;
@@ -1384,17 +1391,27 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		/* Check the role of the node */
 		role = emulab_noderole(proxy);
 		if (role == NULL) {
+			if (debug)
+				FrisInfo("authfail: node '%s' has no role", proxy);
 			free(proxy);
 			emulab_free_host_authinfo(get);
 			emulab_free_host_authinfo(put);
 			return 1;
 		}
 
-		/* Must be inner boss, subboss or virtnode host to proxy */
-		if (strcmp(role, "innerboss") &&
+		/* XXX ops appears as a regular node */
+		if (strcmp(role, "node") == 0 && strcmp(proxy, "ops") == 0)
+			role = mystrdup("opsnode");
+
+		/* Must be ops, inner boss, subboss or virtnode host to proxy */
+		if (strcmp(role, "opsnode") &&
+		    strcmp(role, "innerboss") &&
 		    strcmp(role, "subboss") && 
 		    strcmp(role, "sharedhost") &&
 		    strcmp(role, "virthost")) {
+			if (debug)
+				FrisInfo("authfail: node '%s' role '%s' not a proxy",
+					 proxy, role);
 			free(proxy);
 			free(role);
 			emulab_free_host_authinfo(get);
@@ -1460,7 +1477,9 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			res = NULL;
 		} else
 #endif
-		if (strcmp(role, "subboss") == 0) {
+		if (strcmp(role, "opsnode") == 0) {
+			res = NULL;
+		} else if (strcmp(role, "subboss") == 0) {
 			res = mydb_query("SELECT s.node_id"
 					 " FROM subbosses as s,"
 					 "  nodes as n"
@@ -1497,6 +1516,9 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		if (res) {
 			if (mysql_num_rows(res) == 0) {
 				mysql_free_result(res);
+				if (debug)
+					FrisInfo("authfail: '%s' not a proxy for '%s'",
+						 proxy, node);
 				free(role);
 				free(proxy);
 				free(node);
@@ -1535,8 +1557,9 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 	row = mysql_fetch_row(res);
 	if (!row[0] || !row[1] || !row[2] || !row[3] || !row[4] ||
 	    !row[5] || !row[6] || !row[7] || !row[8]) {
-		FrisError("config_host_authinfo: null pid/gid/eid/uname/uid!?");
 		mysql_free_result(res);
+		FrisInfo("authfail: null pid/gid/eid/uname/uid for node '%s'!",
+			 node);
 		emulab_free_host_authinfo(get);
 		emulab_free_host_authinfo(put);
 		free(node);
@@ -1623,8 +1646,11 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 		parse_imageid(imageid,
 			      &wantpid, &wantname, &wantvers, &wantmeta);
 		imageidx = emulab_imageid(wantpid, wantname);
-		if (imageidx == 0)
+		if (imageidx == 0) {
+			if (debug)
+				FrisInfo("authfail: no such image '%s'", imageid);
 			goto done;
+		}
 	}
 
 	if (put != NULL) {
@@ -1727,6 +1753,9 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			put->imageinfo =
 				mymalloc(nrows *
 					 sizeof(struct config_imageinfo));
+		else if (debug)
+			FrisInfo("authfail: PUT access to '%s' denied to '%s/%s'",
+				 imageid, ei->pid, ei->eid);
 		put->numimages = 0;
 		for (i = 0; i < nrows; i++) {
 			struct emulab_ii_extra_info *ii;
@@ -1958,6 +1987,9 @@ emulab_get_host_authinfo(struct in_addr *req, struct in_addr *host,
 			get->imageinfo =
 				mymalloc(nrows *
 					 sizeof(struct config_imageinfo));
+		else if (debug)
+			FrisInfo("authfail: GET access to '%s' denied to '%s/%s'",
+				 imageid, ei->pid, ei->eid);
 		get->numimages = 0;
 		for (i = 0; i < nrows; i++) {
 			struct emulab_ii_extra_info *ii;

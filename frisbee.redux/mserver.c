@@ -78,6 +78,7 @@ static char *	gidstr(int ngids, gid_t gids[]);
 static int	daemonize = 1;
 int		debug = 0;
 static int	dumpconfig = 0;
+static int	onlyrequests = MS_REQUEST_ANY;
 static int	onlymethods = (MS_METHOD_UNICAST|MS_METHOD_MULTICAST);
 static int	parentmethods = (MS_METHOD_UNICAST|MS_METHOD_MULTICAST);
 static int	myuid = NOUID;
@@ -659,6 +660,17 @@ handle_get(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		sizeof(msg->hdr.version));
 
 	/*
+	 * This server only handles uploads.
+	 * XXX maybe we should just drop these requests and not send reply?
+	 */
+	if ((onlyrequests & MS_REQUEST_GET) == 0) {
+		FrisWarning("%s: %s from %s, rejected by PUT-only server",
+			    imageid, op, clientip);
+		msg->body.getreply.error = MS_ERROR_NOTIMPL;
+		goto reply;
+	}
+
+	/*
 	 * If they request a method we don't support, reject them before
 	 * we do any other work.  XXX maybe the method should not matter
 	 * for a status-only call?
@@ -1140,6 +1152,7 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	uint64_t isize;
 	uint32_t mtime, timo;
 	int rv, wantstatus;
+	PutReply reply;
 	char *op;
 
 	/*
@@ -1193,6 +1206,17 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		sizeof(msg->hdr.version));
 
 	/*
+	 * This server only handles downloads.
+	 * XXX maybe we should just drop these requests and not send reply?
+	 */
+	if ((onlyrequests & MS_REQUEST_PUT) == 0) {
+		FrisWarning("%s: %s from %s, rejected by GET-only server",
+			    imageid, op, clientip);
+		msg->body.getreply.error = MS_ERROR_NOTIMPL;
+		goto reply;
+	}
+
+	/*
 	 * Use the canonical name from here on out.
 	 */
 	if (cimageid != NULL) {
@@ -1202,15 +1226,31 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	}
 
 	/*
-	 * XXX we don't handle mirror mode right now.
+	 * XXX mirror mode on PUT means that we check with our parent to
+	 * make sure that the upload would be legal, and then upload it to
+	 * a local filesystem. We do not actually propogate it to our parent,
+	 * so there is no real "mirroring" going on. This is just a hack so
+	 * we can upload Emulab images on ops directly, while still relying
+	 * on boss (the parent) to authenticate the upload.
 	 */
 	if (mirrormode) {
-		rv = MS_ERROR_NOTIMPL;
-		FrisWarning("%s: client %s %s failed: "
-			    "upload not supported in mirror mode",
-			    imageid, clientip, op);
-		msg->body.putreply.error = rv;
-		goto reply;
+		in_addr_t authip;
+
+		authip = usechildauth ? ntohl(host.s_addr) : 0;
+		if (!ClientNetPutRequest(ntohl(parentip.s_addr), parentport,
+					 authip, imageid, isize, mtime, timo,
+					 1, 5, &reply))
+			reply.error = MS_ERROR_FAILED;
+		if (debug) {
+			FrisLog("Parent PUT%s returns:", wantstatus? "STATUS" : "");
+			PrintPutInfo(imageid, &reply, 1);
+		}
+		if (reply.error) {
+			msg->body.putreply.error = reply.error;
+			FrisLog("%s: client %s authentication with parent failed: %s",
+				imageid, clientip, GetMSError(reply.error));
+			goto reply;
+		}
 	}
 
 	/*
@@ -1238,6 +1278,23 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	config_free_host_authinfo(ai);		
 	assert((ii->flags & (CONFIG_PATH_ISFILE|CONFIG_PATH_ISSIGFILE)) != 0);
 
+	/*
+	 * Use values returned by parent where appropriate.
+	 *
+	 * XXX note that we use local values for size and signature.
+	 * In our only use of PUT mirrormode, the parent will be returning
+	 * the same info as we see locally since they are the same files.
+	 */
+	if (mirrormode) {
+		uint64_t pmaxsize;
+
+		pmaxsize = ((uint64_t)reply.himaxsize << 32) | reply.lomaxsize;
+		if (debug)
+			FrisLog("%s: replace local maxsize %llu with parent %llu",
+				imageid, ii->put_maxsize, pmaxsize);
+		ii->put_maxsize = pmaxsize;
+	}
+	
 	/*
 	 * If they gave us a size and it exceeds the maxsize, return an error.
 	 * We do this even for a status-only request; they can specify a size
@@ -1359,6 +1416,8 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	ci = startuploader(ii, myaddr, ntohl(cip->sin_addr.s_addr),
 			   isize, mtime, (int)timo, &rv);
 	if (ci == NULL) {
+		FrisLog("%s: could not start uploader: %s",
+			imageid, GetMSError(rv));
 		msg->body.putreply.error = rv;
 		goto reply;
 	}
@@ -1471,9 +1530,10 @@ usage(void)
 {
 	fprintf(stderr, "mfrisbeed [-ADRd] [-X method] [-I imagedir] [-S parentIP] [-P parentport] [-p port]\n");
 	fprintf(stderr, "Basic:\n");
-	fprintf(stderr, "  -C <style>  configuration style: emulab, file, or null\n");
+	fprintf(stderr, "  -C <style>  configuration style: emulab, upload-only, or null\n");
 	fprintf(stderr, "  -O <str>    configuration options, style-specific\n");
 	fprintf(stderr, "  -I <dir>    default directory where images are stored\n");
+	fprintf(stderr, "  -r <req>    type of requests to serve: get, put or any\n");
 	fprintf(stderr, "  -x <methods> transfer methods to allow from clients: ucast, mcast, bcast or any\n");
 	fprintf(stderr, "  -X <method> transfer method to request from parent\n");
 	fprintf(stderr, "  -p <port>   port to listen on\n");
@@ -1495,26 +1555,51 @@ get_options(int argc, char **argv)
 	int ch;
 	int forcedaemonize = 0;
 
-	while ((ch = getopt(argc, argv, "AC:O:DI:MRX:x:S:P:p:i:dhQ:")) != -1)
+	while ((ch = getopt(argc, argv, "AC:O:DI:MRX:x:S:P:p:i:dhQ:r:")) != -1)
 		switch(ch) {
 		case 'A':
 			usechildauth = 1;
 			break;
 		case 'C':
 			if (strcmp(optarg, "emulab") == 0 ||
-			    strcmp(optarg, "file") == 0 ||
+			    strcmp(optarg, "upload-only") == 0 ||
 			    strcmp(optarg, "null") == 0)
 				configstyle = optarg;
 			else {
 				fprintf(stderr,
 					"-C should specify one: "
-					"'emulab', 'file', 'null'\n");
+					"'emulab', 'upload-only', 'null'\n");
 				exit(1);
 			}
 			break;
 		case 'O':
 			configopts = optarg;
 			break;
+		case 'r':
+		{
+			char *ostr, *str, *cp;
+			int nm = 0;
+
+			str = ostr = strdup(optarg);
+			while ((cp = strsep(&str, ",")) != NULL) {
+				if (strcmp(cp, "get") == 0)
+					nm |= MS_REQUEST_GET;
+				else if (strcmp(cp, "put") == 0)
+					nm |= MS_REQUEST_PUT;
+				else if (strcmp(cp, "any") == 0)
+					nm = MS_REQUEST_ANY;
+			}
+			free(ostr);
+			if (nm == 0) {
+				fprintf(stderr,
+					"-%c should specify one or more of: "
+					"'get', 'put', 'any'\n",
+					ch);
+				exit(1);
+			}
+			onlyrequests = nm;
+			break;
+		}
 		case 'x':
 		case 'X':
 		{
@@ -1779,7 +1864,7 @@ startchild(struct childinfo *ci)
 		}
 
 		/*
-		 * Now that we are running as the user, see if we to
+		 * Now that we are running as the user, see if we need to
 		 * resolve the path to catch permission problems, create
 		 * intermediate directories, etc.
 		 */

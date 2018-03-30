@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2017 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -73,9 +73,6 @@ struct in_addr	mcastif;
 static void usage(void);
 static void parse_args(int argc, char **argv);
 static int send_file(void);
-static int put_request(char *imageid, in_addr_t sip, in_port_t sport,
-		       in_addr_t hostip, uint64_t isize, uint32_t mtime,
-		       int timeout, int askonly, int reqtimo, PutReply *reply);
 
 int
 main(int argc, char **argv)
@@ -140,9 +137,9 @@ main(int argc, char **argv)
 		if (imageid && !askonly) {
 			fd_set set;
 
-			if (!put_request(imageid, ntohl(msip.s_addr), msport,
-					 proxyip, filesize, mtime, 0, 1, timo,
-					 &reply))
+			if (!ClientNetPutRequest(ntohl(msip.s_addr), msport,
+						 proxyip, imageid, filesize, mtime,
+						 0, 1, timo, &reply))
 				FrisFatal("Could not get upload info for '%s'",
 					  imageid);
 			if (reply.error) {
@@ -204,9 +201,9 @@ main(int argc, char **argv)
 		int retries = 2;
 
 	again:
-		if (!put_request(imageid, ntohl(msip.s_addr), msport, proxyip,
-				 filesize, mtime, timeout, askonly, timo,
-				 &reply))
+		if (!ClientNetPutRequest(ntohl(msip.s_addr), msport, proxyip,
+					 imageid, filesize, mtime, timeout,
+					 askonly, timo, &reply))
 			FrisFatal("Could not get upload info for '%s'",
 				  imageid);
 
@@ -285,8 +282,9 @@ main(int argc, char **argv)
 		 */
 		while (1) {
 			sleep(1);
-			if (!put_request(imageid, ntohl(msip.s_addr), msport,
-					 proxyip, 0, 0, 0, 1, timo, &reply)) {
+			if (!ClientNetPutRequest(ntohl(msip.s_addr), msport,
+						 proxyip, imageid, 0, 0, 0, 1, timo,
+						 &reply)) {
 				FrisWarning("%s: status request failed",
 					    imageid);
 				goto vdone;
@@ -683,109 +681,4 @@ send_file(void)
 		filesize = filesize - remaining;
 
 	return rv;
-}
-
-/*
- * Contact the master server to negotiate an upload for a 'file' to store
- * under the given 'imageid'.
- *
- * 'sip' and 'sport' are the addr/port of the master server, 'askonly' is
- * set to just see if the upload is allowed and to get characteristics of
- * any existing copy of the image, 'timeout' is how long to wait for a
- * response.
- *
- * If 'hostip' is not zero, then we are requesting information on behalf of
- * that node.  The calling node (us) must have "proxy" permission on the
- * server for this to work.
- *
- * On success, return non-zero with 'reply' filled in with the server's
- * response IN HOST ORDER.  On failure returns zero.
- */
-static int
-put_request(char *imageid, in_addr_t sip, in_port_t sport, in_addr_t hostip,
-	    uint64_t isize, uint32_t mtime, int timeout, int askonly,
-	    int reqtimo, PutReply *reply)
-{
-	struct sockaddr_in name;
-	MasterMsg_t msg;
-	int msock, len;
-	
-	if ((msock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
-		perror("Could not allocate socket for master server");
-		return 0;
-	}
-	if (sport == 0)
-		sport = MS_PORTNUM;
-
-	name.sin_family = AF_INET;
-	name.sin_addr.s_addr = htonl(sip);
-	name.sin_port = htons(sport);
-	if (connect(msock, (struct sockaddr *)&name, sizeof(name)) < 0) {
-		perror("Connecting to master server");
-		close(msock);
-		return 0;
-	}
-
-	memset(&msg, 0, sizeof msg);
-	strncpy((char *)msg.hdr.version, MS_MSGVERS_1,
-		sizeof(msg.hdr.version));
-	msg.hdr.type = htonl(MS_MSGTYPE_PUTREQUEST);
-	msg.body.putrequest.hostip = htonl(hostip);
-	if (askonly)
-		msg.body.putrequest.status = 1;
-	len = strlen(imageid);
-	if (len > MS_MAXIDLEN)
-		len = MS_MAXIDLEN;
-	msg.body.putrequest.idlen = htons(len);
-	strncpy((char *)msg.body.putrequest.imageid, imageid, MS_MAXIDLEN);
-	if (filesize > 0) {
-		msg.body.putrequest.hisize = htonl(filesize >> 32);
-		msg.body.putrequest.losize = htonl(filesize);
-	}
-	if (mtime)
-		msg.body.putrequest.mtime = htonl(mtime);
-	/* XXX have the server wait longer than us so we timeout first */
-	if (timeout)
-		msg.body.putrequest.timeout = htonl(timeout+2);
-
-	len = sizeof msg.hdr + sizeof msg.body.putrequest;
-	if (!MsgSend(msock, &msg, len, reqtimo)) {
-		close(msock);
-		return 0;
-	}
-
-	memset(&msg, 0, sizeof msg);
-	len = sizeof msg.hdr + sizeof msg.body.putreply;
-	if (!MsgReceive(msock, &msg, len, reqtimo)) {
-		close(msock);
-		return 0;
-	}
-	close(msock);
-
-	if (strncmp((char *)msg.hdr.version, MS_MSGVERS_1,
-		    sizeof(msg.hdr.version))) {
-		fprintf(stderr, "Got incorrect version from master server\n");
-		return 0;
-	}
-	if (ntohl(msg.hdr.type) != MS_MSGTYPE_PUTREPLY) {
-		fprintf(stderr, "Got incorrect reply from master server\n");
-		return 0;
-	}
-
-	/*
-	 * Convert the reply info to host order
-	 */
-	*reply = msg.body.putreply;
-	reply->error = ntohs(reply->error);
-	reply->addr = ntohl(reply->addr);
-	reply->port = ntohs(reply->port);
-	reply->sigtype = ntohs(reply->sigtype);
-	if (reply->sigtype == MS_SIGTYPE_MTIME)
-		*(uint32_t *)reply->signature =
-			ntohl(*(uint32_t *)reply->signature);
-	reply->hisize = ntohl(reply->hisize);
-	reply->losize = ntohl(reply->losize);
-	reply->himaxsize = ntohl(reply->himaxsize);
-	reply->lomaxsize = ntohl(reply->lomaxsize);
-	return 1;
 }

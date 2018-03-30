@@ -88,13 +88,19 @@ WITH_MSERVER_NULL	= 1
 #ifndef WITH_MSERVER_EMULAB
 WITH_MSERVER_EMULAB	= 1
 #endif
+#ifndef WITH_MSERVER_UPLOAD
+WITH_MSERVER_UPLOAD	= 1
+#endif
 
 include $(OBJDIR)/Makeconf
 
 all:	frisbee frisbeed mfrisbeed frisupload frisuploadd
 
-subboss:
+control:
 	$(MAKE) WITH_MSERVER_EMULAB=0 all
+
+subboss:
+	$(MAKE) WITH_MSERVER_EMULAB=0 WITH_MSERVER_UPLOAD=0 all
 
 include $(TESTBED_SRCDIR)/GNUmakerules
 
@@ -132,8 +138,8 @@ SERVEROBJS	= server.o $(SHAREDOBJS)
 # Master server configuration
 #
 # Default master server config
-MSERVERFLAGS	= -DUSE_NULL_CONFIG $(CFLAGS) -I$(OBJDIR)
-MSERVEROBJS	= mserver.o $(SHAREDOBJS) config.o config_null.o
+MSERVERFLAGS	= -DUSE_NULL_CONFIG -DUSE_UPLOAD_CONFIG $(CFLAGS) -I$(OBJDIR)
+MSERVEROBJS	= mserver.o $(SHAREDOBJS) config.o config_null.o config_upload.o
 ifeq ($(SYSTEM),Linux)
 MSERVERLIBS	= -lrt
 else
@@ -284,6 +290,8 @@ config_emulab.o: $(SRCDIR)/config_emulab.c configdefs.h log.h
 	$(CC) -c $(MSERVERFLAGS) $(SRCDIR)/config_emulab.c
 config_null.o: $(SRCDIR)/config_null.c configdefs.h log.h
 	$(CC) -c $(MSERVERFLAGS) $(SRCDIR)/config_null.c
+config_upload.o: $(SRCDIR)/config_upload.c configdefs.h log.h
+	$(CC) -c $(MSERVERFLAGS) $(SRCDIR)/config_upload.c
 
 log.o:		$(SRCDIR)/log.c decls.h log.h
 	$(CC) $(CFLAGS) -DLOG_TESTBED=$(LOG_TESTBED) -c $(SRCDIR)/log.c
@@ -316,6 +324,10 @@ network.o:	decls.h utils.h
 trace.o:	decls.h trace.h log.h
 
 install:	$(INSTALL_SBINDIR)/mfrisbeed $(INSTALL_SBINDIR)/frisbeed $(INSTALL_SBINDIR)/frisbee $(INSTALL_SBINDIR)/frisuploadd
+
+control-install: control
+	$(INSTALL_PROGRAM) mfrisbeed $(INSTALL_SBINDIR)/mfrisbeed
+	$(INSTALL_PROGRAM) frisupload $(INSTALL_SBINDIR)/frisupload
 
 subboss-install: subboss
 	$(MAKE) WITH_MSERVER_EMULAB=0 install

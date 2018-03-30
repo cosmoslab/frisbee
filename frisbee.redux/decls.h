@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2017 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -493,6 +493,10 @@ typedef struct {
 #define MS_MSGTYPE_PUTREQUEST	3
 #define MS_MSGTYPE_PUTREPLY	4
 
+#define MS_REQUEST_GET		1
+#define MS_REQUEST_PUT		2
+#define MS_REQUEST_ANY		3
+
 #define MS_METHOD_UNKNOWN	0
 #define MS_METHOD_UNICAST	1
 #define MS_METHOD_MULTICAST	2
@@ -534,6 +538,8 @@ void	dump_network(void);
 #ifdef MASTER_SERVER
 int	ClientNetFindServer(in_addr_t, in_port_t, in_addr_t, char *,
 			    int, int, int, GetReply *, struct in_addr *);
+int	ClientNetPutRequest(in_addr_t, in_port_t, in_addr_t, char *,
+			    uint64_t, uint32_t, int, int, int, PutReply *);
 int	MsgSend(int, MasterMsg_t *, size_t, int);
 int	MsgReceive(int, MasterMsg_t *, size_t, int);
 #endif

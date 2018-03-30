@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2012 University of Utah and the Flux Group.
+# Copyright (c) 2000-2018 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -47,6 +47,7 @@ dijkstra-debug: Compressor.o TreeCompressor.o dijkstra.o \
                 OptimalIpTree.o bitmath.o $(LIBS) -o $@
 
 boss-install:
+control:
 control-install:
 subboss:
 subboss-install:

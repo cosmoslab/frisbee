@@ -95,6 +95,18 @@ config_init(char *style, int readit, char *opts)
 		FrisLog("Not built with Null configuration");
 #endif
 	}
+	if (strcmp(style, "upload-only") == 0) {
+#ifdef USE_UPLOAD_CONFIG
+		extern struct config *upload_init(char *);
+		if (myconfig == NULL) {
+			if ((myconfig = upload_init(opts)) != NULL)
+				FrisLog("Using upload-only configuration");
+		} else
+			FrisLog("Upload-only config init failed");
+#else
+		FrisLog("Not built with Upload-only configuration");
+#endif
+	}
 	if (myconfig == NULL) {
 		FrisError("*** No configuration found");
 		return -1;

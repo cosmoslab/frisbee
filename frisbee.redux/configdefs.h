@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2017 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -33,6 +33,8 @@
 #else
 #define MAXGIDS	1024
 #endif
+
+#define MAXIMAGEDIRS 4
 
 #define NOUID (-1)
 

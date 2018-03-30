@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2015 University of Utah and the Flux Group.
+# Copyright (c) 2000-2018 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -37,6 +37,7 @@ all:		boss-all tipserv-all
 boss-all:	capserver
 tipserv-all:	capture capture-tty capquery caplogserver caplog caplog.bin
 client:		capture capture-nossl capquery caplog caplog.bin
+control:
 subboss:	client
 
 include $(TESTBED_SRCDIR)/GNUmakerules

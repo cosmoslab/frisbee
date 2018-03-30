@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2016 University of Utah and the Flux Group.
+# Copyright (c) 2000-2018 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -320,6 +320,8 @@ version.c: imagezip.c imageunzip.c imagedump.c imagedelta.c imageundelta.c image
 install: $(addprefix $(INSTALL_BINDIR)/, $(PROGS))
 
 boss-install: install
+control: all
+control-install: control
 subboss: all
 subboss-install: subboss
 

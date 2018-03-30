@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2017 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -984,6 +984,6 @@ mystrdup(const char *str)
 struct config *
 null_init(void)
 {
-	return NULL;
+	return 0;
 }
 #endif

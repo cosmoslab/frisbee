@@ -63,8 +63,11 @@ boss-install:
 	$(INSTALL) -m 644 $(SRCDIR)/install-tarfile.1 \
 		$(INSTALL_DIR)/opsdir/man/man1/install-tarfile.1
 
+control: control-subdirs
+
 control-install: 
 	@$(MAKE) -C imagezip install
+	$(MAKE) -C frisbee.redux control-install
 
 fs-install:
 

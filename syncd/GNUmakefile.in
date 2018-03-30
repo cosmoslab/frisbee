@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2012 University of Utah and the Flux Group.
+# Copyright (c) 2000-2018 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -54,6 +54,7 @@ boss-install:
 	$(INSTALL) -m 644 $(SRCDIR)/emulab-sync.1 \
 		$(INSTALL_DIR)/opsdir/man/man1/emulab-sync.1
 
+control:
 control-install:
 subboss:
 subboss-install:

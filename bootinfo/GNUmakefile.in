@@ -43,6 +43,8 @@ bootinfo_version.c: bootinfoclient.c
 
 install:
 
+control:
+control-install:
 subboss:
 subboss-install:
 
