@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -25,8 +25,8 @@
  * A list of data ranges.
  */
 struct range {
-	uint32_t	start;		/* In sectors */
-	uint32_t	size;		/* In sectors */
+	uint64_t	start;		/* In sectors */
+	uint64_t	size;		/* In sectors */
 	void		*data;
 	struct range	*next;
 };

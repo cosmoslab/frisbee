@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -130,10 +130,6 @@ static void output_encrypt_key(char *, unsigned char *, int);
 #endif
 static void output_uuid(char *, char *);
 
-#define HDRUSED(reg, rel) \
-    (sizeof(blockhdr_t) + \
-    (reg) * sizeof(struct region) + (rel) * sizeof(struct blockreloc))
-
 /*
  * We want to be able to compress slices by themselves, so we need
  * to know where the slice starts when reading the input file for
@@ -141,13 +137,13 @@ static void output_uuid(char *, char *);
  *
  * These numbers are in sectors.
  */
-unsigned long inputminsec	= 0;
-unsigned long inputmaxsec	= 0;	/* 0 means the entire input image */
+iz_lba inputminsec	= 0;
+iz_lba inputmaxsec	= 0;	/* 0 means the entire input image */
 
 struct range	*ranges, *skips, *fixups;
 int		numranges, numskips, numfixups;
-struct blockreloc	*relocs;
-int			numregions, numrelocs;
+blockreloc_t	*relocs;
+int		numregions, numrelocs;
 
 void	dumpskips(int verbose);
 static void	sortrange(struct range **head, int domerge,
@@ -156,8 +152,7 @@ int	mergeskips(int verbose);
 int	mergeranges(struct range *head);
 void	makeranges(void);
 void	dumpranges(int verbose);
-uint32_t sectinranges(struct range *range);
-void	addvalid(uint32_t start, uint32_t size);
+uint64_t sectinranges(struct range *range);
 void	addreloc(off_t offset, off_t size, int reloctype);
 void	removereloc(off_t offset, off_t size, int reloctype);
 static int cmpfixups(struct range *r1, struct range *r2);
@@ -289,7 +284,7 @@ devread(int fd, void *buf, size_t nbytes)
 			count = nbytes;
 		cc = slowread(fd, buf, count, startoffset);
 		if (cc != count) {
-			fprintf(stderr, "devread: read failed on sector %u, "
+			fprintf(stderr, "devread: read failed on sector %lu, "
 				"returning zeros\n",
 				bytestosec(startoffset));
 			if (cc < 0)
@@ -849,14 +844,14 @@ main(int argc, char *argv[])
 		 * See if we should just create a full image.
 		 */
 		if (hashfile && deltapct >= 0) {
-			uint32_t oldsect = sectinranges(ranges);
-			uint32_t newsect = sectinranges(nranges);
+			uint64_t oldsect = sectinranges(ranges);
+			uint64_t newsect = sectinranges(nranges);
 			int dofull =
 				(oldsect == 0 ||
 				 ((double)newsect / oldsect) * 100 > deltapct);
 			fprintf(stderr,
-				"Full image size %u sect, "
-				"delta image size %u sect\n"
+				"Full image size %lu sect, "
+				"delta image size %lu sect\n"
 				"Auto image selection creating %s image.\n",
 				oldsect, newsect, dofull ? "full" : "delta");
 			if (dofull) {
@@ -1029,11 +1024,11 @@ read_image(int fd)
 	if (debug) {
 		int i;
 
-		fprintf(stderr, "Disk:            start %12d, size %12d\n",
+		fprintf(stderr, "Disk:            start %12d, size %12ld\n",
 			0, dsize);
-		fprintf(stderr, "Usable:          start %12d, size %12d\n",
+		fprintf(stderr, "Usable:          start %12ld, size %12ld\n",
 			disk.lodata, disk.hidata - disk.lodata + 1);
-		fprintf(stderr, "Partition range: start %12d, size %12d\n",
+		fprintf(stderr, "Partition range: start %12ld, size %12ld\n",
 			disk.losect, disk.hisect - disk.losect + 1);
 		fprintf(stderr, "%s Partitions:\n", bbstr);
 		for (i = 0; i < MAXSLICES; i++) {
@@ -1049,7 +1044,7 @@ read_image(int fd)
 			else
 				fprintf(stderr, "%-12s", sinfo->desc);
 
-			fprintf(stderr, "  start %12d, size %12d",
+			fprintf(stderr, "  start %12ld, size %12ld",
 				parttab[i].offset, parttab[i].size);
 			if (parttab[i].flags) {
 				fprintf(stderr, " (");
@@ -1118,13 +1113,13 @@ read_image(int fd)
 		if (losect > dlow) {
 			addskip(dlow, losect-dlow);
 			if (dowarn > 1)
-				warnx("%s: skipping %u sectors at %u",
+				warnx("%s: skipping %lu sectors at %lu",
 				      bbstr, losect - dlow, dlow);
 		}
 		if (hisect < dhigh) {
 			addskip(hisect+1, dhigh-hisect);
 			if (dowarn > 1)
-				warnx("%s: skipping %lu sectors at %u",
+				warnx("%s: skipping %lu sectors at %lu",
 				      bbstr, (unsigned long)(dhigh - hisect),
 				      hisect + 1);
 		}
@@ -1432,7 +1427,7 @@ comparemap(int verbose)
  * Add a range of free space to skip
  */
 void
-addskip(uint32_t start, uint32_t size)
+addskip(uint64_t start, uint64_t size)
 {
 	struct range	   *skip;
 
@@ -1461,7 +1456,7 @@ addskip(uint32_t start, uint32_t size)
  * called with alredy sorted entries.
  */
 void
-addvalid(uint32_t start, uint32_t size)
+addvalid(uint64_t start, uint64_t size)
 {
 	static struct range **lastvalid = &ranges;
 	struct range *valid;
@@ -1483,7 +1478,7 @@ void
 dumpskips(int verbose)
 {
 	struct range	*pskip;
-	uint32_t	offset = 0, total = 0;
+	uint64_t	offset = 0, total = 0;
 	int		nranges = 0;
 
 	if (!skips)
@@ -1498,8 +1493,8 @@ dumpskips(int verbose)
 	pskip = skips;
 	while (pskip) {
 		if (verbose)
-			fprintf(stderr,
-				"  %12d    %9d\n", pskip->start, pskip->size);
+			fprintf(stderr, "  %12lu    %9lu\n",
+				pskip->start, pskip->size);
 		assert(pskip->start >= offset);
 		offset = pskip->start + pskip->size;
 		total += pskip->size;
@@ -1560,7 +1555,8 @@ mergeskips(int verbose)
 			 * Free ranges should line up with hash ranges
 			 */
 			if (frangesize < 0) {
-				unsigned int hbsize, toff, tsize;
+				uint64_t hbsize, tsize;
+				unsigned int toff;
 				int didit = 0;
 
 				hbsize = bytestosec(HASHBLK_SIZE); /* XXX */
@@ -1617,7 +1613,7 @@ mergeskips(int verbose)
 #endif
 				if (debug > 2)
 					fprintf(stderr,
-						"dropping range [%u-%u]\n",
+						"dropping range [%lu-%lu]\n",
 						prange->start,
 						prange->start+prange->size-1);
 				if (zerofrange)
@@ -1808,7 +1804,7 @@ mergeranges(struct range *head)
 		if (prange->start + prange->size == prange->next->start) {
 			if (debug > 2)
 				fprintf(stderr,
-					"merging ranges [%u-%u] and [%u-%u]\n",
+					"merging ranges [%lu-%lu] and [%lu-%lu]\n",
 					prange->start,
 					prange->start+prange->size-1,
 					prange->next->start,
@@ -1881,10 +1877,10 @@ freeranges(struct range *head)
 	}
 }
 
-uint32_t
+uint64_t
 sectinranges(struct range *range)
 {
-	unsigned int total = 0;
+	uint64_t total = 0;
 
 	while (range) {
 		total += range->size;
@@ -1906,7 +1902,7 @@ dumpranges(int verbose)
 	range = ranges;
 	while (range) {
 		if (verbose)
-			fprintf(stderr, "  %12d    %9d\n",
+			fprintf(stderr, "  %12ld    %9ld\n",
 				range->start, range->size);
 		total += range->size;
 		nranges++;
@@ -2014,7 +2010,7 @@ addfixup(off_t offset, off_t poffset, off_t size, void *data, int reloctype)
  */
 void
 addfixupfunc(void (*func)(void *, off_t, void *), off_t offset,
-	     off_t poffset, off_t size, void *data, int dsize, int reloctype)
+	     off_t poffset, off_t size, void *data, off_t dsize, int reloctype)
 {
 	addfixupentry(offset, poffset, size, data, dsize, reloctype, func);
 }
@@ -2267,7 +2263,7 @@ dumpfixups(int verbose, int count)
 		fp = range->data;
 
 		if (verbose) {
-			fprintf(stderr, "  %12d/%9d (%12llu/%9llu)\n",
+			fprintf(stderr, "  %12lu/%9lu (%12llu/%9llu)\n",
 				range->start, range->size,
 				(unsigned long long)fp->offset,
 				(unsigned long long)fp->size);
@@ -2280,31 +2276,71 @@ dumpfixups(int verbose, int count)
 	fprintf(stderr, "Total Number of Fixups: %d\n", nfixups);
 }
 
+int
+headerfull(int nregions, int nrelocs)
+{
+	int hdrsize, regsize, relsize;
+
+	switch (compat) {
+	case COMPRESSED_V1:
+		assert(nrelocs == 0);
+		hdrsize = sizeof(struct blockhdr_V1);
+		regsize = sizeof(struct region_32);
+		relsize = 0;
+		break;
+	case COMPRESSED_V3:
+		hdrsize = sizeof(struct blockhdr_V2);
+		regsize = sizeof(struct region_32);
+		relsize = sizeof(struct blockreloc_32);
+		break;
+	case 0:
+		hdrsize = sizeof(struct blockhdr_V5);
+		regsize = sizeof(struct region_64);
+		relsize = sizeof(struct blockreloc_64);
+		break;
+	default:
+		assert(compat != COMPRESSED_V1 && compat != COMPRESSED_V3);
+		exit(1);
+	}
+	if (hdrsize + nregions * regsize + nrelocs * relsize >
+	    DEFAULTREGIONSIZE)
+		return 1;
+	return 0;
+}
+
 void
 addreloc(off_t offset, off_t size, int reloctype)
 {
-	struct blockreloc *reloc;
+	blockreloc_t *reloc;
+	int is32 = compat ? 1 : 0;
+	off_t sect;
 
 	assert(compat != COMPRESSED_V1);
 
+	if (!RELOC_VALID(is32, bytestosec(offset), size)) {
+		fprintf(stderr, "Reloc sector (%lu) or size (%lu) > 2^32,"
+			" cannot create V3 image\n",
+			bytestosec(offset), size);
+		exit(1);
+	}
+
 	numrelocs++;
-	if (HDRUSED(numregions, numrelocs) > DEFAULTREGIONSIZE) {
+	if (headerfull(numregions, numrelocs)) {
 		fprintf(stderr, "Over filled region/reloc table (%d/%d)\n",
 			numregions, numrelocs);
 		exit(1);
 	}
 
-	relocs = realloc(relocs, numrelocs * sizeof(struct blockreloc));
+	relocs = realloc(relocs, RELOC_SIZE(is32, numrelocs));
 	if (relocs == NULL) {
 		fprintf(stderr, "Out of memory!\n");
 		exit(1);
 	}
 
-	reloc = &relocs[numrelocs-1];
-	reloc->type = reloctype;
-	reloc->sector = bytestosec(offset);
-	reloc->sectoff = offset - sectobytes(reloc->sector);
-	reloc->size = size;
+	reloc = RELOC_ADDR(is32, relocs, numrelocs - 1);
+	sect = is32 ? reloc->r32.sector : reloc->r64.sector;
+	RELOC_ADD(is32, reloc, reloctype, bytestosec(offset),
+		  offset - sectobytes(sect), size);
 }
 
 void
@@ -2322,7 +2358,7 @@ static uint8_t	output_buffer[CHUNKSIZE];
 static int	buffer_offset;
 static off_t	inputoffset;
 static struct timeval cstamp;
-static long long bytescompressed;
+static uint64_t bytescompressed;
 
 static off_t	compress_chunk(off_t, off_t, int *, uint32_t *);
 static int	compress_finish(uint32_t *subblksize);
@@ -2348,11 +2384,12 @@ compress_image(void)
 	off_t		tmpoffset, rangesize;
 	struct range	*prange;
 	blockhdr_t	*blkhdr;
-	struct region	*curregion, *regions;
+	region_t	*curregion, *regions;
 	struct timeval	estamp;
 	uint8_t		*buf;
-	uint32_t	cursect = 0;
-	struct region	*lreg;
+	uint64_t	cursect = 0;
+	region_t	*lreg;
+	int		is32 = 1;
 
 	gettimeofday(&cstamp, 0);
 	inputoffset = 0;
@@ -2365,15 +2402,19 @@ compress_image(void)
 	blkhdr = (blockhdr_t *) buf;
 	switch (compat) {
 	case COMPRESSED_V1:
-		regions = (struct region *)((struct blockhdr_V1 *)blkhdr + 1);
+		regions = (region_t *)((struct blockhdr_V1 *)blkhdr + 1);
 		break;
 	case COMPRESSED_V2:
 	case COMPRESSED_V3:
-		regions = (struct region *)((struct blockhdr_V2 *)blkhdr + 1);
+		regions = (region_t *)((struct blockhdr_V2 *)blkhdr + 1);
+		break;
+	case COMPRESSED_V4:
+		regions = (region_t *)((struct blockhdr_V4 *)blkhdr + 1);
 		break;
 	default:
 		assert(compat == 0);
-		regions = (struct region *)(blkhdr + 1);
+		regions = (region_t *)(blkhdr + 1);
+		is32 = 0;
 		break;
 	}
 	curregion = regions;
@@ -2390,6 +2431,8 @@ compress_image(void)
 
 	prange = ranges;
 	while (prange) {
+		off_t rstart, rsize;
+
 		inputoffset = sectobytes(prange->start);
 
 		/*
@@ -2418,7 +2461,7 @@ compress_image(void)
 				      &full, &blkhdr->size);
 
 		if (debug > 2) {
-			fprintf(stderr, "%14llu -> %12llu %10ld %10u %10d %d\n",
+			fprintf(stderr, "%14llu -> %12llu %10ld %10lu %10d %d\n",
 				(unsigned long long)inputoffset,
 				(unsigned long long)inputoffset + size,
 				prange->start - inputminsec,
@@ -2460,6 +2503,18 @@ compress_image(void)
 		}
 
 		/*
+		 * Make sure we have not exceeded the range of a pre-V5
+		 * image (aka, 32-bit start/size).
+		 */
+		rstart = prange->start - inputminsec;
+		rsize = bytestosec(size);
+		if (!REG_VALID(is32, rstart, rsize)) {
+			fprintf(stderr, " Start (%lu) or size (%lu) > 2^32,"
+				" cannot create V3 image\n", rstart, rsize);
+			return 1;
+		}
+
+		/*
 		 * We have completed a region.  We have either:
 		 *
 		 * 1. compressed the entire current input range
@@ -2469,9 +2524,8 @@ compress_image(void)
 		 * For #1 we want to continue filling the current chunk.
 		 * For 2 and 3 we are done with the current chunk.
 		 */
-		curregion->start = prange->start - inputminsec;
-		curregion->size  = bytestosec(size);
-		curregion++;
+		REG_ADD(is32, curregion, rstart, rsize);
+		curregion = REG_NEXT(is32, curregion);
 		numregions++;
 
 		/*
@@ -2481,9 +2535,8 @@ compress_image(void)
 		 * compression we are in the middle of and declare the
 		 * region full.
 		 */
-		if (HDRUSED(numregions+1, numrelocs) > DEFAULTREGIONSIZE) {
-			assert(HDRUSED(numregions, numrelocs) <=
-			       DEFAULTREGIONSIZE);
+		if (headerfull(numregions+1, numrelocs)) {
+			assert(!headerfull(numregions, numrelocs));
 			if (!full) {
 				compress_finish(&blkhdr->size);
 				full = 1;
@@ -2511,34 +2564,44 @@ compress_image(void)
 		blkhdr->magic = compat ? compat : COMPRESSED_MAGIC_CURRENT;
 		blkhdr->blockindex  = chunkno;
 		blkhdr->regionsize  = DEFAULTREGIONSIZE;
-		blkhdr->regioncount = (curregion - regions);
+		blkhdr->regioncount = REG_DIFF(is32, curregion, regions);
 		if (compat != COMPRESSED_V1) {
-			blkhdr->firstsect = cursect;
+			uint64_t lastsect;
+
+			if (compat == 0)
+				blkhdr->firstsect64 = cursect;
+			else
+				blkhdr->firstsect = cursect;
 			if (size == rangesize) {
 				/*
 				 * Finished subblock at the end of a range.
 				 * Find the beginning of the next range so that
 				 * we include any free space between the ranges
 				 * here.  If this was the last range, we use
-				 * inputmaxsec.  If inputmaxsec is zero, we know
-				 * that we did not end with a skip range.
+				 * inputmaxsec.  If inputmaxsec is zero, we
+				 * know that we did not end with a skip range.
 				 */
 				if (prange->next)
-					blkhdr->lastsect = prange->next->start -
+					lastsect = prange->next->start -
 						inputminsec;
 				else if (inputmaxsec > 0)
-					blkhdr->lastsect = inputmaxsec -
-						inputminsec;
+					lastsect = inputmaxsec - inputminsec;
 				else {
-					lreg = curregion - 1;
-					blkhdr->lastsect =
-						lreg->start + lreg->size;
+					lreg = REG_PREV(is32, curregion);
+					lastsect = is32 ?
+						(lreg->r32.start + lreg->r32.size) :
+						(lreg->r64.start + lreg->r64.size);
 				}
 			} else {
-				lreg = curregion - 1;
-				blkhdr->lastsect = lreg->start + lreg->size;
+				lreg = REG_PREV(is32, curregion);
+				lastsect = is32 ?
+					(lreg->r32.start + lreg->r32.size) :
+					(lreg->r64.start + lreg->r64.size);
 			}
-			cursect = blkhdr->lastsect;
+			if (compat == 0)
+				cursect = blkhdr->lastsect64 = lastsect;
+			else
+				cursect = blkhdr->lastsect = lastsect;
 
 			blkhdr->reloccount = numrelocs;
 		}
@@ -2549,8 +2612,7 @@ compress_image(void)
 		if (numrelocs) {
 			assert(compat != COMPRESSED_V1);
 			assert(relocs != NULL);
-			memcpy(curregion, relocs,
-			       numrelocs * sizeof(struct blockreloc));
+			memcpy(curregion, relocs, RELOC_SIZE(is32, numrelocs));
 			freerelocs();
 		}
 
@@ -2661,15 +2723,26 @@ compress_image(void)
 		blkhdr->magic = compat ? compat : COMPRESSED_MAGIC_CURRENT;
 		blkhdr->blockindex  = chunkno;
 		blkhdr->regionsize  = DEFAULTREGIONSIZE;
-		blkhdr->regioncount = (curregion - regions);
+		blkhdr->regioncount = REG_DIFF(is32, curregion, regions);
 		if (compat != COMPRESSED_V1) {
-			blkhdr->firstsect = cursect;
+			uint64_t lastsect;
+
+			if (compat == 0)
+				blkhdr->firstsect64 = cursect;
+			else
+				blkhdr->firstsect = cursect;
 			if (inputmaxsec > 0)
-				blkhdr->lastsect = inputmaxsec - inputminsec;
+				lastsect = inputmaxsec - inputminsec;
 			else {
-				lreg = curregion - 1;
-				blkhdr->lastsect = lreg->start + lreg->size;
+				lreg = REG_PREV(is32, curregion);
+				lastsect = is32 ?
+					(lreg->r32.start + lreg->r32.size) :
+					(lreg->r64.start + lreg->r64.size);
 			}
+			if (compat == 0)
+				blkhdr->lastsect64 = lastsect;
+			else
+				blkhdr->lastsect = lastsect;
 			blkhdr->reloccount = numrelocs;
 		}
 
@@ -2677,7 +2750,7 @@ compress_image(void)
 		 * Check to see if the region/reloc table is full.
 		 * XXX handle this gracefully sometime.
 		 */
-		if (HDRUSED(numregions, numrelocs) > DEFAULTREGIONSIZE) {
+		if (headerfull(numregions, numrelocs)) {
 			fprintf(stderr, "Over filled region table (%d/%d)\n",
 				numregions, numrelocs);
 			exit(1);
@@ -2689,8 +2762,7 @@ compress_image(void)
 		if (numrelocs) {
 			assert(compat != COMPRESSED_V1);
 			assert(relocs != NULL);
-			memcpy(curregion, relocs,
-			       numrelocs * sizeof(struct blockreloc));
+			memcpy(curregion, relocs, RELOC_SIZE(is32, numrelocs));
 			freerelocs();
 		}
 
@@ -2830,7 +2902,7 @@ compress_status(int sig)
 	ms = (stamp.tv_sec - cstamp.tv_sec) * 1000 +
 		(stamp.tv_usec - cstamp.tv_usec) / 1000;
 	fprintf(stderr,
-		"%llu input (%llu compressed) bytes in %u.%03u seconds\n",
+		"%llu input (%lu compressed) bytes in %u.%03u seconds\n",
 		(unsigned long long)inputoffset,
 		bytescompressed, ms / 1000, ms % 1000);
 	if (badsectors)

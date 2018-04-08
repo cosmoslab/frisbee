@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -42,14 +42,17 @@
  *
  *	V4 of the block descriptor adds support for integrety protection
  *	and encryption.
+ *
+ *	V5 introduced 64-bit blocknumbers.
  */
 #define COMPRESSED_MAGIC_BASE		0x69696969
 #define COMPRESSED_V1			(COMPRESSED_MAGIC_BASE+0)
 #define COMPRESSED_V2			(COMPRESSED_MAGIC_BASE+1)
 #define COMPRESSED_V3			(COMPRESSED_MAGIC_BASE+2)
 #define COMPRESSED_V4			(COMPRESSED_MAGIC_BASE+3)
+#define COMPRESSED_V5			(COMPRESSED_MAGIC_BASE+4)
 
-#define COMPRESSED_MAGIC_CURRENT	COMPRESSED_V4
+#define COMPRESSED_MAGIC_CURRENT	COMPRESSED_V5
 
 /*
  * Each compressed block of the file has this little header on it.
@@ -134,11 +137,36 @@ struct blockhdr_V4 {
 };
 
 /*
- * Coming soon in V5:
- *
- * 64-bit support.
- *   Grow blockindex, firstsect, lastsect, region descriptors, may need to
- *   grow DEFAULTREGIONSIZE to accomodate the doubling in size of regions.
+ * Version 5 of the block descriptor adds support for 64-bit sectors/sizes.
+ * Images of this format also use 64-bit region and relocation structs.
+ */
+struct blockhdr_V5 {
+	uint32_t	magic;		/* magic/version */
+	uint32_t	size;		/* Size of compressed part */
+	int32_t		blockindex;	/* which block we are */
+	int32_t		blocktotal;	/* V1: total number of blocks */
+	int32_t		regionsize;	/* sizeof header + regions */
+	int32_t		regioncount;	/* number of regions */
+	/* V2 follows */
+	uint32_t	firstsect;	/* first sector described by block */
+	uint32_t	lastsect;	/* first sector past block */
+	int32_t		reloccount;	/* number of reloc entries */
+	/* V4 follows */
+	uint16_t	enc_cipher;	/* cipher was used to encrypt */
+	uint16_t	csum_type;	/* checksum algortihm used */
+	uint8_t		enc_iv[ENC_MAX_KEYLEN];
+					/* Initialization vector */
+	unsigned char	checksum[SIG_MAX_KEYLEN];
+					/* (Signed) checksum */
+	unsigned char	imageid[UUID_LENGTH];
+					/* Unique ID for the whole image */
+	/* V5 follows */
+	uint64_t	firstsect64;	/* first sector described by block */
+	uint64_t	lastsect64;	/* first sector past block */
+};
+
+/*
+ * Coming some day in V6:
  *
  * Flag field?
  *   For example, to indicate a delta image. Would probably take over the
@@ -153,19 +181,18 @@ struct blockhdr_V4 {
  * Mandate little-endian on-disk data.
  *   Code changes only to use appropriate endian macros when reading/writing
  *   data. No data struct changes needed.
- *
- * Support for SHA256 and SHA512 checksums.
- *   Just some constants here, as checksum is already 64 bytes.
- *   Will need to grow the imagehash header to accomodate these checksums
- *   for signatures, but that is separately versioned.
  */
 
 /*
  * Checksum types supported
  */
 #define CSUM_NONE		0  /* must be zero */
-#define CSUM_SHA1		1  /* SHA1: default */
+#define CSUM_SHA1		1  /* SHA1 */
 #define CSUM_SHA1_LEN		20
+#define CSUM_SHA256		1  /* SHA256 */
+#define CSUM_SHA256_LEN		32
+#define CSUM_SHA512		1  /* SHA512: default */
+#define CSUM_SHA512_LEN		64
 
 /* type field */
 #define CSUM_TYPE		0xFF
@@ -192,12 +219,56 @@ struct blockhdr_V4 {
  *
  * Relocation descriptors follow the region descriptors in the header area.
  */
-struct blockreloc {
+struct blockreloc_32 {
 	uint32_t	type;		/* relocation type (below) */
 	uint32_t	sector;		/* sector it applies to */
 	uint32_t	sectoff;	/* offset within the sector */
 	uint32_t	size;		/* size of data affected */
 };
+
+struct blockreloc_64 {
+	uint32_t	type;		/* relocation type (below) */
+	uint64_t	sector;		/* sector it applies to */
+	uint32_t	sectoff;	/* offset within the sector */
+	uint64_t	size;		/* size of data affected */
+};
+
+typedef union blockreloc {
+	struct blockreloc_32 r32;
+	struct blockreloc_64 r64;
+} blockreloc_t;
+
+#define RELOC_VALID(is32, sec, size) \
+	(!is32 || (uint32_t)(sec) == (sec) || (uint32_t)(size) == size)
+
+#define RELOC_ADDR(is32, base, ix) \
+	(is32 ? \
+	    (blockreloc_t *)((struct blockreloc_32 *)(base) + (ix)) : \
+	    (blockreloc_t *)((struct blockreloc_64 *)(base) + (ix)))
+	
+#define RELOC_SIZE(is32, num) \
+	((num) * (is32 ? \
+	    sizeof(struct blockreloc_32) : \
+	    sizeof(struct blockreloc_64)))
+	
+#define RELOC_ADD(is32, ptr, _type, _sec, _secoff, _size) \
+	if (is32) { \
+	    (ptr)->r32.type = (_type); \
+	    (ptr)->r32.sector = (uint32_t)(_sec); \
+	    (ptr)->r32.sectoff = (_secoff); \
+	    (ptr)->r32.size = (uint32_t)(_size); \
+	} else { \
+	    (ptr)->r64.type = (_type); \
+	    (ptr)->r64.sector = (_sec); \
+	    (ptr)->r64.sectoff = (_secoff); \
+	    (ptr)->r64.size = (_size); \
+	}
+
+#define RELOC_NEXT(is32, ptr) \
+	(is32 ? \
+	    (blockreloc_t *)((struct blockreloc_32 *)(ptr) + 1) : \
+	    (blockreloc_t *)((struct blockreloc_64 *)(ptr) + 1))
+
 #define RELOC_NONE		0
 #define RELOC_FBSDDISKLABEL	1	/* FreeBSD disklabel */
 #define RELOC_OBSDDISKLABEL	2	/* OpenBSD disklabel */
@@ -211,7 +282,7 @@ struct blockreloc {
 #define RELOC_XOR16CKSUM	101	/* 16-bit XOR checksum */
 #define RELOC_CKSUMRANGE	102	/* range of previous checksum */
 
-typedef struct blockhdr_V4 blockhdr_t;
+typedef struct blockhdr_V5 blockhdr_t;
 
 /*
  * This little struct defines the pair. Each number is in sectors. An array
@@ -220,10 +291,47 @@ typedef struct blockhdr_V4 blockhdr_t;
  * how we skip over parts of the disk that do not need to be written
  * (swap, free FS blocks).
  */
-struct region {
+struct region_32 {
 	uint32_t	start;
 	uint32_t	size;
 };
+
+struct region_64 {
+	uint64_t	start;
+	uint64_t	size;
+};
+
+typedef union region {
+	struct region_32 r32;
+	struct region_64 r64;
+} region_t;
+
+#define REG_VALID(is32, start, size) \
+	(!is32 || (uint32_t)(start) == (start) || (uint32_t)(size) == size)
+
+#define REG_DIFF(is32, last, first) \
+	(is32 ? \
+	    ((struct region_32 *)(last) - (struct region_32 *)(first)) : \
+	    ((struct region_64 *)(last) - (struct region_64 *)(first)))
+	
+#define REG_ADD(is32, ptr, _start, _size) \
+if (is32) { \
+	(ptr)->r32.start = (uint32_t)(_start); \
+	(ptr)->r32.size = (uint32_t)(_size); \
+} else { \
+	(ptr)->r64.start = (_start); \
+	(ptr)->r64.size = (_size); \
+}
+
+#define REG_NEXT(is32, ptr) \
+	(is32 ? \
+	    (region_t *)((struct region_32 *)(ptr) + 1) : \
+	    (region_t *)((struct region_64 *)(ptr) + 1))
+
+#define REG_PREV(is32, ptr) \
+	(is32 ? \
+	    (region_t *)((struct region_32 *)(ptr) - 1) : \
+	    (region_t *)((struct region_64 *)(ptr) - 1))
 
 /*
  * Each block has its own region header info.

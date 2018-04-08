@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -36,7 +36,7 @@
 #define HASH_CHUNKSETSPAN(c)	((c) | (1 << 31))
 
 struct hashregion {
-	struct region region;
+	struct region_32 region;
 	uint32_t chunkno;
 	unsigned char hash[HASH_MAXSIZE];
 };

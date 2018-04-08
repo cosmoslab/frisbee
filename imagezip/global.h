@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -34,12 +34,12 @@ extern int forcerelocs;
 
 extern off_t devlseek(int fd, off_t off, int whence);
 extern ssize_t devread(int fd, void *buf, size_t nbytes);
-extern void addskip(uint32_t start, uint32_t size);
-extern void addvalid(uint32_t start, uint32_t size);
+extern void addskip(uint64_t start, uint64_t size);
+extern void addvalid(uint64_t start, uint64_t size);
 extern void addfixup(off_t offset, off_t poffset, off_t size, void *data,
 		     int reloctype);
 extern void addfixupfunc(void (*func)(void *, off_t, void *), off_t offset,
-			 off_t poffset, off_t size, void *data, int dsize,
+			 off_t poffset, off_t size, void *data, off_t dsize,
 			 int reloctype);
 extern void applyfixups(off_t offset, off_t size, void *data);
 extern int hasfixup(uint32_t soffset, uint32_t ssize);
@@ -58,4 +58,4 @@ extern SLICEMAP_PROCESS_PROTO(read_ntfsslice);
 extern SLICEMAP_PROCESS_PROTO(read_fatslice);
 
 #define sectobytes(s)	((off_t)(s) * secsize)
-#define bytestosec(b)	(uint32_t)((b) / secsize)
+#define bytestosec(b)	((uint64_t)(b) / secsize)

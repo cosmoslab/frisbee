@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2014-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -67,6 +67,7 @@ struct ndz_file {
     unsigned chunkhits;
     unsigned chunkreopens;
     /* relocation information */
+    int reloc32;
     unsigned relocentries;
     void *relocdata;
     ndz_addr_t reloclo, relochi;
@@ -87,8 +88,8 @@ struct ndz_file {
 
 struct ndz_chunkhdr {
     blockhdr_t *header;
-    struct region *region;
-    struct blockreloc *reloc;
+    region_t *region;
+    blockreloc_t *reloc;
     char data[DEFAULTREGIONSIZE];
 };
 

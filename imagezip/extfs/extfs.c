@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -122,7 +122,7 @@ read_linuxslice(int slice, iz_type stype, iz_lba start, iz_size size,
 			    (off_t)fs.s_blocks_count_lo);
 	if (excludenonfs && fssect < size) {
 		warnx("Linux Slice %d: filesystem smaller than partition, "
-		      "excluding [%u-%u]",
+		      "excluding [%lu-%lu]",
 		      dosslice, start+fssect, start+size-1);
 		addskip(start + fssect, size - fssect);
 	}

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2014-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -207,13 +207,14 @@ ndz_readranges(struct ndz_file *ndz)
     struct ndz_rangemap *map;
     struct ndz_chunkhdr head;
     blockhdr_t *hdr;
-    struct region *reg;
+    region_t *reg;
     int rv, i;
     ndz_chunkno_t chunkno;
     ndz_addr_t first = 0, last = 0;
 #ifdef USE_CHUNKMAP
     struct stat sb;
 #endif
+    int is32 = 1;
 
     if (ndz == NULL || (ndz->flags & NDZ_FILE_WRITE) != 0)
 	return NULL;
@@ -267,6 +268,9 @@ ndz_readranges(struct ndz_file *ndz)
 	if ((hdr = head.header) == NULL)
 	    break;
 
+	if (hdr->magic >= COMPRESSED_V5)
+	    is32 = 1;
+
 	if (hdr->magic != COMPRESSED_V1) {
 	    if (chunkno == 0)
 		first = hdr->firstsect;
@@ -281,25 +285,32 @@ ndz_readranges(struct ndz_file *ndz)
 	reg = head.region;
 	assert(reg != NULL || hdr->regioncount == 0);
 	for (i = 0; i < hdr->regioncount; i++) {
+	    ndz_addr_t rstart;
+	    ndz_size_t rsize;
+
+	    if (is32) {
+		rstart = (ndz_addr_t)reg->r32.start;
+		rsize = (ndz_size_t)reg->r32.size;
+	    } else {
+		rstart = (ndz_addr_t)reg->r64.start;
+		rsize = (ndz_size_t)reg->r64.size;
+	    }
+
 	    if (hdr->magic == COMPRESSED_V1) {
 		if (chunkno == 0)
-		    first = (ndz_addr_t)reg->start;
-		last = (ndz_addr_t)reg->start + (ndz_size_t)reg->size - 1;
+		    first = rstart;
+		last = rstart + rsize - 1;
 #ifdef USE_CHUNKMAP
 		if (i == 0)
-		    clo = (ndz_addr_t)reg->start;
+		    clo = rstart;
 		chi = last;
 #endif
 	    }
-	    rv = ndz_rangemap_alloc(map,
-				    (ndz_addr_t)reg->start,
-				    (ndz_size_t)reg->size,
+	    rv = ndz_rangemap_alloc(map, rstart, rsize,
 				    (void *)(uintptr_t)(chunkno+1));
 	    if (rv) {
-		fprintf(stderr, "%s: bad region [%u-%u]\n",
-			ndz->fname,
-			(unsigned)reg->start,
-			(unsigned)reg->start+reg->size-1);
+		fprintf(stderr, "%s: bad region [%lu-%lu]\n",
+			ndz->fname, rstart, rstart+rsize-1);
 		ndz_rangemap_deinit(map);
 		return NULL;
 	    }
@@ -357,8 +368,8 @@ ndz_readchunkheader(struct ndz_file *ndz, ndz_chunkno_t chunkno,
 {
     ssize_t cc;
     blockhdr_t *hdr;
-    struct region *reg;
-    struct blockreloc *rel;
+    region_t *reg;
+    blockreloc_t *rel;
 
     if (ndz == NULL || (ndz->flags & NDZ_FILE_WRITE) != 0)
 	return -1;
@@ -380,17 +391,21 @@ ndz_readchunkheader(struct ndz_file *ndz, ndz_chunkno_t chunkno,
     hdr = (blockhdr_t *)chunkhdr->data;
     switch (hdr->magic) {
     case COMPRESSED_V1:
-	reg = (struct region *)((struct blockhdr_V1 *)hdr + 1);
+	reg = (region_t *)((struct blockhdr_V1 *)hdr + 1);
 	rel = NULL;
 	break;
     case COMPRESSED_V2:
     case COMPRESSED_V3:
-	reg = (struct region *)((struct blockhdr_V2 *)hdr + 1);
-	rel = (struct blockreloc *)(reg + hdr->regioncount);
+	reg = (region_t *)((struct blockhdr_V2 *)hdr + 1);
+	rel = (blockreloc_t *)((struct region_32 *)reg + hdr->regioncount);
 	break;
     case COMPRESSED_V4:
-	reg = (struct region *)((struct blockhdr_V4 *)hdr + 1);
-	rel = (struct blockreloc *)(reg + hdr->regioncount);
+	reg = (region_t *)((struct blockhdr_V4 *)hdr + 1);
+	rel = (blockreloc_t *)((struct region_32 *)reg + hdr->regioncount);
+	break;
+    case COMPRESSED_V5:
+	reg = (region_t *)((struct blockhdr_V5 *)hdr + 1);
+	rel = (blockreloc_t *)((struct region_64 *)reg + hdr->regioncount);
 	break;
     default:
 	fprintf(stderr, "%s: bad version 0x%x, not an ndz file?\n",

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2016 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -79,11 +79,12 @@ typedef uint16_t	iz_flags;
 	 (t) == IZTYPE_FAT32_LBA || (t) == IZTYPE_FAT16L_LBA)
 
 /*
- * XXX as of V4 we are all still 32 bit sector numbers.
- * 64-bit will come in V5...
+ * For internal purposes, we use 64-bit sector/size numbers.
+ * If the maximum sector of an image turns out to fit in 32-bits,
+ * we may choose to export a V4 32-bit image.
  */
-typedef uint32_t	iz_lba;
-typedef uint32_t	iz_size;
+typedef uint64_t	iz_lba;
+typedef uint64_t	iz_size;
 
 struct iz_slice {
 	iz_type		type;

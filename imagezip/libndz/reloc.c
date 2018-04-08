@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2014-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -49,6 +49,7 @@ ndz_reloc_init(struct ndz_file *ndz)
 {
     assert(ndz != NULL);
 
+    ndz->reloc32 = 1;
     ndz->relocdata = NULL;
     ndz->relocentries = 0;
     ndz->reloclo = NDZ_HIADDR;
@@ -63,7 +64,7 @@ ndz_reloc_init(struct ndz_file *ndz)
 int
 ndz_reloc_get(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
 {
-    struct blockreloc *relocdata, *chunkreloc = buf;
+    blockreloc_t *relocdata, *chunkreloc = buf;
     int i;
 
     if (ndz == NULL || hdr == NULL || chunkreloc == NULL)
@@ -72,28 +73,43 @@ ndz_reloc_get(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
     if (hdr->magic < COMPRESSED_V2 || hdr->reloccount == 0)
 	return 0;
 
+    if (ndz->relocdata == NULL)
+	ndz->reloc32 = hdr->magic >= COMPRESSED_V5 ? 0 : 1;
+    else {
+	int is32 = hdr->magic >= COMPRESSED_V5 ? 0 : 1;
+	assert(is32 == ndz->reloc32);
+    }
+
     /* resize the relocation buffer */
     i = ndz->relocentries + hdr->reloccount;
     if (ndz->relocdata == NULL)
-	relocdata = malloc(i * sizeof(struct blockreloc));
+	relocdata = malloc(RELOC_SIZE(ndz->reloc32, i));
     else
-	relocdata = realloc(ndz->relocdata, i * sizeof(struct blockreloc));
+	relocdata = realloc(ndz->relocdata, RELOC_SIZE(ndz->reloc32, i));
     if (relocdata == NULL) {
 	ndz_reloc_free(ndz);
 	return -1;
     }
     ndz->relocdata = relocdata;
 
-    relocdata = (struct blockreloc *)ndz->relocdata + ndz->relocentries;
+    relocdata = RELOC_ADDR(ndz->reloc32, ndz->relocdata, ndz->relocentries);
     for (i = 0; i < hdr->reloccount; i++) {
-	if (ndz->reloclo == NDZ_HIADDR)
-	    ndz->reloclo = chunkreloc->sector;
-	/* XXX we should be adding these in order; we assume this elsewhere */
-	assert(ndz->reloclo <= chunkreloc->sector);
-	if (chunkreloc->sector > ndz->relochi)
-	    ndz->relochi = chunkreloc->sector;
+	ndz_addr_t rsector = ndz->reloc32 ?
+	    chunkreloc->r32.sector : chunkreloc->r64.sector;
 
-	*relocdata++ = *chunkreloc++;
+	if (ndz->reloclo == NDZ_HIADDR)
+	    ndz->reloclo = rsector;
+	/* XXX we should be adding these in order; we assume this elsewhere */
+	assert(ndz->reloclo <= rsector);
+	if (rsector > ndz->relochi)
+	    ndz->relochi = rsector;
+
+	if (ndz->reloc32)
+	    relocdata->r32 = chunkreloc->r32;
+	else
+	    relocdata->r64 = chunkreloc->r64;
+	relocdata = RELOC_NEXT(ndz->reloc32, relocdata);
+	chunkreloc = RELOC_NEXT(ndz->reloc32, chunkreloc);
     }
     ndz->relocentries += hdr->reloccount;
 
@@ -114,7 +130,7 @@ ndz_reloc_get(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
 int
 ndz_reloc_put(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
 {
-    struct blockreloc *chunkreloc, *relocdata;
+    blockreloc_t *chunkreloc, *relocdata;
     int i;
 
     if (ndz == NULL || hdr == NULL || buf == NULL)
@@ -127,16 +143,32 @@ ndz_reloc_put(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
     chunkreloc = buf;
     relocdata = ndz->relocdata;
     for (i = 0; i < ndz->relocentries; i++) {
-	assert(relocdata->sectoff + relocdata->size <= ndz->sectsize);
-	if (relocdata->sector >= hdr->firstsect &&
-	    relocdata->sector < hdr->lastsect) {
-#ifdef RELOC_DEBUG
-	    fprintf(stderr, "found reloc for %u in chunk range [%u-%u]\n",
-		    relocdata->sector, hdr->firstsect, hdr->lastsect - 1);
-#endif
-	    *chunkreloc++ = *relocdata;
+	ndz_addr_t rsector, roffset;
+	ndz_size_t rsize;
+
+	if (ndz->reloc32) {
+	    rsector = relocdata->r32.sector;
+	    roffset = relocdata->r32.sectoff;
+	    rsize = relocdata->r32.size;
+	} else {
+	    rsector = relocdata->r64.sector;
+	    roffset = relocdata->r64.sectoff;
+	    rsize = relocdata->r64.size;
 	}
-	relocdata++;
+
+	assert(roffset + rsize <= ndz->sectsize);
+	if (rsector >= hdr->firstsect && rsector < hdr->lastsect) {
+#ifdef RELOC_DEBUG
+	    fprintf(stderr, "found reloc for %lu in chunk range [%u-%u]\n",
+		    rsector, hdr->firstsect, hdr->lastsect - 1);
+#endif
+	    if (ndz->reloc32)
+		chunkreloc->r32 = relocdata->r32;
+	    else
+		chunkreloc->r64 = relocdata->r64;
+	    chunkreloc = RELOC_NEXT(ndz->reloc32, chunkreloc);
+	}
+	relocdata = RELOC_NEXT(ndz->reloc32, relocdata);
     }
 
     return 0;
@@ -149,7 +181,7 @@ ndz_reloc_put(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
 int
 ndz_reloc_inrange(struct ndz_file *ndz, ndz_addr_t addr, ndz_size_t size)
 {
-    struct blockreloc *relocdata;
+    blockreloc_t *relocdata;
     ndz_addr_t eaddr;
     int i, nreloc = 0;
 
@@ -164,13 +196,26 @@ ndz_reloc_inrange(struct ndz_file *ndz, ndz_addr_t addr, ndz_size_t size)
 
     relocdata = ndz->relocdata;
     for (i = 0; i < ndz->relocentries; i++) {
-	assert(relocdata->sectoff + relocdata->size <= ndz->sectsize);
-	if (relocdata->sector > eaddr)
+	ndz_addr_t rsector, roffset;
+	ndz_size_t rsize;
+
+	if (ndz->reloc32) {
+	    rsector = relocdata->r32.sector;
+	    roffset = relocdata->r32.sectoff;
+	    rsize = relocdata->r32.size;
+	} else {
+	    rsector = relocdata->r64.sector;
+	    roffset = relocdata->r64.sectoff;
+	    rsize = relocdata->r64.size;
+	}
+
+	assert(roffset + rsize <= ndz->sectsize);
+	if (rsector > eaddr)
 	    break;
-	if (relocdata->sector >= addr && relocdata->sector <= eaddr) {
+	if (rsector >= addr && rsector <= eaddr) {
 	    nreloc++;
 	}
-	relocdata++;
+	relocdata = RELOC_NEXT(ndz->reloc32, relocdata);
     }
 #ifdef RELOC_DEBUG
     if (nreloc)
@@ -194,7 +239,7 @@ ndz_reloc_copy(struct ndz_file *ndzfrom, struct ndz_file *ndzto)
     if (ndzfrom->relocentries == 0)
 	return 0;
 
-    size = ndzfrom->relocentries * sizeof(struct blockreloc);
+    size = RELOC_SIZE(ndzfrom->reloc32, ndzfrom->relocentries);
     if ((ndzto->relocdata = malloc(size)) == NULL)
 	return -1;
 

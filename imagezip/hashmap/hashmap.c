@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2005-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -212,7 +212,7 @@ hash_range(uint32_t start, uint32_t size, unsigned char *hash)
 static int
 hash_and_cmp(struct hashregion *hashreg, unsigned char *hash)
 {
-	struct region		hreg = hashreg->region;
+	struct region_32	hreg = hashreg->region;
 	int			iretval;
 
 	assert(imagefd >= 0);
