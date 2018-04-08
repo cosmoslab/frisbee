@@ -150,8 +150,13 @@ mfs-install:
 
 newnode-mfs: mfs
 newnode-mfs-install: mfs-install
-
 cdboot-install: mfs-install
+
+onie-dongle: 
+	$(MAKE) -C bootinfo onie-dongle
+
+onie-dongle-install: 
+	$(MAKE) -C bootinfo onie-dongle-install
 
 subdir-distclean:
 	@$(MAKE) -C imagezip distclean

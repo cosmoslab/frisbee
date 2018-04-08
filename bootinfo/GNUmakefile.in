@@ -52,5 +52,10 @@ client: all
 client-install: client
 	$(INSTALL_PROGRAM) bootinfoclient $(DESTDIR)$(CLIENT_BINDIR)
 
+onie-dongle: client
+onie-dongle-install:
+	$(INSTALL) -m 755 -o root -g root -d $(DESTDIR)/etc/testbed
+	$(INSTALL_PROGRAM) bootinfoclient $(DESTDIR)/etc/testbed
+
 clean:
 	rm -f *.o bootinfoclient
