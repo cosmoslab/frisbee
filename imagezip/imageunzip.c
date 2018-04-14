@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2016 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -92,7 +92,7 @@ static long		outputmaxsec	= 0;
 /* XXX keep macros in sync with global.h */
 int secsize = 512;
 #define sectobytes(s)	((off_t)(s) * secsize)
-#define bytestosec(b)	(uint32_t)((b) / secsize)
+#define bytestosec(b)	((uint64_t)(b) / secsize)
 
 /*
  * Sector alignment is required for buffers used with read/write on
@@ -1431,10 +1431,11 @@ inflate_subblock(const char *chunkbufp)
 	z_stream	d_stream; /* inflation stream */
 	const blockhdr_t *blockhdr;
 	int		regioncount;
-	struct region	*curregion;
-	off_t		offset, size;
+	region_t	*curregion;
+	off_t		offset, size, newoffset;
 	char		resid[SECSIZE];
 	writebuf_t	*wbuf;
+	int		is32 = 1;
 #ifdef WITH_CRYPTO
 	char		plaintext[CHUNKMAX];
 #endif
@@ -1478,7 +1479,7 @@ inflate_subblock(const char *chunkbufp)
 	{
 		static int didwarn;
 
-		curregion = (struct region *)
+		curregion = (region_t *)
 			((struct blockhdr_V1 *)blockhdr + 1);
 		if (dofill && !didwarn) {
 			fprintf(stderr,
@@ -1492,7 +1493,7 @@ inflate_subblock(const char *chunkbufp)
 	case COMPRESSED_V2:
 	case COMPRESSED_V3:
 		imageversion = 2;
-		curregion = (struct region *)
+		curregion = (region_t *)
 			((struct blockhdr_V2 *)blockhdr + 1);
 		/*
 		 * Extract relocation information
@@ -1500,6 +1501,10 @@ inflate_subblock(const char *chunkbufp)
 		getrelocinfo(blockhdr);
 		break;
 
+	case COMPRESSED_V5:
+		is32 = 0;
+		imageversion = 5;
+		/* fall into... */
 	case COMPRESSED_V4:
 #ifdef WITH_CRYPTO
 		/*
@@ -1561,8 +1566,9 @@ inflate_subblock(const char *chunkbufp)
 			chunkbufp = plaintext;
 		}
 #endif
-		imageversion = 4;
-		curregion = (struct region *) (blockhdr + 1);
+		if (imageversion != 5)
+			imageversion = 4;
+		curregion = (region_t *) (blockhdr + 1);
 		getrelocinfo(blockhdr);
 		break;
 
@@ -1572,11 +1578,23 @@ inflate_subblock(const char *chunkbufp)
 	}
 
 	/*
+	 * Start with the first region.
+	 */
+	offset = sectobytes(REG_START(is32, curregion));
+	size   = sectobytes(REG_SIZE(is32, curregion));
+	assert(size > 0);
+
+	regioncount = blockhdr->regioncount;
+
+	curregion = REG_NEXT(is32, curregion);
+	regioncount--;
+
+	/*
 	 * Handle any lead-off free space
 	 */
-	if (imageversion > 1 && curregion->start > blockhdr->firstsect) {
+	if (imageversion > 1 && offset > blockhdr->firstsect) {
+		size = sectobytes(offset - blockhdr->firstsect);
 		offset = sectobytes(blockhdr->firstsect);
-		size = sectobytes(curregion->start - blockhdr->firstsect);
 		if (dofill) {
 			wbuf = alloc_writebuf(offset, size, 0, 1);
 			dowrite_request(wbuf);
@@ -1585,18 +1603,6 @@ inflate_subblock(const char *chunkbufp)
 			totaledata += size;
 		}
 	}
-
-	/*
-	 * Start with the first region.
-	 */
-	offset = sectobytes(curregion->start);
-	size   = sectobytes(curregion->size);
-	assert(size > 0);
-
-	regioncount = blockhdr->regioncount;
-
-	curregion++;
-	regioncount--;
 
 	if (debug == 1)
 		fprintf(stderr, "Decompressing chunk %04d: %14lld --> ",
@@ -1722,10 +1728,12 @@ inflate_subblock(const char *chunkbufp)
 				if (!regioncount)
 					break;
 
-				newoffset = sectobytes(curregion->start);
-				size      = sectobytes(curregion->size);
+				newoffset = sectobytes(REG_START(is32,
+								 curregion));
+				size      = sectobytes(REG_SIZE(is32,
+								curregion));
 				assert(size);
-				curregion++;
+				curregion = REG_NEXT(is32, curregion);
 				regioncount--;
 				assert((newoffset-offset) > 0);
 				if (dofill) {
@@ -1767,12 +1775,12 @@ inflate_subblock(const char *chunkbufp)
 	/*
 	 * Handle any trailing free space
 	 */
-	curregion--;
-	if (imageversion > 1 &&
-	    curregion->start + curregion->size < blockhdr->lastsect) {
-		offset = sectobytes(curregion->start + curregion->size);
-		size = sectobytes(blockhdr->lastsect -
-				  (curregion->start + curregion->size));
+	curregion = REG_PREV(is32, curregion);
+	newoffset = REG_START(is32, curregion);
+	size = REG_SIZE(is32, curregion);
+	if (imageversion > 1 && newoffset + size < blockhdr->lastsect) {
+		offset = sectobytes(newoffset + size);
+		size = sectobytes(blockhdr->lastsect - (newoffset + size));
 		if (dofill) {
 			wbuf = alloc_writebuf(offset, size, 0, 1);
 			dowrite_request(wbuf);
@@ -1942,7 +1950,7 @@ zero_remainder()
 
 		if (debug)
 			fprintf(stderr, "zeroing %lld bytes at offset %lld "
-				"(%u sectors at %u)\n",
+				"(%lu sectors at %lu)\n",
 				(long long)remaining,
 				(long long)maxwrittenoffset,
 				bytestosec(remaining),

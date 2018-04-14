@@ -333,6 +333,12 @@ if (is32) { \
 	    (region_t *)((struct region_32 *)(ptr) - 1) : \
 	    (region_t *)((struct region_64 *)(ptr) - 1))
 
+#define REG_START(is32, ptr) \
+	(is32 ? (uint64_t)ptr->r32.start : ptr->r64.start)
+
+#define REG_SIZE(is32, ptr) \
+	(is32 ? (uint64_t)ptr->r32.size : ptr->r64.size)
+
 /*
  * Each block has its own region header info.
  *
