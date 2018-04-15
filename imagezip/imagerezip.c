@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2016 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -291,8 +291,8 @@ struct chunkstate {
     unsigned char *chunkdatabuf;
     blockhdr_t *header;
     uint32_t headerleft;
-    struct region *region;
-    struct region *curregion;
+    region_t *region;
+    region_t *curregion;
 };
 
 static int

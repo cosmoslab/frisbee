@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -194,11 +194,11 @@ usage(void)
 static char chunkbuf[CHUNKSIZE];
 static unsigned int magic;
 static unsigned long chunkcount;
-static uint32_t nextsector, nextcovered;
+static uint64_t nextsector, nextcovered;
 static uint32_t fmax, fmin, franges, amax, amin, aranges;
 static uint32_t adist[8]; /* <4k, <8k, <16k, <32k, <64k, <128k, <256k, >=256k */
 static int regmax, regmin;
-static uint32_t losect, hisect;
+static uint64_t losect, hisect;
 static uint8_t imageid[UUID_LENGTH];
 static int sigtype, enctype;
 
@@ -401,7 +401,7 @@ dumpfile(char *name, int fd)
 		printf("  %d relocations covering %llu bytes\n",
 		       relocs, relocbytes);
 	if (hisect != ~0)
-		printf("  covered sector range: [%u-%u]\n",
+		printf("  covered sector range: [%lu-%lu]\n",
 		       losect, hisect);
 	printf("  %llu bytes of compressed data\n",
 	       cbytes);
@@ -474,22 +474,35 @@ static int
 dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 {
 	blockhdr_t *hdr;
-	struct region *reg;
+	region_t *reg = NULL;
 	uint32_t count;
-	int i;
+	int i, is32 = 1;
+	uint64_t first, last;
 
 	hdr = (blockhdr_t *)buf;
 
 	switch (hdr->magic) {
 	case COMPRESSED_V1:
-		reg = (struct region *)((struct blockhdr_V1 *)hdr + 1);
+		reg = (region_t *)((struct blockhdr_V1 *)hdr + 1);
 		break;
 	case COMPRESSED_V2:
 	case COMPRESSED_V3:
-		reg = (struct region *)((struct blockhdr_V2 *)hdr + 1);
+		reg = (region_t *)((struct blockhdr_V2 *)hdr + 1);
+		first = hdr->firstsect;
+		last = hdr->lastsect;
 		break;
+	case COMPRESSED_V5:
+		is32 = 0;
+		reg = (region_t *)((struct blockhdr_V5 *)hdr + 1);
+		first = hdr->firstsect64;
+		last = hdr->lastsect64;
+		/* fall into... */
 	case COMPRESSED_V4:
-		reg = (struct region *)((struct blockhdr_V4 *)hdr + 1);
+		if (reg == NULL) {
+			reg = (region_t *)((struct blockhdr_V4 *)hdr + 1);
+			first = hdr->firstsect;
+			last = hdr->lastsect;
+		}
 		if (chunkno > 0) {
 			if (sigtype != hdr->csum_type) {
 				printf("%s: wrong checksum type in chunk %d\n",
@@ -552,17 +565,17 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 		printf("  Chunk %d: %u compressed bytes, ",
 		       chunkno, hdr->size);
 		if (hdr->magic > COMPRESSED_V1) {
-			if (hdr->firstsect != nextcovered) {
+			if (first != nextcovered) {
 				printf("    WARNING: chunk %d %s in covered "
-				       "range, %u/%u last-end/cur-start\n",
+				       "range, %lu/%lu last-end/cur-start\n",
 				       chunkno,
-				       (hdr->firstsect < nextcovered) ?
+				       (first < nextcovered) ?
 				       "overlap" : "gap", nextcovered,
-				       hdr->firstsect);
+				       first);
 			}
-			nextcovered = hdr->lastsect;
-			printf("sector range [%u-%u], ",
-			       hdr->firstsect, hdr->lastsect-1);
+			nextcovered = last;
+			printf("sector range [%lu-%lu], ",
+			       first, last-1);
 			if (hdr->reloccount > 0)
 				printf("%d relocs, ", hdr->reloccount);
 		}
@@ -616,34 +629,37 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 		       hdr->regionsize, DEFAULTREGIONSIZE, chunkno);
 
 	for (i = 0; i < hdr->regioncount; i++) {
+		uint64_t rstart, rsize;
+
+		rstart = REG_START(is32, reg);
+		rsize = REG_SIZE(is32, reg);
 		if (detail > 1)
-			printf("    Region %d: %u sectors [%u-%u]\n",
-			       i, reg->size, reg->start,
-			       reg->start + reg->size - 1);
-		if (reg->start < nextsector)
+			printf("    Region %d: %lu sectors [%lu-%lu]\n",
+			       i, rsize, rstart,
+			       rstart + rsize - 1);
+		if (rstart < nextsector)
 			printf("    WARNING: chunk %d region %d "
 			       "may overlap others\n", chunkno, i);
-		if (reg->size == 0)
+		if (rsize == 0)
 			printf("    WARNING: chunk %d region %d "
 			       "zero-length region\n", chunkno, i);
 		count = 0;
 		if (hdr->magic > COMPRESSED_V1) {
 			if (i == 0) {
-				if (hdr->firstsect > reg->start)
+				if (first > rstart)
 					printf("    WARNING: chunk %d bad "
-					       "firstsect value (%u>%u)\n",
-					       chunkno, hdr->firstsect,
-					       reg->start);
+					       "firstsect value (%lu>%lu)\n",
+					       chunkno, first, rstart);
 				else
-					count = reg->start - hdr->firstsect;
+					count = rstart - first;
 			} else
-				count = reg->start - nextsector;
+				count = rstart - nextsector;
 			if (i == hdr->regioncount-1) {
-				if (hdr->lastsect < reg->start + reg->size)
+				if (last < rstart + rsize)
 					printf("    WARNING: chunk %d bad "
-					       "lastsect value (%u<%u)\n",
-					       chunkno, hdr->lastsect,
-					       reg->start + reg->size);
+					       "lastsect value (%lu<%lu)\n",
+					       chunkno, last,
+					       rstart + rsize);
 				else {
 					if (count > 0) {
 						sectfree += count;
@@ -653,16 +669,15 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 							fmax = count;
 						franges++;
 					}
-					count = hdr->lastsect -
-						(reg->start+reg->size);
+					count = last - (rstart+rsize);
 				}
 			}
-			if (hdr->firstsect < losect)
-				losect = hdr->firstsect;
-			if ((hdr->lastsect-1) > hisect)
-				hisect = hdr->lastsect - 1;
+			if (first < losect)
+				losect = first;
+			if ((last-1) > hisect)
+				hisect = last - 1;
 		} else
-			count = reg->start - nextsector;
+			count = rstart - nextsector;
 		if (count > 0) {
 			sectfree += count;
 			if (count < fmin)
@@ -672,7 +687,7 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 			franges++;
 		}
 
-		count = reg->size;
+		count = rsize;
 		sectinuse += count;
 		if (count < amin)
 			amin = count;
@@ -699,53 +714,63 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 		if (dumpmap) {
 			switch (hdr->magic) {
 			case COMPRESSED_V1:
-				if (reg->start - nextsector != 0)
-					printf("F: [%08x-%08x]\n",
-					       nextsector, reg->start-1);
-				printf("A: [%08x-%08x]\n",
-				       reg->start, reg->start + reg->size - 1);
+				if (rstart - nextsector != 0)
+					printf("F: [%08lx-%08lx]\n",
+					       nextsector, rstart-1);
+				printf("A: [%08lx-%08lx]\n",
+				       rstart, rstart + rsize - 1);
 				break;
 			case COMPRESSED_V2:
 			case COMPRESSED_V3:
-				if (i == 0 && hdr->firstsect < reg->start)
-					printf("F: [%08x-%08x]\n",
-					       hdr->firstsect, reg->start-1);
-				if (i != 0 && reg->start - nextsector != 0)
-					printf("F: [%08x-%08x]\n",
-					       nextsector, reg->start-1);
-				printf("A: [%08x-%08x]\n",
-				       reg->start, reg->start + reg->size - 1);
+			case COMPRESSED_V4:
+			case COMPRESSED_V5:
+				if (i == 0 && first < rstart)
+					printf("F: [%08lx-%08lx]\n",
+					       first, rstart-1);
+				if (i != 0 && rstart - nextsector != 0)
+					printf("F: [%08lx-%08lx]\n",
+					       nextsector, rstart-1);
+				printf("A: [%08lx-%08lx]\n",
+				       rstart, rstart + rsize - 1);
 				if (i == hdr->regioncount-1 &&
-				    reg->start+reg->size < hdr->lastsect)
-					printf("F: [%08x-%08x]\n",
-					       reg->start+reg->size,
-					       hdr->lastsect-1);
+				    rstart+rsize < last)
+					printf("F: [%08lx-%08lx]\n",
+					       rstart+rsize, last-1);
 				break;
 			}
 		}
 
-		nextsector = reg->start + reg->size;
-		reg++;
+		nextsector = rstart + rsize;
+		reg = REG_NEXT(is32, reg);
 	}
 
 	if (hdr->magic == COMPRESSED_V1)
 		return 0;
 
 	for (i = 0; i < hdr->reloccount; i++) {
-		struct blockreloc *reloc = &((struct blockreloc *)reg)[i];
+		blockreloc_t *reloc = RELOC_ADDR(is32, reg, i);
+		struct blockreloc_64 r;
+
+		if (is32) {
+			r.type = reloc->r32.type;
+			r.sector = reloc->r32.sector;
+			r.sectoff = reloc->r32.sectoff;
+			r.size = reloc->r32.size;
+		} else {
+			r = reloc->r64;
+		}
 
 		relocs++;
-		relocbytes += reloc->size;
+		relocbytes += r.size;
 
-		if (reloc->sector < hdr->firstsect ||
-		    reloc->sector >= hdr->lastsect)
+		if (r.sector < first || r.sector >= last)
 			printf("    WARNING: "
-			       "Reloc %d at %u not in chunk [%u-%u]\n", i,
-			       reloc->sector, hdr->firstsect, hdr->lastsect-1);
+			       "Reloc %d at %lu not in chunk [%lu-%lu]\n",
+			       i, r.sector, first, last);
 		if (detail > 1) {
 			char *relocstr;
 
-			switch (reloc->type) {
+			switch (r.type) {
 			case RELOC_FBSDDISKLABEL:
 				relocstr = "FBSDDISKLABEL";
 				break;
@@ -768,9 +793,9 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 				relocstr = "??";
 				break;
 			}
-			printf("    Reloc %d: %s sector %d, offset %u-%u\n", i,
-			       relocstr, reloc->sector, reloc->sectoff,
-			       reloc->sectoff + reloc->size);
+			printf("    Reloc %d: %s sector %lu, offset %lu-%lu\n",
+			       i, relocstr, r.sector, (uint64_t)r.sectoff,
+			       (uint64_t)r.sectoff + r.size);
 		}
 	}
 

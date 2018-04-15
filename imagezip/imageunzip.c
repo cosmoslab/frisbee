@@ -1436,6 +1436,7 @@ inflate_subblock(const char *chunkbufp)
 	char		resid[SECSIZE];
 	writebuf_t	*wbuf;
 	int		is32 = 1;
+	uint64_t	firstsect, lastsect;
 #ifdef WITH_CRYPTO
 	char		plaintext[CHUNKMAX];
 #endif
@@ -1481,6 +1482,7 @@ inflate_subblock(const char *chunkbufp)
 
 		curregion = (region_t *)
 			((struct blockhdr_V1 *)blockhdr + 1);
+		firstsect = lastsect = 0;
 		if (dofill && !didwarn) {
 			fprintf(stderr,
 				"WARNING: old image file format, "
@@ -1495,6 +1497,8 @@ inflate_subblock(const char *chunkbufp)
 		imageversion = 2;
 		curregion = (region_t *)
 			((struct blockhdr_V2 *)blockhdr + 1);
+		firstsect = blockhdr->firstsect;
+		lastsect = blockhdr->lastsect;
 		/*
 		 * Extract relocation information
 		 */
@@ -1504,6 +1508,10 @@ inflate_subblock(const char *chunkbufp)
 	case COMPRESSED_V5:
 		is32 = 0;
 		imageversion = 5;
+		curregion = (region_t *)
+			((struct blockhdr_V5 *)blockhdr + 1);
+		firstsect = blockhdr->firstsect64;
+		lastsect = blockhdr->lastsect64;
 		/* fall into... */
 	case COMPRESSED_V4:
 #ifdef WITH_CRYPTO
@@ -1566,9 +1574,13 @@ inflate_subblock(const char *chunkbufp)
 			chunkbufp = plaintext;
 		}
 #endif
-		if (imageversion != 5)
+		if (imageversion != 5) {
 			imageversion = 4;
-		curregion = (region_t *) (blockhdr + 1);
+			curregion = (region_t *)
+				((struct blockhdr_V4 *)blockhdr + 1);
+			firstsect = blockhdr->firstsect;
+			lastsect = blockhdr->lastsect;
+		}
 		getrelocinfo(blockhdr);
 		break;
 
@@ -1592,9 +1604,9 @@ inflate_subblock(const char *chunkbufp)
 	/*
 	 * Handle any lead-off free space
 	 */
-	if (imageversion > 1 && offset > blockhdr->firstsect) {
-		size = sectobytes(offset - blockhdr->firstsect);
-		offset = sectobytes(blockhdr->firstsect);
+	if (imageversion > 1 && offset > firstsect) {
+		size = sectobytes(offset - firstsect);
+		offset = sectobytes(firstsect);
 		if (dofill) {
 			wbuf = alloc_writebuf(offset, size, 0, 1);
 			dowrite_request(wbuf);
@@ -1778,9 +1790,9 @@ inflate_subblock(const char *chunkbufp)
 	curregion = REG_PREV(is32, curregion);
 	newoffset = REG_START(is32, curregion);
 	size = REG_SIZE(is32, curregion);
-	if (imageversion > 1 && newoffset + size < blockhdr->lastsect) {
+	if (imageversion > 1 && newoffset + size < lastsect) {
 		offset = sectobytes(newoffset + size);
-		size = sectobytes(blockhdr->lastsect - (newoffset + size));
+		size = sectobytes(lastsect - (newoffset + size));
 		if (dofill) {
 			wbuf = alloc_writebuf(offset, size, 0, 1);
 			dowrite_request(wbuf);
@@ -2041,8 +2053,8 @@ setslicetype(int slice, int dostype)
 			slice, dostype);
 }
 
-static struct blockreloc *reloctable;
-static int numrelocs;
+static blockreloc_t *reloctable;
+static int numrelocs, isreloc32;
 static void reloc_lilo(void *addr, int reloctype, uint32_t size);
 static void reloc_lilocksum(void *addr, uint32_t off, uint32_t size);
 
@@ -2052,42 +2064,46 @@ static void reloc_bsdlabel(struct disklabel *label, int reloctype);
 static void
 getrelocinfo(const blockhdr_t *hdr)
 {
-	const struct blockreloc *relocs;
-	int hdrsize = 0;
+	const blockreloc_t *relocs;
 
 	if (reloctable) {
 		free(reloctable);
 		reloctable = NULL;
 	}
+	isreloc32 = (hdr->magic == COMPRESSED_V5) ? 0 : 1;
 
+	assert(numrelocs == 0 || hdr->magic != COMPRESSED_V1);
 	if ((numrelocs = hdr->reloccount) == 0)
 		return;
 
-	reloctable = malloc(numrelocs * sizeof(struct blockreloc));
+	reloctable = malloc(RELOC_RSIZE(isreloc32, numrelocs));
 	if (reloctable == NULL) {
 		fprintf(stderr, "No memory for relocation table\n");
 		exit(1);
 	}
 
 	switch (hdr->magic) {
-	case COMPRESSED_V1:
-		hdrsize = sizeof(struct blockhdr_V1);
-		break;
 	case COMPRESSED_V2:
 	case COMPRESSED_V3:
-		hdrsize = sizeof(struct blockhdr_V2);
+		relocs = (const blockreloc_t *)
+			((const char *)hdr + sizeof(struct blockhdr_V2) +
+			 hdr->regioncount * sizeof(struct region_32));
 		break;
 	case COMPRESSED_V4:
-		hdrsize = sizeof(struct blockhdr_V4);
+		relocs = (const blockreloc_t *)
+			((const char *)hdr + sizeof(struct blockhdr_V4) +
+			 hdr->regioncount * sizeof(struct region_32));
+		break;
+	case COMPRESSED_V5:
+		relocs = (const blockreloc_t *)
+			((const char *)hdr + sizeof(struct blockhdr_V5) +
+			 hdr->regioncount * sizeof(struct region_32));
 		break;
 	default:
 		fprintf(stderr, "Unrecognized header type 0x%x\n", hdr->magic);
 		exit(1);
 	}
-	relocs = (const struct blockreloc *)
-		((const char *)hdr + hdrsize +
-		 hdr->regioncount * sizeof(struct region));
-	memcpy(reloctable, relocs, numrelocs * sizeof(struct blockreloc));
+	memcpy(reloctable, relocs, RELOC_RSIZE(isreloc32, numrelocs));
 }
 
 /*
@@ -2099,52 +2115,61 @@ getrelocinfo(const blockhdr_t *hdr)
 static size_t
 applyrelocs(off_t offset, size_t size, void *buf)
 {
-	struct blockreloc *reloc;
+	blockreloc_t *reloc;
 	off_t roffset;
 	uint32_t coff;
 	size_t nsize = size;
+	int i;
 
 	if (numrelocs == 0)
 		return nsize;
 
 	offset -= sectobytes(outputminsec);
 
-	for (reloc = reloctable; reloc < &reloctable[numrelocs]; reloc++) {
-		roffset = sectobytes(reloc->sector) + reloc->sectoff;
-		if (offset < roffset+reloc->size && offset+size > roffset) {
+	for (reloc = reloctable, i = 0; i < numrelocs;
+	     reloc = RELOC_NEXT(isreloc32, reloc)) {
+		struct blockreloc_64 r;
+
+		if (isreloc32) {
+			r.type = reloc->r32.type;
+			r.sector = (uint64_t)reloc->r32.sector;
+			r.sectoff = reloc->r32.sectoff;
+			r.size = (uint64_t)reloc->r32.size;
+		} else {
+			r = reloc->r64;
+		}
+		roffset = sectobytes(r.sector) + r.sectoff;
+		if (offset < roffset+r.size && offset+size > roffset) {
 			/* XXX lazy: relocation must be totally contained */
 			assert(offset <= roffset);
-			assert(roffset+reloc->size <= offset+size);
+			assert(roffset+r.size <= offset+size);
 
-			coff = (u_int32_t)(roffset - offset);
+			coff = (uint32_t)(roffset - offset);
 			if (debug > 1)
 				fprintf(stderr,
-					"Applying reloc type %d [%lld-%lld] "
-					"to [%lld-%lld]\n", reloc->type,
-					(long long)roffset,
-					(long long)roffset+reloc->size,
-					(long long)offset,
-					(long long)offset+size);
-			switch (reloc->type) {
+					"Applying reloc type %d [%ld-%ld] "
+					"to [%ld-%ld]\n", r.type,
+					roffset, roffset+r.size,
+					offset, offset+size);
+			switch (r.type) {
 			case RELOC_NONE:
 				break;
 			case RELOC_FBSDDISKLABEL:
 			case RELOC_OBSDDISKLABEL:
-				assert(reloc->size >= sizeof(struct disklabel));
+				assert(r.size >= sizeof(struct disklabel));
 				reloc_bsdlabel((struct disklabel *)((char *)buf+coff),
-					       reloc->type);
+					       r.type);
 				break;
 			case RELOC_LILOSADDR:
 			case RELOC_LILOMAPSECT:
-				reloc_lilo((char *)buf+coff, reloc->type,
-					   reloc->size);
+				reloc_lilo((char *)buf+coff, r.type, r.size);
 				break;
 			case RELOC_LILOCKSUM:
-				reloc_lilocksum(buf, coff, reloc->size);
+				reloc_lilocksum(buf, coff, r.size);
 				break;
 			case RELOC_SHORTSECTOR:
-				assert(reloc->sectoff == 0);
-				assert(reloc->size < SECSIZE);
+				assert(r.sectoff == 0);
+				assert(r.size < SECSIZE);
 				assert(roffset+SECSIZE == offset+size);
 				/*
 				 * If we are using O_DIRECT, the size must
@@ -2155,12 +2180,12 @@ applyrelocs(off_t offset, size_t size, void *buf)
 				 * zeroed already).
 				 */
 				if (!directio)
-					nsize -= (SECSIZE - reloc->size);
+					nsize -= (SECSIZE - r.size);
 				break;
 			default:
 				fprintf(stderr,
 					"Ignoring unknown relocation type %d\n",
-					reloc->type);
+					r.type);
 				break;
 			}
 		}
@@ -2172,7 +2197,7 @@ static void
 reloc_bsdlabel(struct disklabel *label, int reloctype)
 {
 	int i, npart;
-	uint32_t slicesize;
+	uint64_t slicesize;
 
 	/*
 	 * This relocation only makes sense in slice mode,
@@ -2181,7 +2206,7 @@ reloc_bsdlabel(struct disklabel *label, int reloctype)
 	if (slice == 0)
 		return;
 
-	if (label->d_magic  != DISKMAGIC || label->d_magic2 != DISKMAGIC) {
+	if (label->d_magic != DISKMAGIC || label->d_magic2 != DISKMAGIC) {
 		fprintf(stderr, "No disklabel at relocation offset\n");
 		exit(1);
 	}

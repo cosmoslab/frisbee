@@ -2331,7 +2331,7 @@ addreloc(off_t offset, off_t size, int reloctype)
 		exit(1);
 	}
 
-	relocs = realloc(relocs, RELOC_SIZE(is32, numrelocs));
+	relocs = realloc(relocs, RELOC_RSIZE(is32, numrelocs));
 	if (relocs == NULL) {
 		fprintf(stderr, "Out of memory!\n");
 		exit(1);
@@ -2568,10 +2568,10 @@ compress_image(void)
 		if (compat != COMPRESSED_V1) {
 			uint64_t lastsect;
 
-			if (compat == 0)
-				blkhdr->firstsect64 = cursect;
-			else
+			if (is32)
 				blkhdr->firstsect = cursect;
+			else
+				blkhdr->firstsect64 = cursect;
 			if (size == rangesize) {
 				/*
 				 * Finished subblock at the end of a range.
@@ -2612,7 +2612,7 @@ compress_image(void)
 		if (numrelocs) {
 			assert(compat != COMPRESSED_V1);
 			assert(relocs != NULL);
-			memcpy(curregion, relocs, RELOC_SIZE(is32, numrelocs));
+			memcpy(curregion, relocs, RELOC_RSIZE(is32, numrelocs));
 			freerelocs();
 		}
 
@@ -2660,9 +2660,17 @@ compress_image(void)
 		 * Update chunk numbers in new signature file.
 		 */
 		if (newhashfile) {
+			uint64_t first, last;
 			assert(compat != COMPRESSED_V1);
-			hashmap_update_chunk(blkhdr->firstsect + inputminsec,
-					     blkhdr->lastsect + inputminsec,
+			if (is32) {
+				first = blkhdr->firstsect;
+				last = blkhdr->lastsect;
+			} else {
+				first = blkhdr->firstsect64;
+				last = blkhdr->lastsect64;
+			}
+			hashmap_update_chunk(first + inputminsec,
+					     last + inputminsec,
 					     blkhdr->blockindex);
 		}
 #endif
@@ -2762,7 +2770,7 @@ compress_image(void)
 		if (numrelocs) {
 			assert(compat != COMPRESSED_V1);
 			assert(relocs != NULL);
-			memcpy(curregion, relocs, RELOC_SIZE(is32, numrelocs));
+			memcpy(curregion, relocs, RELOC_RSIZE(is32, numrelocs));
 			freerelocs();
 		}
 
@@ -2810,9 +2818,17 @@ compress_image(void)
 		 * Update chunk numbers in new signature file.
 		 */
 		if (newhashfile) {
+			uint64_t first, last;
 			assert(compat != COMPRESSED_V1);
-			hashmap_update_chunk(blkhdr->firstsect + inputminsec,
-					     blkhdr->lastsect + inputminsec,
+			if (is32) {
+				first = blkhdr->firstsect;
+				last = blkhdr->lastsect;
+			} else {
+				first = blkhdr->firstsect64;
+				last = blkhdr->lastsect64;
+			}
+			hashmap_update_chunk(first + inputminsec,
+					     last + inputminsec,
 					     blkhdr->blockindex);
 		}
 #endif

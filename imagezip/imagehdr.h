@@ -246,7 +246,7 @@ typedef union blockreloc {
 	    (blockreloc_t *)((struct blockreloc_32 *)(base) + (ix)) : \
 	    (blockreloc_t *)((struct blockreloc_64 *)(base) + (ix)))
 	
-#define RELOC_SIZE(is32, num) \
+#define RELOC_RSIZE(is32, num) \
 	((num) * (is32 ? \
 	    sizeof(struct blockreloc_32) : \
 	    sizeof(struct blockreloc_64)))

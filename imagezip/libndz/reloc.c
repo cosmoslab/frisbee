@@ -83,9 +83,9 @@ ndz_reloc_get(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
     /* resize the relocation buffer */
     i = ndz->relocentries + hdr->reloccount;
     if (ndz->relocdata == NULL)
-	relocdata = malloc(RELOC_SIZE(ndz->reloc32, i));
+	relocdata = malloc(RELOC_RSIZE(ndz->reloc32, i));
     else
-	relocdata = realloc(ndz->relocdata, RELOC_SIZE(ndz->reloc32, i));
+	relocdata = realloc(ndz->relocdata, RELOC_RSIZE(ndz->reloc32, i));
     if (relocdata == NULL) {
 	ndz_reloc_free(ndz);
 	return -1;
@@ -239,7 +239,7 @@ ndz_reloc_copy(struct ndz_file *ndzfrom, struct ndz_file *ndzto)
     if (ndzfrom->relocentries == 0)
 	return 0;
 
-    size = RELOC_SIZE(ndzfrom->reloc32, ndzfrom->relocentries);
+    size = RELOC_RSIZE(ndzfrom->reloc32, ndzfrom->relocentries);
     if ((ndzto->relocdata = malloc(size)) == NULL)
 	return -1;
 

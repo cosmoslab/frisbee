@@ -366,7 +366,7 @@ read_linuxswap(int slice, iz_type stype, iz_lba start, iz_size size,
 		fprintf(stderr,
 			"  P%d (Linux Swap)\n", slice + 1 /* DOS Numbering */);
 		fprintf(stderr,
-			"        start %12d, size %9d\n",
+			"        start %12ld, size %9ld\n",
 			start, size);
 	}
 
