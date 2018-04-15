@@ -131,13 +131,21 @@ int
 ndz_reloc_put(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
 {
     blockreloc_t *chunkreloc, *relocdata;
+    ndz_addr_t first, last;
     int i;
 
     if (ndz == NULL || hdr == NULL || buf == NULL)
 	return -1;
 
-    if (ndz->relocentries == 0 ||
-	hdr->firstsect > ndz->relochi || hdr->lastsect <= ndz->reloclo)
+    if (ndz->reloc32) {
+	first = hdr->firstsect;
+	last = hdr->lastsect;
+    } else {
+	first = hdr->firstsect64;
+	last = hdr->lastsect64;
+    }
+
+    if (ndz->relocentries == 0 || first > ndz->relochi || last <= ndz->reloclo)
 	return 0;
 
     chunkreloc = buf;
@@ -157,10 +165,10 @@ ndz_reloc_put(struct ndz_file *ndz, blockhdr_t *hdr, void *buf)
 	}
 
 	assert(roffset + rsize <= ndz->sectsize);
-	if (rsector >= hdr->firstsect && rsector < hdr->lastsect) {
+	if (rsector >= first && rsector < last) {
 #ifdef RELOC_DEBUG
-	    fprintf(stderr, "found reloc for %lu in chunk range [%u-%u]\n",
-		    rsector, hdr->firstsect, hdr->lastsect - 1);
+	    fprintf(stderr, "found reloc for %lu in chunk range [%lu-%lu]\n",
+		    rsector, first, last - 1);
 #endif
 	    if (ndz->reloc32)
 		chunkreloc->r32 = relocdata->r32;

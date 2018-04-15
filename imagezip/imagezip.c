@@ -2338,8 +2338,8 @@ addreloc(off_t offset, off_t size, int reloctype)
 	}
 
 	reloc = RELOC_ADDR(is32, relocs, numrelocs - 1);
-	sect = is32 ? reloc->r32.sector : reloc->r64.sector;
-	RELOC_ADD(is32, reloc, reloctype, bytestosec(offset),
+	sect = bytestosec(offset);
+	RELOC_ADD(is32, reloc, reloctype, sect,
 		  offset - sectobytes(sect), size);
 }
 

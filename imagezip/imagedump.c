@@ -477,7 +477,7 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 	region_t *reg = NULL;
 	uint32_t count;
 	int i, is32 = 1;
-	uint64_t first, last;
+	uint64_t first = 0, last = 0;
 
 	hdr = (blockhdr_t *)buf;
 

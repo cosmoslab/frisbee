@@ -226,10 +226,11 @@ struct blockreloc_32 {
 	uint32_t	size;		/* size of data affected */
 };
 
+/* N.B. sector and sectoff swapped to avoid alignment issues */
 struct blockreloc_64 {
 	uint32_t	type;		/* relocation type (below) */
-	uint64_t	sector;		/* sector it applies to */
 	uint32_t	sectoff;	/* offset within the sector */
+	uint64_t	sector;		/* sector it applies to */
 	uint64_t	size;		/* size of data affected */
 };
 

@@ -269,15 +269,17 @@ ndz_readranges(struct ndz_file *ndz)
 	    break;
 
 	if (hdr->magic >= COMPRESSED_V5)
-	    is32 = 1;
+	    is32 = 0;
 
 	if (hdr->magic != COMPRESSED_V1) {
+	    ndz_addr_t firstsect = is32 ? hdr->firstsect : hdr->firstsect64;
+	    ndz_addr_t lastsect = is32 ? hdr->lastsect : hdr->lastsect64;
 	    if (chunkno == 0)
-		first = hdr->firstsect;
-	    last = hdr->lastsect - 1;
+		first = firstsect;
+	    last = lastsect - 1;
 #ifdef USE_CHUNKMAP
-	    clo = hdr->firstsect;
-	    chi = hdr->lastsect - 1;
+	    clo = firstsect;
+	    chi = lastsect - 1;
 #endif
 	}
 

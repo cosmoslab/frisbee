@@ -1436,7 +1436,7 @@ inflate_subblock(const char *chunkbufp)
 	char		resid[SECSIZE];
 	writebuf_t	*wbuf;
 	int		is32 = 1;
-	uint64_t	firstsect, lastsect;
+	uint64_t	firstsect = 0, lastsect = 0;
 #ifdef WITH_CRYPTO
 	char		plaintext[CHUNKMAX];
 #endif
@@ -1482,7 +1482,6 @@ inflate_subblock(const char *chunkbufp)
 
 		curregion = (region_t *)
 			((struct blockhdr_V1 *)blockhdr + 1);
-		firstsect = lastsect = 0;
 		if (dofill && !didwarn) {
 			fprintf(stderr,
 				"WARNING: old image file format, "
@@ -2097,7 +2096,7 @@ getrelocinfo(const blockhdr_t *hdr)
 	case COMPRESSED_V5:
 		relocs = (const blockreloc_t *)
 			((const char *)hdr + sizeof(struct blockhdr_V5) +
-			 hdr->regioncount * sizeof(struct region_32));
+			 hdr->regioncount * sizeof(struct region_64));
 		break;
 	default:
 		fprintf(stderr, "Unrecognized header type 0x%x\n", hdr->magic);
@@ -2127,7 +2126,7 @@ applyrelocs(off_t offset, size_t size, void *buf)
 	offset -= sectobytes(outputminsec);
 
 	for (reloc = reloctable, i = 0; i < numrelocs;
-	     reloc = RELOC_NEXT(isreloc32, reloc)) {
+	     reloc = RELOC_NEXT(isreloc32, reloc), i++) {
 		struct blockreloc_64 r;
 
 		if (isreloc32) {
