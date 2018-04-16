@@ -1604,14 +1604,14 @@ inflate_subblock(const char *chunkbufp)
 	 * Handle any lead-off free space
 	 */
 	if (imageversion > 1 && offset > firstsect) {
-		size = sectobytes(offset - firstsect);
-		offset = sectobytes(firstsect);
+		off_t toffset = sectobytes(firstsect);
+		off_t tsize = sectobytes(offset - firstsect);
 		if (dofill) {
-			wbuf = alloc_writebuf(offset, size, 0, 1);
+			wbuf = alloc_writebuf(toffset, tsize, 0, 1);
 			dowrite_request(wbuf);
 		} else {
-			dodots(DODOTS_SKIP, size);
-			totaledata += size;
+			dodots(DODOTS_SKIP, tsize);
+			totaledata += tsize;
 		}
 	}
 
