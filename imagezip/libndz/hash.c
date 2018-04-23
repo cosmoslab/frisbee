@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2014-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -90,6 +90,7 @@ ndz_hash_data(struct ndz_file *ndz, unsigned char *data, unsigned long count,
 	MD5(data, count, hash);
 }
 
+#define SANITY_CHECK
 
 /*
  * Read the hash info from a signature file into a region map associated
@@ -99,14 +100,17 @@ struct ndz_rangemap *
 ndz_readhashinfo(struct ndz_file *ndz, char *sigfile)
 {
     struct hashinfo hi;
-    struct hashregion hr;
+    union {
+	struct hashregion_32 hr32;
+	struct hashregion hr64;
+    } hr;
     int fd, cc, rv, i;
     unsigned hashlen, blksize, hashtype;
     struct ndz_rangemap *map;
     struct ndz_hashdata *hashdata = NULL;
     unsigned lhblock;
-#if 0
-    unsigned lstart, lsize;
+#ifdef SANITY_CHECK
+    uint64_t lstart, lsize;
 #endif
 
     if (ndz == NULL || sigfile == NULL)
@@ -129,7 +133,8 @@ ndz_readhashinfo(struct ndz_file *ndz, char *sigfile)
 	return NULL;
     }
     if (strcmp((char *)hi.magic, HASH_MAGIC) != 0 ||
-	!(hi.version == HASH_VERSION_1 || hi.version == HASH_VERSION_2)) {
+	!(hi.version == HASH_VERSION_1 || hi.version == HASH_VERSION_2 ||
+	  hi.version == HASH_VERSION_3)) {
 	fprintf(stderr, "%s: not a valid signature file\n", sigfile);
 	close(fd);
 	return NULL;
@@ -158,47 +163,62 @@ ndz_readhashinfo(struct ndz_file *ndz, char *sigfile)
     hashlen = (hashtype == HASH_TYPE_MD5) ? 16 : 20;
     blksize = (hi.version == HASH_VERSION_1) ?
 	(HASHBLK_SIZE / ndz->sectsize) : hi.blksize;
+    ndz->hash32 = (hi.version < HASH_VERSION_3) ? 1 : 0;
 
     lhblock = -1;
     for (i = 0; i < hi.nregions; i++) {
-	cc = read(fd, &hr, sizeof(hr));
-	if (cc != sizeof(hr)) {
+	uint32_t chunkno;
+	uint64_t hstart, hsize;
+	uint8_t *hash;
+	size_t sz = ndz->hash32 ? sizeof(hr.hr32) : sizeof(hr.hr64);
+
+	cc = read(fd, &hr, sz);
+	if (cc != sz) {
 	    fprintf(stderr, "%s: incomplete sig entry\n", sigfile);
 	    free(hashdata);
 	    close(fd);
 	    return NULL;
 	}
-	hashdata[i].chunkno = hr.chunkno;
+	if (ndz->hash32) {
+	    chunkno = hr.hr32.chunkno;
+	    hstart = hr.hr32.region.start;
+	    hsize = hr.hr32.region.size;
+	    hash = &hr.hr32.hash[0];
+	} else {
+	    chunkno = hr.hr64.chunkno;
+	    hstart = hr.hr64.region.start;
+	    hsize = hr.hr64.region.size;
+	    hash = &hr.hr64.hash[0];
+	}
+	hashdata[i].chunkno = chunkno;
 	hashdata[i].hashlen = hashlen;
-	memcpy(hashdata[i].hash, hr.hash, HASH_MAXSIZE);
+	memcpy(hashdata[i].hash, hash, HASH_MAXSIZE);
 
-#if 0
+#ifdef SANITY_CHECK
 	/* Sanity check the ranges */
 	if (1) {
-	    unsigned sb = hr.region.start / blksize;
-	    unsigned eb = (hr.region.start+hr.region.size-1) / blksize;
+	    uint64_t sb = hstart / blksize;
+	    uint64_t eb = (hstart + hsize-1) / blksize;
+
 	    if (sb != eb)
-		fprintf(stderr, "*** [%u-%u]: range spans hash blocks\n",
-			hr.region.start, hr.region.start+hr.region.size-1);
+		fprintf(stderr, "*** [%lu-%lu]: range spans hash blocks\n",
+			hstart, hstart + hsize-1);
 	    if (sb == lhblock)
-		fprintf(stderr, "*** [%u-%u]: range in same hash block ([%u-%u]) as [%u-%u]\n",
-			hr.region.start, hr.region.start+hr.region.size-1,
+		fprintf(stderr, "*** [%lu-%lu]: range in same hash block ([%lu-%lu]) as [%lu-%lu]\n",
+			hstart, hstart + hsize-1,
 			sb*blksize, sb*blksize+blksize-1,
 			lstart, lstart+lsize-1);
 	    lhblock = sb;
-	    lstart = hr.region.start;
-	    lsize = hr.region.size;
+	    lstart = hstart;
+	    lsize = hsize;
 	}
 #endif
 
-	rv = ndz_rangemap_alloc(map, (ndz_addr_t)hr.region.start,
-				(ndz_size_t)hr.region.size,
+	rv = ndz_rangemap_alloc(map, (ndz_addr_t)hstart, (ndz_size_t)hsize,
 				(void *)&hashdata[i]);
 	if (rv) {
-	    fprintf(stderr, "%s: bad hash region [%u-%u]\n",
-		    ndz->fname,
-		    (unsigned)hr.region.start,
-		    (unsigned)hr.region.start+hr.region.size-1);
+	    fprintf(stderr, "%s: bad hash region [%lu-%lu]\n",
+		    ndz->fname, hstart, hstart+hsize-1);
 	    ndz_rangemap_deinit(map);
 	    free(hashdata);
 	    close(fd);
@@ -217,12 +237,22 @@ ndz_readhashinfo(struct ndz_file *ndz, char *sigfile)
     return map;
 }
 
+struct hashiterarg {
+    int ofd;
+    int is32;
+};
+
 static int
 writehinfo(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
 {
-    struct hashregion hr;
+    union {
+	struct hashregion_32 hr32;
+	struct hashregion hr64;
+    } hr;
     struct ndz_hashdata *hd = range->data;
-    int ofd = (int)(uintptr_t)arg;
+    int ofd = ((struct hashiterarg *)arg)->ofd;
+    int is32 = ((struct hashiterarg *)arg)->is32;
+    size_t sz;
 
     if (hd == NULL) {
 	fprintf(stderr, "no hash info for range [%lu-%lu]\n",
@@ -231,13 +261,24 @@ writehinfo(struct ndz_rangemap *map, struct ndz_range *range, void *arg)
     }
     assert(hd->hashlen <= HASH_MAXSIZE);
 
-    hr.region.start = range->start;
-    hr.region.size = range->end - range->start + 1;
-    hr.chunkno = hd->chunkno;
-    memcpy(hr.hash, hd->hash, hd->hashlen);
-    if (hd->hashlen < HASH_MAXSIZE)
-	memset(&hr.hash[hd->hashlen], 0, HASH_MAXSIZE - hd->hashlen);
-    if (write(ofd, &hr, sizeof(hr)) != sizeof(hr))
+    if (is32) {
+	hr.hr32.region.start = (uint32_t)range->start;
+	hr.hr32.region.size = (uint32_t)(range->end - range->start + 1);
+	hr.hr32.chunkno = hd->chunkno;
+	memcpy(hr.hr32.hash, hd->hash, hd->hashlen);
+	if (hd->hashlen < HASH_MAXSIZE)
+	    memset(&hr.hr32.hash[hd->hashlen], 0, HASH_MAXSIZE - hd->hashlen);
+	sz = sizeof(hr.hr32);
+    } else {
+	hr.hr64.region.start = range->start;
+	hr.hr64.region.size = range->end - range->start + 1;
+	hr.hr64.chunkno = hd->chunkno;
+	memcpy(hr.hr64.hash, hd->hash, hd->hashlen);
+	if (hd->hashlen < HASH_MAXSIZE)
+	    memset(&hr.hr64.hash[hd->hashlen], 0, HASH_MAXSIZE - hd->hashlen);
+	sz = sizeof(hr.hr64);
+    }
+    if (write(ofd, &hr, sz) != sz)
 	return 1;
 
     return 0;
@@ -251,6 +292,7 @@ ndz_writehashinfo(struct ndz_file *ndz, char *sigfile, char *ifile)
 {
     int ofd, cc;
     struct hashinfo hi;
+    struct hashiterarg ha;
 
     if (ndz == NULL || ndz->hashmap == NULL || sigfile == NULL)
 	return -1;
@@ -266,7 +308,7 @@ ndz_writehashinfo(struct ndz_file *ndz, char *sigfile, char *ifile)
 
     memset(&hi, 0, sizeof(hi));
     strcpy((char *)hi.magic, HASH_MAGIC);
-    hi.version = HASH_VERSION_2;
+    hi.version = ndz->hash32 ? HASH_VERSION_2 : HASH_VERSION_3;
     hi.hashtype = ndz->hashtype;
     hi.nregions = ndz->hashentries;
     hi.blksize = ndz->hashblksize;
@@ -287,8 +329,9 @@ ndz_writehashinfo(struct ndz_file *ndz, char *sigfile, char *ifile)
     /*
      * Iterate over the sigmap writing out the entries
      */
-    if (ndz_rangemap_iterate(ndz->hashmap, writehinfo,
-			     (void *)(uintptr_t)ofd) != 0) {
+    ha.ofd = ofd;
+    ha.is32 = ndz->hash32;
+    if (ndz_rangemap_iterate(ndz->hashmap, writehinfo, (void *)&ha) != 0) {
 	fprintf(stderr,
 		"%s: could not write one or more hash entries to sigfile %s\n",
 		ifile, sigfile);

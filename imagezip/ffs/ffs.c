@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -54,8 +54,8 @@ static int _read_bsdslice(int slice, iz_type bsdtype, iz_lba start,
 			  iz_size size, char *sname, int infd,
 			  int musthavelabel);
 static int read_bsdpartition(int infd, struct disklabel *dlabel, int part);
-static int read_bsdsblock(int infd, u_int32_t off, int part, struct fs *fsp);
-static int read_bsdcg(struct fs *fsp, struct cg *cgp, int cg, u_int32_t off);
+static int read_bsdsblock(int infd, uint64_t off, int part, struct fs *fsp);
+static int read_bsdcg(struct fs *fsp, struct cg *cgp, int cg, uint64_t off);
 #ifdef CLEAR_FREE_INODES
 static void inodefixup(void *buf, off_t buflen, void *fdata);
 #endif
@@ -63,7 +63,7 @@ static void inodefixup(void *buf, off_t buflen, void *fdata);
 /* Map partition number to letter */
 #define BSDPARTNAME(i)       ("abcdefghijklmnop"[(i)])
 
-static int32_t freecount;
+static int64_t freecount;
 
 /*
  * Operate on a BSD slice
@@ -298,8 +298,8 @@ read_bsdpartition(int infd, struct disklabel *dlabel, int part)
 		struct cg cg;
 		char pad[MAXBSIZE];
 	} cg;
-	u_int32_t	size, offset, fssect;
-	int32_t		sbfree;
+	uint64_t	size, offset, fssect;
+	int64_t		sbfree;
 
 	offset = dlabel->d_partitions[part].p_offset;
 	size   = dlabel->d_partitions[part].p_size;
@@ -336,7 +336,7 @@ read_bsdpartition(int infd, struct disklabel *dlabel, int part)
 	fssect = bytestosec(fs.fs_fsize * (off_t)fs.fs_size);
 	if (excludenonfs && fssect < size) {
 		warnx("BSD Partition '%c': filesystem smaller than partition, "
-		      "excluding [%u-%u]",
+		      "excluding [%lu-%lu]",
 		      BSDPARTNAME(part), offset+fssect, offset+size-1);
 		addskip(offset + fssect, size - fssect);
 	}
@@ -377,7 +377,7 @@ read_bsdpartition(int infd, struct disklabel *dlabel, int part)
 
 	if (rval == 0 && freecount != sbfree) {
 		warnx("BSD Partition '%c': "
-		      "computed free count (%d) != expected free count (%d)",
+		      "computed free count (%ld) != expected free count (%ld)",
 		      BSDPARTNAME(part), freecount, sbfree);
 	}
 
@@ -388,7 +388,7 @@ read_bsdpartition(int infd, struct disklabel *dlabel, int part)
  * Includes code yanked from UFS2 ffs_vfsops.c
  */
 static int
-read_bsdsblock(int infd, u_int32_t offset, int part, struct fs *fsp)
+read_bsdsblock(int infd, uint64_t offset, int part, struct fs *fsp)
 {
 	static int sblock_try[] = SBLOCKSEARCH;
 	union {
@@ -489,7 +489,7 @@ read_bsdsblock(int infd, u_int32_t offset, int part, struct fs *fsp)
 }
 
 static int
-read_bsdcg(struct fs *fsp, struct cg *cgp, int cg, u_int32_t offset)
+read_bsdcg(struct fs *fsp, struct cg *cgp, int cg, uint64_t offset)
 {
 	int  i, max;
 	u_int8_t *p;

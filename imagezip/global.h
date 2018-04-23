@@ -42,7 +42,7 @@ extern void addfixupfunc(void (*func)(void *, off_t, void *), off_t offset,
 			 off_t poffset, off_t size, void *data, off_t dsize,
 			 int reloctype);
 extern void applyfixups(off_t offset, off_t size, void *data);
-extern int hasfixup(uint32_t soffset, uint32_t ssize);
+extern int hasfixup(uint64_t soffset, uint64_t ssize);
 extern void savefixups(void);
 extern void restorefixups(int isempty);
 extern void dumpfixups(int verbose, int count);

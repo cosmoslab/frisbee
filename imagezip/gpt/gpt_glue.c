@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2016 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -278,13 +278,6 @@ parse_gpt(int fd, struct iz_disk *disk, int dowarn)
 
 		parttab[i].offset = start;
 		parttab[i].size = size;
-
-		/* XXX right now imagezip only handles 32-bit off/size */
-		if ((uint64_t)(parttab[i].offset) != start ||
-		    (uint64_t)(parttab[i].size) != size) {
-			warnx("P%d: Offset/size too large, ignoring", i+1);
-			parttab[i].flags |= IZFLAG_IGNORE;
-		}
 
 		if (type != IZTYPE_INVALID) {
 			if (start < losect)

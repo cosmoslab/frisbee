@@ -32,7 +32,7 @@
 
 static int read_ext4group(struct ext4_super_block *super,
 			   struct ext4_group_desc *group, int index,
-			   u_int32_t sliceoffset, int infd);
+			   uint64_t sliceoffset, int infd);
 
 extern int fixup_lilo(int slice, int stype, u_int32_t start, u_int32_t size,
 		      char *sname, int infd, int *found);
@@ -60,7 +60,7 @@ read_linuxslice(int slice, iz_type stype, iz_lba start, iz_size size,
 	unsigned char   	groups[EXT4_MAX_BLOCK_SIZE];
 	int			dosslice = slice + 1; /* DOS Numbering */
 	off_t			soff;
-	u_int32_t		fssect;
+	iz_lba			fssect;
 
 	/*
 	 * Check for a LILO boot block and create relocations as necessary
@@ -216,7 +216,7 @@ static int
 read_ext4group(struct ext4_super_block *super,
 		struct ext4_group_desc	*group,
 		int index,
-		u_int32_t sliceoffset /* Sector offset of slice */,
+		uint64_t sliceoffset /* Sector offset of slice */,
 		int infd)
 {
 	char	*p, bitmap[EXT4_MAX_BLOCK_SIZE];

@@ -148,7 +148,7 @@ dumphash(struct hashinfo *hinfo)
  * Read a range of the disk and compute the hash value.
  */
 static int
-hash_range(uint32_t start, uint32_t size, unsigned char *hash)
+hash_range(uint64_t start, uint64_t size, unsigned char *hash)
 {
 	unsigned char		*bp;
 	size_t			count, byte_size;
@@ -191,7 +191,7 @@ hash_range(uint32_t start, uint32_t size, unsigned char *hash)
 	/* XXX apply fixups */
 	if (hasfixup(start, size)) {
 #ifdef FOLLOW
-		fprintf(stderr, "  h: [%u-%u] applying fixups\n",
+		fprintf(stderr, "  h: [%lu-%lu] applying fixups\n",
 			start, start + size - 1);
 #endif
 		applyfixups(byte_start, byte_size, hashdata);
@@ -284,7 +284,7 @@ static int
 readhashinfo(char *hfile, struct hashinfo **hinfop)
 {
 	struct hashinfo		hi, *hinfo;
-	int			fd, nregbytes, cc, i;
+	int			fd, nregbytes, cc, i, is32;
 
 	assert(poffset != ~0);
 
@@ -303,10 +303,12 @@ readhashinfo(char *hfile, struct hashinfo **hinfop)
 		return -1;
 	}
 	if (strcmp((char *)hi.magic, HASH_MAGIC) != 0 ||
-	    !(hi.version == HASH_VERSION_1 || hi.version == HASH_VERSION_2)) {
+	    !(hi.version == HASH_VERSION_1 || hi.version == HASH_VERSION_2 ||
+	      hi.version == HASH_VERSION_3)) {
 		fprintf(stderr, "%s: not a valid signature file\n", hfile);
 		return -1;
 	}
+	is32 = (hi.version < HASH_VERSION_3) ? 1 : 0;
 	nregbytes = hi.nregions * sizeof(struct hashregion);
 	hinfo = malloc(sizeof(hi) + nregbytes);
 	if (hinfo == 0) {
@@ -314,7 +316,11 @@ readhashinfo(char *hfile, struct hashinfo **hinfop)
 		return -1;
 	}
 	*hinfo = hi;
-	cc = read(fd, hinfo->regions, nregbytes);
+	if (is32) {
+		FIXME
+	} else {
+		cc = read(fd, hinfo->regions, nregbytes);
+	}
 	if (cc != nregbytes) {
 		free(hinfo);
 		return -1;
@@ -577,7 +583,7 @@ add_to_hashmap(struct hashinfo **hinfop, uint32_t rstart, uint32_t rsize,
  * in the range, mark it special.
  */
 void
-hashmap_update_chunk(uint32_t ssect, uint32_t lsect, int chunkno)
+hashmap_update_chunk(uint64_t ssect, uint64_t lsect, int chunkno)
 {
 	int i;
 	assert(chunkno >= 0);
@@ -622,10 +628,10 @@ hashmap_update_chunk(uint32_t ssect, uint32_t lsect, int chunkno)
  */
 int
 hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
-		      uint32_t ssect, char *newhashfile,
+		      uint64_t ssect, char *newhashfile,
 		      struct range **nranges)
 {
-	uint32_t		gapstart, gapsize, lastdrangeend = 0;
+	uint64_t		gapstart, gapsize, lastdrangeend = 0;
 	unsigned char 		hash[HASH_MAXSIZE];
 	struct range		dummy_head, *range_tail;
 	struct hashregion	*hreg, *ereg;

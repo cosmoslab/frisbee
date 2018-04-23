@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -74,6 +74,7 @@ static int report = 0;
 static int withchunkno = 1;
 static int regfile = 0;
 static int nothreads = 0;
+static int hashversion = HASH_VERSION;
 static int hashtype = HASH_TYPE_SHA1;
 static int hashlen = 20;
 static long hashblksize = HASHBLK_SIZE;
@@ -119,8 +120,8 @@ static void free_readbuf(readbuf_t *rbuf);
 static void dump_readbufs(void);
 static void dump_stats(int sig);
 
-#define sectobytes(s)	((off_t)(s) * SECSIZE)
-#define bytestosec(b)	(uint32_t)((b) / SECSIZE)
+#define sectobytes(s)	((uint64_t)(s) * SECSIZE)
+#define bytestosec(b)	(uint64_t)((b) / SECSIZE)
 
 int
 main(int argc, char **argv)
@@ -129,7 +130,7 @@ main(int argc, char **argv)
 	extern char build_info[];
 	struct hashinfo *hashinfo = 0;
 
-	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:SXqT")) != -1)
+	while ((ch = getopt(argc, argv, "cCb:dvhno:rD:NVRF:SXqT2")) != -1)
 		switch(ch) {
 		case 'b':
 			hashblksize = atol(optarg);
@@ -204,6 +205,9 @@ main(int argc, char **argv)
 		case 'T':
 			terse = 1;
 			break;
+		case '2':
+			hashversion = HASH_VERSION_2;
+			break;
 		case 'h':
 		case '?':
 		default:
@@ -275,6 +279,24 @@ main(int argc, char **argv)
 				signame(argv[0]));
 			exit(1);
 		}
+
+		/*
+		 * Need to use the same hash params when hashing the image
+		 * as are already recorded in the signature.
+		 */
+		hashversion = hashinfo->version;
+		hashtype = hashinfo->hashtype;
+		switch (hashtype) {
+		case HASH_TYPE_MD5:
+		default:
+			hashlen = 16;
+			break;
+		case HASH_TYPE_SHA1:
+			hashlen = 20;
+			break;
+		}
+		hashblksizeinsec = hashinfo->blksize;
+
 		if (hashimage(argv[0], &ihashinfo) != 0) {
 			fprintf(stderr, "Could not compute hashinfo for %s\n",
 				argv[0]);
@@ -282,7 +304,7 @@ main(int argc, char **argv)
 		}
 		assert(ihashinfo != NULL);
 		strcpy((char *)ihashinfo->magic, HASH_MAGIC);
-		ihashinfo->version = HASH_VERSION_2;
+		ihashinfo->version = hashversion;
 		ihashinfo->hashtype = hashtype;
 		ihashinfo->blksize = hashblksizeinsec;
 
@@ -421,11 +443,20 @@ readhashinfo(char *name, struct hashinfo **hinfop)
 		return -1;
 	}
 	if (strcmp((char *)hi.magic, HASH_MAGIC) != 0 ||
-	    !(hi.version == HASH_VERSION_1 || hi.version == HASH_VERSION_2)) {
+	    !(hi.version == HASH_VERSION_1 || hi.version == HASH_VERSION_2 ||
+	      hi.version == HASH_VERSION3)) {
 		fprintf(stderr, "%s: not a valid signature file\n", hname);
 		goto bad;
 	}
-	nbytes = hi.nregions * sizeof(struct hashregion);
+	switch (hi.version) {
+	case HASH_VERSION_1:
+	case HASH_VERSION_2:
+		nbytes = hi.nregions * sizeof(struct hashregion_32);
+		break;
+	default:
+		nbytes = hi.nregions * sizeof(struct hashregion);
+		break;
+	}
 	hinfo = malloc(sizeof(hi) + nbytes);
 	if (hinfo == 0) {
 		fprintf(stderr, "%s: not enough memory for info\n", hname);
@@ -472,14 +503,56 @@ readhashinfo(char *name, struct hashinfo **hinfop)
 #define REGPERBLK	8192	/* ~256KB -- must be power of 2 */
 
 static void
-addhash(struct hashinfo **hinfop, uint32_t chunkno, uint32_t start,
-	uint32_t size, unsigned char hash[HASH_MAXSIZE])
+addhash32(struct hashinfo **hinfop, uint32_t chunkno, uint32_t start,
+	  uint32_t size, unsigned char hash[HASH_MAXSIZE])
+{
+	struct hashinfo *hinfo = *hinfop;
+	struct hasregion_32 regions;
+	int nreg;
+
+	if (report) {
+		printf("%s\t%u\t%u",
+		       spewhash(hash, hashlen), start, size);
+		if (report > 1)
+			printf("\t%u\tU\t%s", chunkno, fileid);
+		putchar('\n');
+		return;
+	}
+
+	if (hinfo == 0) {
+		nreg = 0;
+		hinfo = calloc(1, sizeof(*hinfo));
+	} else {
+		nreg = hinfo->nregions;
+	}
+	if ((nreg % REGPERBLK) == 0) {
+		hinfo = realloc(hinfo, sizeof(*hinfo) +
+				(nreg+REGPERBLK)*sizeof(struct hashregion_32));
+		if (hinfo == 0) {
+			fprintf(stderr, "out of memory for hash map\n");
+			exit(1);
+		}
+		*hinfop = hinfo;
+	}
+
+	regions = (struct hashregion_32 *)&hinfo->regions[0];
+	regions[nreg].chunkno = chunkno;
+	regions[nreg].region.start = start;
+	regions[nreg].region.size = size;
+	memcpy(regions[nreg].hash, hash, HASH_MAXSIZE);
+	hinfo->nregions++;
+	nhregions = hinfo->nregions;
+}
+
+static void
+addhash(struct hashinfo **hinfop, uint32_t chunkno, uint64_t start,
+	uint64_t size, unsigned char hash[HASH_MAXSIZE])
 {
 	struct hashinfo *hinfo = *hinfop;
 	int nreg;
 
 	if (report) {
-		printf("%s\t%u\t%u",
+		printf("%s\t%lu\t%lu",
 		       spewhash(hash, hashlen), start, size);
 		if (report > 1)
 			printf("\t%u\tU\t%s", chunkno, fileid);
@@ -526,6 +599,10 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 				break;
 			case HASH_VERSION_2:
 				printf("sig version 2, blksize=%d sectors:\n",
+				       hinfo->blksize);
+				break;
+			case HASH_VERSION_3:
+				printf("sig version 3, blksize=%d sectors:\n",
 				       hinfo->blksize);
 				break;
 			default:
@@ -1464,7 +1541,7 @@ hashfilechunk(int chunkno, char *chunkbufp, int chunksize,
 	      struct hashinfo **hinfop)
 {
 	int resid;
-	uint32_t cursect = 0, nbytes;
+	uint64_t cursect = 0, nbytes;
 	unsigned char hash[HASH_MAXSIZE];
 	unsigned char *(*hashfunc)(const unsigned char *, size_t,
 				   unsigned char *);
@@ -1495,7 +1572,7 @@ hashfilechunk(int chunkno, char *chunkbufp, int chunksize,
 	 */
 	resid = chunksize - sectobytes(bytestosec(chunksize));
 	while (chunksize > 0) {
-		uint32_t rstart, rsize;
+		uint64_t rstart, rsize;
 
 		if (chunksize > hashblksize)
 			nbytes = hashblksize;

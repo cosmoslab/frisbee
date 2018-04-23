@@ -72,6 +72,7 @@ struct ndz_file {
     void *relocdata;
     ndz_addr_t reloclo, relochi;
     /* hash (signature) info */
+    int hash32;
     unsigned hashtype;
     unsigned hashblksize;
     unsigned hashentries;

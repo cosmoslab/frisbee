@@ -150,7 +150,7 @@ static void	sortrange(struct range **head, int domerge,
 		  int (*rangecmp)(struct range *, struct range *));
 int	mergeskips(int verbose);
 int	mergeranges(struct range *head);
-void	makeranges(void);
+void	makeranges(int *need64);
 void	dumpranges(int verbose);
 uint64_t sectinranges(struct range *range);
 void	addreloc(off_t offset, off_t size, int reloctype);
@@ -397,6 +397,7 @@ main(int argc, char *argv[])
 	char	*outfilename = 0;
 	int	rawmode	  = 0;
 	int	slicetype = 0;
+	int	need64    = 0;
 	struct timeval sstamp;
 	extern char build_info[];
 
@@ -711,43 +712,6 @@ main(int argc, char *argv[])
 	}
 #endif
 
-#ifdef WITH_V3COMPAT
-	/*
-	 * Deal with pre-crypto backward compatibility.
-	 * We don't want to generate V4 images unless we really need it.
-	 * Note that this means we do NOT generate a UUID if none was provided.
-	 */
-	if (!compat &&
-#ifdef WITH_CRYPTO
-	    !do_encrypt && !do_checksum &&
-#endif
-	    !got_imageid)
-		compat = COMPRESSED_V3;
-#endif
-
-	/*
-	 * Generate a random UUID if one was not provided and we are
-	 * not operating in compatibility mode.
-	 */
-	if (!compat && !got_imageid) {
-		int fd = open("/dev/urandom", O_RDONLY, 0);
-
-		if (fd < 0 ||
-		    read(fd, imageid, sizeof(imageid)) != sizeof(imageid)) {
-			fprintf(stderr, "WARNING: no UUID generated\n");
-			memset(imageid, '\0', UUID_LENGTH);
-		} else {
-			char uuidstr[UUID_LENGTH*2+1];
-
-			mem_to_hexstr(uuidstr, imageid, UUID_LENGTH);
-			output_uuid(outfilename, uuidstr);
-			got_imageid = 1;
-		}
-
-		if (fd >= 0)
-			close(fd);
-	}
-
 	/*
 	 * Create the skip list by scanning the filesystems on
 	 * the disk or indicated partition.
@@ -788,7 +752,7 @@ main(int argc, char *argv[])
 	(void) mergeskips(debug > 1);
 	if (debug)
 		dumpskips(debug > 1);
-	makeranges();
+	makeranges(&need64);
 #ifdef TEST_RANGEMAP
 	dumpranges(debug > 1);
 #else
@@ -813,6 +777,57 @@ main(int argc, char *argv[])
 	if (debug > 1)
 		dumpfixups(debug > 2, 0);
 	fflush(stderr);
+
+	/*
+	 * Now that we have computed the range map, see if there are any
+	 * offsets/sizes > 32-bits and fail if they are trying to create
+	 * an old image.
+	 */
+	if (compat && compat < COMPRESSED_V5 && need64) {
+		fprintf(stderr,
+			"Offset or size > 32-bits detected, cannot use -3\n");
+		usage();
+	}
+#ifdef WITH_V3COMPAT
+	/*
+	 * Deal with pre-crypto/pre-64-bit backward compatibility.
+	 *
+	 * We don't want to generate V4/V5 images unless we really need it.
+	 * For V4, we don't have to if none of encryption, checksuming, or
+	 * a UUID is specified. For V5, it also means that no region sector
+	 * number or size exceeds 32-bits. This is determined for us by
+	 * makeranges().
+	 */
+	if (!compat &&
+#ifdef WITH_CRYPTO
+	    !do_encrypt && !do_checksum &&
+#endif
+	    !got_imageid && !need64)
+		compat = COMPRESSED_V3;
+#endif
+
+	/*
+	 * Generate a random UUID if one was not provided and we are
+	 * not operating in compatibility mode.
+	 */
+	if (!compat && !got_imageid) {
+		int fd = open("/dev/urandom", O_RDONLY, 0);
+
+		if (fd < 0 ||
+		    read(fd, imageid, sizeof(imageid)) != sizeof(imageid)) {
+			fprintf(stderr, "WARNING: no UUID generated\n");
+			memset(imageid, '\0', UUID_LENGTH);
+		} else {
+			char uuidstr[UUID_LENGTH*2+1];
+
+			mem_to_hexstr(uuidstr, imageid, UUID_LENGTH);
+			output_uuid(outfilename, uuidstr);
+			got_imageid = 1;
+		}
+
+		if (fd >= 0)
+			close(fd);
+	}
 
 #ifdef WITH_HASH
 	/*
@@ -1534,9 +1549,9 @@ mergeskips(int verbose)
 {
 	struct range *prange, **prevp;
 	int freed = 0, culled = 0;
-	uint32_t total = 0;
+	uint64_t total = 0;
 #ifdef DOHISTO
-	uint32_t histo[64];
+	uint64_t histo[64];
 	memset(histo, 0, sizeof(histo));
 #endif
 
@@ -1607,7 +1622,7 @@ mergeskips(int verbose)
 				prevp = &prange->next;
 			} else
 #endif
-			if (prange->size < (uint32_t)frangesize) {
+			if (prange->size < (uint64_t)frangesize) {
 #ifdef WITH_HASHALIGN
 			dropall:
 #endif
@@ -1635,8 +1650,8 @@ mergeskips(int verbose)
 		}
 		if (verbose && culled) {
 			fprintf(stderr,
-				"\nFree Sectors Ignored: %d (%lld bytes) in %d ranges\n",
-				total, (long long)sectobytes(total), culled);
+				"\nFree Sectors Ignored: %lu (%ld bytes) in %d ranges\n",
+				total, sectobytes(total), culled);
 #ifdef DOHISTO
 			{
 				int i;
@@ -1650,7 +1665,7 @@ mergeskips(int verbose)
 					s = (double)(histo[i]*i)/total*100.0;
 					cums += s;
 					fprintf(stderr,
-						"%d: %u, %4.1f%% (%4.1f%%) of ranges "
+						"%d: %lu, %4.1f%% (%4.1f%%) of ranges "
 						"%4.1f%% (%4.1f%%) of sectors)\n",
 						i, histo[i], r, cumr, s, cums);
 				}
@@ -1828,17 +1843,22 @@ mergeranges(struct range *head)
  * we create a single range covering the entire partition.
  */
 void
-makeranges(void)
+makeranges(int *need64p)
 {
 	struct range	*pskip, *ptmp;
-	uint32_t	offset;
+	uint64_t	offset, size;
+	int		need64 = 0;
 
 	offset = inputminsec;
 
 	pskip = skips;
 	while (pskip) {
-		if ((pskip->start - offset) > 0)
-			addvalid(offset, pskip->start - offset);
+		size = pskip->start - offset;
+		if (!need64 && (offset > UINT32_MAX || size > UINT32_MAX))
+			need64 = 1;
+
+		if (size > 0)
+			addvalid(offset, size);
 		offset = pskip->start + pskip->size;
 
 		ptmp  = pskip;
@@ -1861,8 +1881,18 @@ makeranges(void)
 		 * Mark the last range with 0 so compression goes to end
 		 * if we don't know where it is.
 		 */
-		addvalid(offset, inputmaxsec ? (inputmaxsec - offset) : 0);
+		if (inputmaxsec) {
+			size = inputmaxsec - offset;
+			if (!need64 &&
+			    (inputmaxsec > UINT32_MAX || size > UINT32_MAX))
+				need64 = 1;
+		} else
+			size = 0;
+
+		addvalid(offset, size);
 	}
+	if (need64p)
+		*need64p = need64;
 }
 
 void
@@ -1894,7 +1924,7 @@ void
 dumpranges(int verbose)
 {
 	struct range *range;
-	uint32_t total = 0;
+	uint64_t total = 0;
 	int nranges = 0;
 
 	if (verbose)
@@ -1909,8 +1939,8 @@ dumpranges(int verbose)
 		range = range->next;
 	}
 	fprintf(stderr,
-		"Total Number of Valid Sectors: %u (bytes %llu) in %d ranges\n",
-		(unsigned)total, (unsigned long long)sectobytes(total), nranges);
+		"Total Number of Valid Sectors: %lu (bytes %lu) in %d ranges\n",
+		total, sectobytes(total), nranges);
 #ifdef TEST_RANGEMAP
 	comparemap(verbose);
 #endif
@@ -2034,7 +2064,7 @@ cmpfixups(struct range *r1, struct range *r2)
  * Returns 1 if so, 0 otherwise.
  */
 int
-hasfixup(uint32_t soffset, uint32_t ssize)
+hasfixup(uint64_t soffset, uint64_t ssize)
 {
 	struct range *rp;
 	struct fixup *fp;
@@ -2055,12 +2085,12 @@ hasfixup(uint32_t soffset, uint32_t ssize)
 
 		/* otherwise, there is overlap */
 #ifdef FOLLOW
-		fprintf(stderr, "R: [%u-%u] overlaps with F: [%u/%u-%u/%u]\n",
+		fprintf(stderr, "R: [%lu-%lu] overlaps with F: [%lu/%lu-%lu/%lu]\n",
 			soffset, soffset+ssize-1,
 			bytestosec(fp->offset),
-			(uint32_t)fp->offset % SECSIZE,
+			fp->offset % SECSIZE,
 			bytestosec(fp->offset+fp->size-1),
-			(uint32_t)(fp->offset+fp->size-1) % SECSIZE);
+			(fp->offset+fp->size-1) % SECSIZE);
 #endif
 		return 1;
 	}
@@ -2138,7 +2168,7 @@ applyfixups(off_t offset, off_t size, void *data)
 {
 	struct range **prev, *entry;
 	struct fixup *fp;
-	uint32_t coff, clen;
+	uint64_t coff, clen;
 
 #ifdef FOLLOW
 	fprintf(stderr, "D: [%u-%u], %d fixups\n",
@@ -2149,12 +2179,12 @@ applyfixups(off_t offset, off_t size, void *data)
 		assert(entry->data != NULL);
 		fp = entry->data;
 #ifdef FOLLOW
-		fprintf(stderr, "  F%p: [%u/%u-%u/%u]: ",
+		fprintf(stderr, "  F%p: [%lu/%lu-%lu/%lu]: ",
 			fp,
 			bytestosec(fp->offset),
-			(uint32_t)fp->offset % SECSIZE,
+			fp->offset % SECSIZE,
 			bytestosec(fp->offset+fp->size-1),
-			(uint32_t)(fp->offset+fp->size-1) % SECSIZE);
+			(fp->offset+fp->size-1) % SECSIZE);
 #endif
 
 		/*
@@ -2184,24 +2214,22 @@ applyfixups(off_t offset, off_t size, void *data)
 		 */
 		if (fp->offset+fp->size > offset+size) {
 			assert(fp->reloctype == RELOC_NONE);
-			coff = (u_int32_t)(fp->offset - offset);
+			coff = (uint64_t)(fp->offset - offset);
 			clen = (offset + size) - fp->offset;
 		} else {
-			coff = (u_int32_t)(fp->offset - offset);
-			clen = (u_int32_t)fp->size;
+			coff = (uint64_t)(fp->offset - offset);
+			clen = (uint64_t)fp->size;
 		}
 		assert(offset+coff == fp->offset);
 		assert(offset+coff+clen <= fp->offset+fp->size);
 
 		if (debug > 2)
 			fprintf(stderr,
-				"Applying %sfixup [%llu-%llu] to [%llu-%llu]\n",
-				(clen == (u_int32_t)fp->size) ?
+				"Applying %sfixup [%lu-%lu] to [%lu-%lu]\n",
+				(clen == (uint64_t)fp->size) ?
 				"full " : "partial ",
-				(unsigned long long)fp->offset,
-				(unsigned long long)fp->offset+fp->size,
-				(unsigned long long)offset,
-				(unsigned long long)offset+size);
+				fp->offset, fp->offset+fp->size,
+				offset, offset+size);
 
 		/* don't mess with data arg for functions */
 		if (fp->func != NULL)
@@ -2225,11 +2253,11 @@ applyfixups(off_t offset, off_t size, void *data)
 		if (fp->size > 0) {
 			fp->offset += clen;
 #ifdef FOLLOW
-			fprintf(stderr, "used, reduced to [%u/%u-%u/%u]\n",
+			fprintf(stderr, "used, reduced to [%lu/%lu-%lu/%lu]\n",
 				bytestosec(fp->offset),
-				(uint32_t)fp->offset % SECSIZE,
+				fp->offset % SECSIZE,
 				bytestosec(fp->offset+fp->size-1),
-				(uint32_t)(fp->offset+fp->size-1) % SECSIZE);
+				(fp->offset+fp->size-1) % SECSIZE);
 #endif
 			prev = &entry->next;
 		} else {
@@ -2360,7 +2388,8 @@ static off_t	inputoffset;
 static struct timeval cstamp;
 static uint64_t bytescompressed;
 
-static off_t	compress_chunk(off_t, off_t, int *, uint32_t *);
+static off_t	compress_chunk(off_t off, off_t size, int *full,
+			       uint32_t *subblksize);
 static int	compress_finish(uint32_t *subblksize);
 static void	compress_status(int sig);
 #ifdef WITH_CRYPTO
@@ -2713,7 +2742,7 @@ compress_image(void)
 		if (size == rangesize)
 			prange = prange->next;
 		else {
-			uint32_t sectors = bytestosec(size);
+			uint64_t sectors = bytestosec(size);
 
 			prange->start += sectors;
 			if (prange->size)

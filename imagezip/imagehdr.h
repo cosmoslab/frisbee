@@ -351,8 +351,11 @@ if (is32) { \
  * area before filling the region header.  Since the latter is more likely
  * to be common, we tend to the small-ish side.
  *
- * At 4K with 8 byte region descriptors, we can fix 512 regions into a
- * single chunk.
+ * At 4K, with a V2 image having a 36 byte header and 8 byte region
+ * descriptors, we can fix 507 regions into a single chunk.
+ *
+ * At 4K, with a V5 image having a 360 byte header and 16 byte region
+ * descriptors, we can fix 233 regions into a single chunk.
  */
 #define DEFAULTREGIONSIZE	4096
 

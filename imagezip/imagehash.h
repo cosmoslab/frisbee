@@ -25,7 +25,8 @@
 
 #define HASH_VERSION_1	0x20031107
 #define HASH_VERSION_2	0x20140618
-#define HASH_VERSION	HASH_VERSION_2
+#define HASH_VERSION_3	0x20180415
+#define HASH_VERSION	HASH_VERSION_3
 
 #define HASH_MAGIC	".ndzsig"
 #define HASHBLK_SIZE	(64*1024)
@@ -36,6 +37,12 @@
 #define HASH_CHUNKSETSPAN(c)	((c) | (1 << 31))
 
 struct hashregion {
+	struct region_64 region;
+	uint32_t chunkno;
+	unsigned char hash[HASH_MAXSIZE];
+};
+
+struct hashregion_32 {
 	struct region_32 region;
 	uint32_t chunkno;
 	unsigned char hash[HASH_MAXSIZE];
@@ -48,7 +55,7 @@ struct hashinfo {
 	uint32_t nregions;
 	uint32_t blksize;	/* V2: make hash blocksize explicit */
 	uint8_t	 pad[8];
-	struct hashregion regions[0];
+	struct hashregion regions[0]; /* V3: hash regions have 64 byte vals */
 };
 
 #define HASH_TYPE_MD5	1
