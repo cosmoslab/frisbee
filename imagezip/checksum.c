@@ -71,6 +71,8 @@ init_checksum(char *keyfile)
 {
 	char str[1024];
 	FILE *file;
+	BIGNUM *n, *e, *dmp1, *dmq1, *iqmp;
+	n = e = dmp1 = dmq1 = iqmp = NULL;
 
 	if (keyfile == NULL || (file = fopen(keyfile, "r")) == NULL) {
 		fprintf(stderr, "%s: cannot open keyfile\n", keyfile);
@@ -81,22 +83,33 @@ init_checksum(char *keyfile)
 		return 0;
 	}
 
+					   
 	if (fscanf(file, "%1024s", str) != 1)
 		goto bad;
-	BN_hex2bn(&signature_key->n, str);
+	BN_hex2bn(&n, str);
 	if (fscanf(file, "%1024s", str) != 1)
 		goto bad;
-	BN_hex2bn(&signature_key->e, str);
+	BN_hex2bn(&e, str);
 	if (fscanf(file, "%1024s", str) != 1)
 		goto bad;
-	BN_hex2bn(&signature_key->dmp1, str);
+	BN_hex2bn(&dmp1, str);
 	if (fscanf(file, "%1024s", str) != 1)
 		goto bad;
-	BN_hex2bn(&signature_key->dmq1, str);
+	BN_hex2bn(&dmq1, str);
 	if (fscanf(file, "%1024s", str) != 1)
 		goto bad;
-	BN_hex2bn(&signature_key->iqmp, str);
+	BN_hex2bn(&iqmp, str);
 	fclose(file);
+#if (OPENSSL_VERSION_NUMBER >= 0x01010000L)
+	RSA_set0_key(signature_key, n, e, NULL);
+	RSA_set0_crt_params(signature_key, dmp1, dmq1, iqmp);
+#else
+	signature_key->n = n;
+	signature_key->e = e;
+	signature_key->dmp1 = dmp1;
+	signature_key->dmq1 = dmq1;
+	signature_key->iqmp = iqmp;
+#endif
 	return 1; 
 
  bad:

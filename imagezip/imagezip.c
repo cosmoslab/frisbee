@@ -3215,6 +3215,21 @@ output_public_key(char *imagename, RSA *key)
 		fprintf(stderr, "Cannot create keyfile %s\n", fname);
 		exit(1);
 	}
+#if (OPENSSL_VERSION_NUMBER >= 0x01010000L)
+	const BIGNUM *n = NULL, *e = NULL;
+	const BIGNUM *dmp1 = NULL, *dmq1 = NULL, *iqmp = NULL;
+	RSA_get0_key(key,&n,&e,NULL);
+	BN_print_fp(file, n);
+	fprintf(file, "\n");
+	BN_print_fp(file, e);
+	fprintf(file, "\n");
+	BN_print_fp(file, dmp1);
+	fprintf(file, "\n");
+	BN_print_fp(file, dmq1);
+	fprintf(file, "\n");
+	BN_print_fp(file, iqmp);
+	fprintf(file, "\n");
+#else
 	BN_print_fp(file, key->n);
 	fprintf(file, "\n");
 	BN_print_fp(file, key->e);
@@ -3225,6 +3240,7 @@ output_public_key(char *imagename, RSA *key)
 	fprintf(file, "\n");
 	BN_print_fp(file, key->iqmp);
 	fprintf(file, "\n");
+#endif
 	fclose(file);
 
 	fprintf(stderr, "Signing pubkey written to %s\n", fname);
@@ -3305,7 +3321,12 @@ checksum_finish(blockhdr_t *hdr)
 /*
  * Encryption functions
  */
+#if (OPENSSL_VERSION_NUMBER >= 0x01010000L)
+static EVP_CIPHER_CTX *cipher_ctxp;
+#else
 static EVP_CIPHER_CTX cipher_ctx;
+static EVP_CIPHER_CTX *cipher_ctxp = &cipher_ctx;
+#endif
 static const EVP_CIPHER *ecipher;
 /* XXX: the size of the IV may have to change with different ciphers */
 static uint8_t iv[ENC_MAX_KEYLEN];
@@ -3325,7 +3346,11 @@ encrypt_start(blockhdr_t *hdr)
 	/*
 	 * Pick our cipher - currently, only Blowfish in CBC mode is supported
 	 */
-	EVP_CIPHER_CTX_init(&cipher_ctx);
+#if (OPENSSL_VERSION_NUMBER >= 0x01010000L)
+	cipher_ctxp = EVP_CIPHER_CTX_new();
+#else
+	EVP_CIPHER_CTX_init(cipher_ctxp);
+#endif
 	ecipher = EVP_bf_cbc();
 
 	/*
@@ -3367,13 +3392,13 @@ encrypt_start(blockhdr_t *hdr)
 	/*
 	 * Set the cipher and IV
 	 */
-	EVP_EncryptInit(&cipher_ctx, ecipher, NULL, iv);
+	EVP_EncryptInit(cipher_ctxp, ecipher, NULL, iv);
 
 	/*
 	 * Bump up the key length and set the key
 	 */
-	EVP_CIPHER_CTX_set_key_length(&cipher_ctx, ENC_MAX_KEYLEN);
-	EVP_EncryptInit(&cipher_ctx, NULL, enc_key, NULL);
+	EVP_CIPHER_CTX_set_key_length(cipher_ctxp, ENC_MAX_KEYLEN);
+	EVP_EncryptInit(cipher_ctxp, NULL, enc_key, NULL);
 
 	/*
 	 * Copy the IV into the header
@@ -3393,9 +3418,9 @@ encrypt_chunk(uint8_t *buf, off_t size, off_t maxsize)
 	int encrypted_this_round = 0;
 
 	/* man page says encrypted output could be this large */
-	assert(size + EVP_CIPHER_CTX_block_size(&cipher_ctx) - 1 <= maxsize);
+	assert(size + EVP_CIPHER_CTX_block_size(cipher_ctxp) - 1 <= maxsize);
 
-	EVP_EncryptUpdate(&cipher_ctx, ebuffer_current, &encrypted_this_round,
+	EVP_EncryptUpdate(cipher_ctxp, ebuffer_current, &encrypted_this_round,
 			  buf, size);
 	encrypted_bytes += encrypted_this_round;
 	ebuffer_current = encryption_buffer + encrypted_bytes;
@@ -3406,7 +3431,7 @@ encrypt_finish(blockhdr_t *hdr, uint8_t *outbuf, uint32_t *out_size)
 {
 	int encrypted_this_round = 0;
 
-	EVP_EncryptFinal(&cipher_ctx, ebuffer_current, &encrypted_this_round);
+	EVP_EncryptFinal(cipher_ctxp, ebuffer_current, &encrypted_this_round);
 	encrypted_bytes += encrypted_this_round;
 
 	/*
