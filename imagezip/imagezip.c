@@ -3215,7 +3215,7 @@ output_public_key(char *imagename, RSA *key)
 		fprintf(stderr, "Cannot create keyfile %s\n", fname);
 		exit(1);
 	}
-#if (OPENSSL_VERSION_NUMBER >= 0x01010000L)
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
 	const BIGNUM *n = NULL, *e = NULL;
 	const BIGNUM *dmp1 = NULL, *dmq1 = NULL, *iqmp = NULL;
 	RSA_get0_key(key,&n,&e,NULL);
@@ -3321,7 +3321,7 @@ checksum_finish(blockhdr_t *hdr)
 /*
  * Encryption functions
  */
-#if (OPENSSL_VERSION_NUMBER >= 0x01010000L)
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
 static EVP_CIPHER_CTX *cipher_ctxp;
 #else
 static EVP_CIPHER_CTX cipher_ctx;
@@ -3346,7 +3346,7 @@ encrypt_start(blockhdr_t *hdr)
 	/*
 	 * Pick our cipher - currently, only Blowfish in CBC mode is supported
 	 */
-#if (OPENSSL_VERSION_NUMBER >= 0x01010000L)
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
 	cipher_ctxp = EVP_CIPHER_CTX_new();
 #else
 	EVP_CIPHER_CTX_init(cipher_ctxp);

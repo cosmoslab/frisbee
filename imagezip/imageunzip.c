@@ -1396,13 +1396,13 @@ decrypt_buffer(unsigned char *dest, const unsigned char *source,
 	int update_count = 0;
 	int final_count = 0;
 	int error = 0;
-#if (OPENSSL_VERSION_NUMBER < 0x01010000L)
+#if (OPENSSL_VERSION_NUMBER < 0x10100000L)
 	EVP_CIPHER_CTX context;
 #endif
 	EVP_CIPHER_CTX *contextp;
 	EVP_CIPHER const *ecipher;
 
-#if (OPENSSL_VERSION_NUMBER >= 0x01010000L)
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
 	contextp = EVP_CIPHER_CTX_new();
 #else
 	contextp = &context;

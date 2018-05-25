@@ -100,7 +100,7 @@ init_checksum(char *keyfile)
 		goto bad;
 	BN_hex2bn(&iqmp, str);
 	fclose(file);
-#if (OPENSSL_VERSION_NUMBER >= 0x01010000L)
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
 	RSA_set0_key(signature_key, n, e, NULL);
 	RSA_set0_crt_params(signature_key, dmp1, dmq1, iqmp);
 #else
