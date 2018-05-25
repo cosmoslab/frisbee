@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2017 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -1996,8 +1996,9 @@ progmode(int isrestart)
  *
  * This is a prime example of a simple perl script written in C.
  */
-#define XEN_XL	"/usr/sbin/xl"
-#define XEN_XSR	"/usr/sbin/xenstore-read"
+#define XEN_XL	 "/usr/sbin/xl"
+#define XEN_XSR	 "/usr/sbin/xenstore-read"
+#define XEN_XSR2 "/usr/bin/xenstore-read"
 #define XEN_XSW	 "/usr/sbin/xenstore-watch"
 #define XEN_XSW2 "/usr/bin/xenstore-watch"
 
@@ -2148,11 +2149,14 @@ xenmode(int isrestart)
 	char cmdbuf[128], outbuf[256], *cp, *pty = NULL;
 	int domid = -1;
 	static int called = 0;
+	static char *reader = XEN_XSR;
 
 	/* XXX make sure we have the necessary Xen tools */
 	if (!called) {
 		struct stat sb;
-		if (stat(XEN_XL, &sb) < 0 || stat(XEN_XSR, &sb) < 0)
+		if (stat(XEN_XSR, &sb) < 0)
+			reader = XEN_XSR2;
+		if (stat(XEN_XL, &sb) < 0 || stat(reader, &sb) < 0)
 			die("%s or %s do not exist; not running Xen?",
 			    XEN_XL, XEN_XSR);
 		called++;
@@ -2176,12 +2180,12 @@ xenmode(int isrestart)
 	/* see if it is an HVM domain */
 	snprintf(cmdbuf, sizeof(cmdbuf),
 		 "%s /local/domain/%d/hvmloader >/dev/null 2>&1",
-		 XEN_XSR, domid);
+		 reader, domid);
 	if (backtick(cmdbuf, outbuf, sizeof(outbuf)) == 0) {
 		/* HVM: try looking for emulated uart */
 		snprintf(cmdbuf, sizeof(cmdbuf),
 			 "%s /local/domain/%d/serial/0/tty 2>/dev/null",
-			 XEN_XSR, domid);
+			 reader, domid);
 		if (backtick(cmdbuf, outbuf, sizeof(outbuf)) == 0) {
 			if ((cp = index(outbuf, '\n')) != 0)
 				*cp = '\0';
@@ -2205,7 +2209,7 @@ xenmode(int isrestart)
 	if (pty == NULL) {
 		snprintf(cmdbuf, sizeof(cmdbuf),
 			 "%s /local/domain/%d/console/tty 2>/dev/null",
-			 XEN_XSR, domid);
+			 reader, domid);
 		if (backtick(cmdbuf, outbuf, sizeof(outbuf)) == 0) {
 			if ((cp = index(outbuf, '\n')) != 0)
 				*cp = '\0';
