@@ -1396,21 +1396,29 @@ decrypt_buffer(unsigned char *dest, const unsigned char *source,
 	int update_count = 0;
 	int final_count = 0;
 	int error = 0;
+#if (OPENSSL_VERSION_NUMBER < 0x10100000L)
 	EVP_CIPHER_CTX context;
+#endif
+	EVP_CIPHER_CTX *contextp;
 	EVP_CIPHER const *ecipher;
 
-	EVP_CIPHER_CTX_init(&context);
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
+	contextp = EVP_CIPHER_CTX_new();
+#else
+	contextp = &context;
+	EVP_CIPHER_CTX_init(contextp);
+#endif
 	ecipher = EVP_bf_cbc();
 
-	EVP_DecryptInit(&context, ecipher, NULL, header->enc_iv);
-	EVP_CIPHER_CTX_set_key_length(&context, ENC_MAX_KEYLEN);
-	EVP_DecryptInit(&context, NULL, encryption_key, NULL);
+	EVP_DecryptInit(contextp, ecipher, NULL, header->enc_iv);
+	EVP_CIPHER_CTX_set_key_length(contextp, ENC_MAX_KEYLEN);
+	EVP_DecryptInit(contextp, NULL, encryption_key, NULL);
 
 	/* decrypt */
-	EVP_DecryptUpdate(&context, dest, &update_count, source, header->size);
+	EVP_DecryptUpdate(contextp, dest, &update_count, source, header->size);
 
 	/* cleanup */
-	error = EVP_DecryptFinal(&context, dest + update_count, &final_count);
+	error = EVP_DecryptFinal(contextp, dest + update_count, &final_count);
 	if (!error) {
 		char keystr[ENC_MAX_KEYLEN*2 + 1];
 		fprintf(stderr, "Padding was incorrect.\n");
