@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2018 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -734,7 +734,7 @@ main(int argc, char *argv[])
 	 * Generate a random UUID if one was not provided and we are
 	 * not operating in compatibility mode.
 	 */
-	if (!compat && !got_imageid) {
+	if (!info && !compat && !got_imageid) {
 		int fd = open("/dev/urandom", O_RDONLY, 0);
 
 		if (fd < 0 ||
