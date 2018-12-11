@@ -26,6 +26,8 @@ OBJDIR		= @top_builddir@
 SUBDIR		= $(subst $(TESTBED_SRCDIR)/,,$(SRCDIR))
 
 SYSTEM	       := $(shell uname -s)
+LN_S		= /bin/ln -s
+MKDIR_P		= /bin/mkdir -p
 
 include $(OBJDIR)/Makeconf
 
@@ -116,15 +118,35 @@ rack-control-install: rack-control
 	$(INSTALL_PROGRAM) capture-nossl$(EXE) $(DESTDIR)$(INSTALL_SBINDIR)/capture-nossl$(EXE)
 
 rack-control-startup-install: rack-control-install
-	if [ -d "/etc/systemd/system" ]; then \
+	if [ -x "/bin/systemctl" ]; then \
 		$(MKDIR_P) /etc/systemd/system ; \
 		$(INSTALL_PROGRAM) $(SRCDIR)/capture-boss.service /etc/systemd/system ; \
 		$(INSTALL_PROGRAM) $(SRCDIR)/capture-ops.service /etc/systemd/system ; \
 		$(MKDIR_P) /etc/systemd/system/multi-user.target.wants ; \
-		ln -sf ../capture-boss.service \
+		$(LN_S) ../capture-boss.service \
 			/etc/systemd/system/multi-user.target.wants/capture-boss.service ; \
-		ln -sf ../capture-ops.service \
+		$(LN_S) ../capture-ops.service \
 			/etc/systemd/system/multi-user.target.wants/capture-ops.service ; \
+	else \
+		$(MKDIR_P) /etc/init.d ; \
+		$(INSTALL_PROGRAM) $(SRCDIR)/linux-capture-boss.sh /etc/init.d/capture-boss ; \
+		$(INSTALL_PROGRAM) $(SRCDIR)/linux-capture-ops.sh /etc/init.d/capture-ops ; \
+		$(MKDIR_P) /etc/rc2.d ; \
+		(cd /etc/rc2.d && \
+			$(LN_S) -f ../init.d/capture-boss S95capture-boss && \
+			$(LN_S) -f ../init.d/capture-ops S95capture-ops) ; \
+		$(MKDIR_P) /etc/rc3.d ; \
+		(cd /etc/rc3.d && \
+			$(LN_S) -f ../init.d/capture-boss S95capture-boss && \
+			$(LN_S) -f ../init.d/capture-ops S95capture-ops) ; \
+		$(MKDIR_P) /etc/rc1.d ; \
+		(cd /etc/rc1.d && \
+			$(LN_S) -f ../init.d/capture-boss K13capture-boss && \
+			$(LN_S) -f ../init.d/capture-ops K13capture-ops) ; \
+		$(MKDIR_P) /etc/rc6.d ; \
+		(cd /etc/rc6.d && \
+			$(LN_S) -f ../init.d/capture-boss K13capture-boss && \
+			$(LN_S) -f ../init.d/capture-ops K13capture-ops) ; \
 	fi
 
 clean:
