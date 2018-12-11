@@ -158,6 +158,12 @@ onie-dongle:
 onie-dongle-install: 
 	$(MAKE) -C bootinfo onie-dongle-install
 
+rack-control: 
+	$(MAKE) -C capture rack-control
+
+rack-control-install: 
+	$(MAKE) -C capture rack-control-install
+
 subdir-distclean:
 	@$(MAKE) -C imagezip distclean
 

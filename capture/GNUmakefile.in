@@ -39,6 +39,7 @@ tipserv-all:	capture capture-tty capquery caplogserver caplog caplog.bin
 client:		capture capture-nossl capquery caplog caplog.bin
 control:
 subboss:	client
+rack-control:   capture-nossl
 
 include $(TESTBED_SRCDIR)/GNUmakerules
 
@@ -109,6 +110,22 @@ real-install:	all $(INSTALL_SBINDIR)/capserver $(INSTALL_SBINDIR)/capture
 
 tipserv-install:	tipserv-all $(INSTALL_SBINDIR)/capture \
 			$(INSTALL_SBINDIR)/caplogserver
+
+rack-control-install: rack-control
+	-mkdir -p /var/log/tiplogs
+	$(INSTALL_PROGRAM) capture-nossl$(EXE) $(DESTDIR)$(INSTALL_SBINDIR)/capture-nossl$(EXE)
+
+rack-control-startup-install: rack-control-install
+	if [ -d "/etc/systemd/system" ]; then \
+		$(MKDIR_P) /etc/systemd/system ; \
+		$(INSTALL_PROGRAM) $(SRCDIR)/capture-boss.service /etc/systemd/system ; \
+		$(INSTALL_PROGRAM) $(SRCDIR)/capture-ops.service /etc/systemd/system ; \
+		$(MKDIR_P) /etc/systemd/system/multi-user.target.wants ; \
+		ln -sf ../capture-boss.service \
+			/etc/systemd/system/multi-user.target.wants/capture-boss.service ; \
+		ln -sf ../capture-ops.service \
+			/etc/systemd/system/multi-user.target.wants/capture-ops.service ; \
+	fi
 
 clean:
 	rm -f *.o capture capture-tty capserver capquery core errs Errs

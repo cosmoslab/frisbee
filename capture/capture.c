@@ -165,6 +165,7 @@ char   **programargv;
 #define xendomain 0
 #define retryinterval 0
 #define nomodpath 0
+#define insecure 0
 #else
 char		  *Bossnode = BOSSNODE;
 struct sockaddr_in Bossaddr;
@@ -178,6 +179,7 @@ int		   retryinterval = 5000;
 int		   maxretries = 0;
 int		   nomodpath = 0;
 int		   maxfailures = 10;
+int		   insecure = 0;
 int		   failures;
 int		   upportnum = -1, upfd = -1, upfilefd = -1;
 char		   uptmpnam[64];
@@ -384,7 +386,7 @@ main(int argc, char **argv)
 	else
 		Progname = *argv;
 
-	while ((op = getopt(argc, argv, "rds:Hb:ip:c:T:aonu:v:PmMLCl:X:R:y:A")) != EOF)
+	while ((op = getopt(argc, argv, "rds:Hb:ip:c:T:aonu:v:PmMLCl:X:R:y:AI")) != EOF)
 		switch (op) {
 #ifdef	USESOCKETS
 #ifdef  WITHSSL
@@ -401,6 +403,10 @@ main(int argc, char **argv)
 
 		case 'p':
 			serverport = atoi(optarg);
+			break;
+
+		case 'I':
+			insecure = 1;
 			break;
 
 		case 'i':
@@ -614,7 +620,12 @@ main(int argc, char **argv)
 	
 	/* Create wildcard name. */
 	name.sin_family = AF_INET;
-	name.sin_addr.s_addr = INADDR_ANY;
+	if (insecure) {
+		inet_aton("127.0.0.1", &name.sin_addr);
+	}
+	else {
+		name.sin_addr.s_addr = INADDR_ANY;
+	}
 	name.sin_port = 0;
 	if (bind(sockfd, (struct sockaddr *) &name, sizeof(name)))
 		die("bind(): binding stream socket: %s", geterr(errno));
@@ -2799,7 +2810,7 @@ createkey(void)
 	if ((fp = fdopen(fd, "w")) == NULL)
 		die("fdopen(%s)", tmpname, geterr(errno));
 
-	fprintf(fp, "host:   %s\n", ourhostname);
+	fprintf(fp, "host:   %s\n", (insecure ? "localhost" : ourhostname));
 	fprintf(fp, "port:   %d\n", portnum);
 	if (upportnum > 0) {
 		fprintf(fp, "uphost: %s\n", inet_ntoa(relayaddr));
