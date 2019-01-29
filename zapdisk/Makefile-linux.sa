@@ -76,6 +76,7 @@ CLIENTOBJS	+= $(IMAGEZIPDIR)/gpt/gpt.o $(IMAGEZIPDIR)/gpt/crc32.o $(IMAGEZIPDIR)
 endif
 
 CFLAGS		= -O2 -g -Wall -fno-builtin-log $(LINUXOPTS) -I$(IMAGEZIPDIR)
+STRIP		?= strip
 
 all: zapdisk
 
