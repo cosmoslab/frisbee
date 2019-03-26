@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2019 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -590,7 +590,7 @@ main(int argc, char **argv)
 	/*
 	 * Verify the bossnode and stash the address info
 	 */
-	{
+	if (!standalone) {
 		struct hostent *he;
 
 		he = gethostbyname(Bossnode);
