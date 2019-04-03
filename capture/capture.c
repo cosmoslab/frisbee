@@ -1019,9 +1019,9 @@ capture(void)
 	sigset_t omask;
 	char buf[BUFSIZE];
 	struct timeval timeout;
+#ifdef  USESOCKETS
 	int nretries;
-
-
+#endif
 	/*
 	 * XXX for now we make both directions non-blocking.  This is a
 	 * quick hack to achieve the goal that capture never block
@@ -2945,6 +2945,27 @@ handshake(void)
 	 */
 	tipuid = tipown.uid;
 	tipgid = tipown.gid;
+
+	/*
+	 * Watch for bogus values, I have seen this happen and it throws
+	 * everything out of whack. I have a theory, but its too sketchy
+	 * to even mention.
+	 */
+	if ((int)tipuid < 0 || (int)tipuid > 0x1000 * 128) {
+		warning("Whacky value for Owner: %d", tipuid);
+		tipuid = tipgid = 0;
+		err = -1;
+		close(sock);
+		goto done;
+	}
+	if ((int)tipgid < 0 || (int)tipgid > 0x1000 * 128) {
+		warning("Whacky value for Group: %d", tipgid);
+		tipuid = tipgid = 0;
+		err = -1;
+		close(sock);
+		goto done;
+	}
+	
 	if (runfile && chown(Runname, tipuid, tipgid) < 0)
 		die("%s: chown: %s", Runname, geterr(errno));
 
