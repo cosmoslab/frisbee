@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2018 University of Utah and the Flux Group.
+# Copyright (c) 2000-2019 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -24,6 +24,7 @@ SRCDIR		= @srcdir@
 TESTBED_SRCDIR	= @top_srcdir@
 OBJDIR		= @top_builddir@
 SUBDIR		= $(subst $(TESTBED_SRCDIR)/,,$(SRCDIR))
+RPC_CPPFLAGS	= @RPC_CPPFLAGS@
 
 SYSTEM	       := $(shell uname -s)
 LN_S		= /bin/ln -s
@@ -53,7 +54,8 @@ LOGPATH  = $(TBROOT)/log/tiplogs
 # due to the output device/pty being full.
 #
 CFLAGS += -Wall -g -O2 -DLOG_DROPS -I${OBJDIR} -DLOG_TESTBED=$(LOG_TESTBED)
-CFLAGS += -DLOGPATH=\"$(LOGPATH)\" 
+CFLAGS += -DLOGPATH=\"$(LOGPATH)\"
+CFLAGS += $(RPC_CPPFLAGS)
 LDFLAGS  += $(LDSTATIC)
 
 ifeq ($(SYSTEM),Linux)
