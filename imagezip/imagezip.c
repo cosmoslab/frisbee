@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -1157,6 +1157,8 @@ read_image(int fd)
 		if (ignore[i] && (!ISBSD(type) || ignore[i] == ~0)) {
 			fprintf(stderr,
 				"P%d: forcing skip, NOT SAVING.\n", i+1);
+			if (size > 0)
+				addskip(start, size);
 			flags |= IZFLAG_IGNORE;
 		}
 		/*
