@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 
 #
-# Copyright (c) 2000-2017 University of Utah and the Flux Group.
+# Copyright (c) 2000-2019 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -253,26 +253,27 @@ else {
 
 	# XXX hack for NVMe
 	if ($dtype eq "nvd") {
-	    return "/dev/nvme${dunit}n1";
-	}
+	    $device = "/dev/nvme${dunit}n1";
+	} else {
 
-	$dunit -= 4 if ($dtype eq 'ad' && $dunit > 3);
-	$dunit =~ y/01234567/abcdefgh/;
+	    $dunit -= 4 if ($dtype eq 'ad' && $dunit > 3);
+	    $dunit =~ y/01234567/abcdefgh/;
 
-	#
-	# XXX woeful TPM dongle-boot hack.
-	# If we are imaging /dev/sda and dmesg reports that
-	# that device is write-protected, assume it is the boot dongle
-	# and use /dev/sdb instead!
-	#
-	if ($dunit eq "a") {
-	    if (!system("dmesg | fgrep -q '[sda] Write Protect is on'")) {
-		print STDERR "WARNING: suspect dongle-booted node, using sdb instead of sda\n";
-		$dunit = "b";
+	    #
+	    # XXX woeful TPM dongle-boot hack.
+	    # If we are imaging /dev/sda and dmesg reports that
+	    # that device is write-protected, assume it is the boot dongle
+	    # and use /dev/sdb instead!
+	    #
+	    if ($dunit eq "a") {
+		if (!system("dmesg | fgrep -q '[sda] Write Protect is on'")) {
+		    print STDERR "WARNING: suspect dongle-booted node, using sdb instead of sda\n";
+		    $dunit = "b";
+		}
 	    }
-	}
 
-	$device = "/dev/sd$dunit";
+	    $device = "/dev/sd$dunit";
+	}
     }
 }
 

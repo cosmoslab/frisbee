@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2016 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2016, 2019 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -112,9 +112,6 @@ main(int argc, char **argv)
 	openlog("capserver", LOG_PID, LOG_TESTBED);
 	syslog(LOG_NOTICE, "daemon starting");
 
-	if (!debug)
-		(void)daemon(0, 0);
-
 	if (!dbinit()) {
 		syslog(LOG_ERR, "Could not connect to DB!");
 		exit(1);
@@ -226,6 +223,9 @@ main(int argc, char **argv)
 		exit(1);
 	}
 	syslog(LOG_NOTICE, "listening on TCP port %d", ntohs(name.sin_port));
+
+	if (!debug)
+		(void)daemon(0, 0);
 
 	if (!getuid()) {
 		FILE	*fp;

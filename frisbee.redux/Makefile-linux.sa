@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2015 University of Utah and the Flux Group.
+# Copyright (c) 2000-2018 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -98,6 +98,7 @@ endif
 
 CFLAGS		= -O2 -g -Wall -fno-builtin-log \
 		  $(PTHREADCFLAGS) $(LINUXOPTS) -DSTATS -DMASTER_SERVER
+STRIP		?= strip
 
 #
 # Define this if your implementation of cond_vars works well
@@ -126,17 +127,17 @@ all: frisbee frisupload frisbeed
 frisbee: $(CLIENTOBJS)
 	$(CC) $(LDFLAGS) $(CLIENTFLAGS) $(CLIENTOBJS) $(CLIENTLIBS) $(IUZLIBS) -o frisbee
 	cp frisbee frisbee.debug
-	strip frisbee
+	$(STRIP) frisbee
 
 frisupload: $(UPLOADOBJS)
 	$(CC) $(LDFLAGS) $(UPLOADFLAGS) $(UPLOADOBJS) $(UPLOADLIBS) -o frisupload
 	cp frisupload frisupload.debug
-	strip frisupload
+	$(STRIP) frisupload
 
 frisbeed: $(SERVEROBJS)
 	$(CC) $(LDFLAGS) $(SERVERFLAGS) $(SERVEROBJS) $(SERVERLIBS) -o frisbeed
 	cp frisbeed frisbeed.debug
-	strip frisbeed
+	$(STRIP) frisbeed
 
 
 event.o:	$(SRCDIR)/event.c decls.h log.h event.h

@@ -39,7 +39,7 @@ configureit:
 	wget -q -N http://www.emulab.net/distributions/ntfsprogs-2.0.0.tar.gz
 	tar zxf ntfsprogs-2.0.0.tar.gz
 	patch -sN -d $(NTFSDIR) -p1 < ntfsprogs-2.0.0.patch
-	(cd $(NTFSDIR); ./configure)
+	(cd $(NTFSDIR); ./configure $(NTFS_CONFIGURE_OPTS))
 	cp $(NTFSDIR)/config.h $(NTFSDIR)/include
 	touch configureit
 

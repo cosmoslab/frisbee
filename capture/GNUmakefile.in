@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2018 University of Utah and the Flux Group.
+# Copyright (c) 2000-2019 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -24,8 +24,11 @@ SRCDIR		= @srcdir@
 TESTBED_SRCDIR	= @top_srcdir@
 OBJDIR		= @top_builddir@
 SUBDIR		= $(subst $(TESTBED_SRCDIR)/,,$(SRCDIR))
+RPC_CPPFLAGS	= @RPC_CPPFLAGS@
 
 SYSTEM	       := $(shell uname -s)
+LN_S		= /bin/ln -s
+MKDIR_P		= /bin/mkdir -p
 
 include $(OBJDIR)/Makeconf
 
@@ -39,6 +42,7 @@ tipserv-all:	capture capture-tty capquery caplogserver caplog caplog.bin
 client:		capture capture-nossl capquery caplog caplog.bin
 control:
 subboss:	client
+rack-control:   capture-nossl
 
 include $(TESTBED_SRCDIR)/GNUmakerules
 
@@ -50,7 +54,8 @@ LOGPATH  = $(TBROOT)/log/tiplogs
 # due to the output device/pty being full.
 #
 CFLAGS += -Wall -g -O2 -DLOG_DROPS -I${OBJDIR} -DLOG_TESTBED=$(LOG_TESTBED)
-CFLAGS += -DLOGPATH=\"$(LOGPATH)\" 
+CFLAGS += -DLOGPATH=\"$(LOGPATH)\"
+CFLAGS += $(RPC_CPPFLAGS)
 LDFLAGS  += $(LDSTATIC)
 
 ifeq ($(SYSTEM),Linux)
@@ -109,6 +114,42 @@ real-install:	all $(INSTALL_SBINDIR)/capserver $(INSTALL_SBINDIR)/capture
 
 tipserv-install:	tipserv-all $(INSTALL_SBINDIR)/capture \
 			$(INSTALL_SBINDIR)/caplogserver
+
+rack-control-install: rack-control
+	-mkdir -p /var/log/tiplogs
+	$(INSTALL_PROGRAM) capture-nossl$(EXE) $(DESTDIR)$(INSTALL_SBINDIR)/capture-nossl$(EXE)
+
+rack-control-startup-install: rack-control-install
+	if [ -x "/bin/systemctl" ]; then \
+		$(MKDIR_P) /etc/systemd/system ; \
+		$(INSTALL_PROGRAM) $(SRCDIR)/capture-boss.service /etc/systemd/system ; \
+		$(INSTALL_PROGRAM) $(SRCDIR)/capture-ops.service /etc/systemd/system ; \
+		$(MKDIR_P) /etc/systemd/system/multi-user.target.wants ; \
+		$(LN_S) ../capture-boss.service \
+			/etc/systemd/system/multi-user.target.wants/capture-boss.service ; \
+		$(LN_S) ../capture-ops.service \
+			/etc/systemd/system/multi-user.target.wants/capture-ops.service ; \
+	else \
+		$(MKDIR_P) /etc/init.d ; \
+		$(INSTALL_PROGRAM) $(SRCDIR)/linux-capture-boss.sh /etc/init.d/capture-boss ; \
+		$(INSTALL_PROGRAM) $(SRCDIR)/linux-capture-ops.sh /etc/init.d/capture-ops ; \
+		$(MKDIR_P) /etc/rc2.d ; \
+		(cd /etc/rc2.d && \
+			$(LN_S) -f ../init.d/capture-boss S95capture-boss && \
+			$(LN_S) -f ../init.d/capture-ops S95capture-ops) ; \
+		$(MKDIR_P) /etc/rc3.d ; \
+		(cd /etc/rc3.d && \
+			$(LN_S) -f ../init.d/capture-boss S95capture-boss && \
+			$(LN_S) -f ../init.d/capture-ops S95capture-ops) ; \
+		$(MKDIR_P) /etc/rc1.d ; \
+		(cd /etc/rc1.d && \
+			$(LN_S) -f ../init.d/capture-boss K13capture-boss && \
+			$(LN_S) -f ../init.d/capture-ops K13capture-ops) ; \
+		$(MKDIR_P) /etc/rc6.d ; \
+		(cd /etc/rc6.d && \
+			$(LN_S) -f ../init.d/capture-boss K13capture-boss && \
+			$(LN_S) -f ../init.d/capture-ops K13capture-ops) ; \
+	fi
 
 clean:
 	rm -f *.o capture capture-tty capserver capquery core errs Errs
