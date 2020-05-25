@@ -137,14 +137,19 @@ SERVEROBJS	= server.o $(SHAREDOBJS)
 #
 # Master server configuration
 #
-# Default master server config
-MSERVERFLAGS	= -DUSE_NULL_CONFIG -DUSE_UPLOAD_CONFIG $(CFLAGS) -I$(OBJDIR)
-MSERVEROBJS	= mserver.o $(SHAREDOBJS) config.o config_null.o config_upload.o
+
+# Default NULL master server config
+NC_MSERVERFLAGS	= -DUSE_NULL_CONFIG -DUSE_UPLOAD_CONFIG $(CFLAGS) -I$(OBJDIR)
+NC_MSERVEROBJS	= nc_mserver.o $(SHAREDOBJS) nc_config.o config_null.o config_upload.o
 ifeq ($(SYSTEM),Linux)
-MSERVERLIBS	= -lrt
+NC_MSERVERLIBS	= -lrt
 else
-MSERVERLIBS	= 
+NC_MSERVERLIBS	= 
 endif
+
+MSERVERFLAGS = $(NC_MSERVERFLAGS)
+MSERVEROBJS  = mserver.o $(SHAREDOBJS) config.o config_null.o config_upload.o
+MSERVERLIBS  = $(NC_MSERVERLIBS)
 
 # Master server based image uploader client
 UPLOADFLAGS	= $(CFLAGS)
@@ -276,6 +281,9 @@ frisuploadd-debug: $(UPLOADDOBJS)
 mfrisbeed-debug: $(MSERVEROBJS)
 	$(CC) $(LDFLAGS) $(MSERVERFLAGS) $(MSERVEROBJS) $(MSERVERLIBS) -o $@
 
+mfrisbeed-null-debug: $(NC_MSERVEROBJS)
+	$(CC) $(LDFLAGS) $(NC_MSERVERFLAGS) $(NC_MSERVEROBJS) $(NC_MSERVERLIBS) -o $@
+
 frisuploader.o: $(SRCDIR)/frisuploader.c decls.h uploadio.h
 	$(CC) -c $(UPLOADDFLAGS) $(SRCDIR)/frisuploader.c
 upload.o: $(SRCDIR)/upload.c decls.h utils.h uploadio.h
@@ -292,6 +300,12 @@ config_null.o: $(SRCDIR)/config_null.c configdefs.h log.h
 	$(CC) -c $(MSERVERFLAGS) $(SRCDIR)/config_null.c
 config_upload.o: $(SRCDIR)/config_upload.c configdefs.h log.h
 	$(CC) -c $(MSERVERFLAGS) $(SRCDIR)/config_upload.c
+
+# XXX special versions of .o files for forced null-config build
+nc_mserver.o: $(SRCDIR)/mserver.c decls.h configdefs.h utils.h
+	$(CC) -c $(NC_MSERVERFLAGS) -o nc_mserver.o $(SRCDIR)/mserver.c
+nc_config.o: $(SRCDIR)/config.c configdefs.h log.h
+	$(CC) -c $(NC_MSERVERFLAGS) -o nc_config.o $(SRCDIR)/config.c
 
 log.o:		$(SRCDIR)/log.c decls.h log.h
 	$(CC) $(CFLAGS) -DLOG_TESTBED=$(LOG_TESTBED) -c $(SRCDIR)/log.c
@@ -323,7 +337,8 @@ log.o:		decls.h log.h
 network.o:	decls.h utils.h
 trace.o:	decls.h trace.h log.h
 
-install:	$(INSTALL_SBINDIR)/mfrisbeed $(INSTALL_SBINDIR)/frisbeed $(INSTALL_SBINDIR)/frisbee $(INSTALL_SBINDIR)/frisuploadd
+install:	$(INSTALL_SBINDIR)/mfrisbeed $(INSTALL_SBINDIR)/frisbeed $(INSTALL_SBINDIR)/frisbee $(INSTALL_SBINDIR)/frisuploadd mfrisbeed-null
+	$(INSTALL_PROGRAM) mfrisbeed-null $(INSTALL_DIR)/opsdir/sbin/mfrisbeed
 
 control-install: control
 	$(INSTALL_PROGRAM) mfrisbeed $(INSTALL_SBINDIR)/mfrisbeed
@@ -349,7 +364,7 @@ frisbee-mfs-install: frisbee-mfs
 
 clean:
 	/bin/rm -f *.o *.a *-debug
-	/bin/rm -f frisbee frisbeed mfrisbeed frisupload frisuploadd
+	/bin/rm -f frisbee frisbeed mfrisbeed mfrisbeed-null frisupload frisuploadd
 	/bin/rm -f frisbee.tar frisbee.tar.gz
 	/bin/rm -rf frisbee-dist
 
