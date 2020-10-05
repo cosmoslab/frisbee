@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -1226,7 +1226,7 @@ ClientNetPutRequest(in_addr_t sip, in_port_t sport,
 	msg.hdr.type = htonl(MS_MSGTYPE_PUTREQUEST);
 	msg.body.putrequest.hostip = htonl(hostip);
 	if (askonly)
-		msg.body.putrequest.status = 1;
+		msg.body.putrequest.status = askonly;
 	len = strlen(imageid);
 	if (len > MS_MAXIDLEN)
 		len = MS_MAXIDLEN;
@@ -1337,7 +1337,7 @@ igmp_csum(struct igmp *pkt)
 static int
 igmp_opensocket(void)
 {
-	char ra[4];
+	unsigned char ra[4];
 	int ttl = 1;
 	int sock;
 

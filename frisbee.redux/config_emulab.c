@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -36,6 +36,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <mysql/mysql.h>
+#include "decls.h"
 #include "log.h"
 #include "configdefs.h"
 
@@ -2318,8 +2319,8 @@ emulab_canonicalize_imageid(char *path)
 {
 	MYSQL_RES *res;
 	MYSQL_ROW row;
-	char *iid = NULL, *ipath = NULL;
-	int len;
+	char *iid = NULL, *ipath, *dpath, *fname, *cp;
+	int len, issig = 0, version;
 
 	/*
 	 * The only non-path (imageid) conversion we do right now is
@@ -2333,6 +2334,10 @@ emulab_canonicalize_imageid(char *path)
 		assert(ipid != NULL);
 		assert(iname != NULL);
 
+		if (debug)
+			FrisInfo("canonicalize(%s): pid=%s, name=%s, vers=%s, meta=%s",
+				 path, ipid, iname,
+				 ivers ? ivers : "", imeta ? imeta : "");
 		if (ivers == NULL) {
 			res = mydb_query("SELECT i.version FROM "
 					 "  images AS i, image_versions AS v "
@@ -2364,67 +2369,226 @@ emulab_canonicalize_imageid(char *path)
 	}
 
 	/*
-	 * We have a path.
-	 * First see if it might be a sigfile and strip off the ".sig"
-	 * so we can lookup the image name.
+	 * We have a path to an image (or image signature) file.
+	 *
+	 * Unfortunately, we cannot just match this to the path column in
+	 * the DB, because that path might be a complete path for the image
+	 * file or it might be the path to the image directory in which all
+	 * versions of the image exist. String parsing in C, oh joy!
 	 */
-	len = strlen(path);
-	if (len > 4 && strcmp(path+len-4, ".sig") == 0) {
-		ipath = mystrdup(path);
-		ipath[len-4] = '\0';
+	ipath = mystrdup(path);
+	len = strlen(ipath);
+
+	/*
+	 * Remember if it is a sigfile, and strip off the .sig.
+	 */
+	if (len > 4 && strcmp(ipath+len-4, ".sig") == 0) {
+		len -= 4;
+		ipath[len] = '\0';
+		issig = 1;
 	}
 
 	/*
-	 * Try to do everything is one swell foop.
+	 * First see if this is the uploader_path for some image
+	 */
+	res = mydb_query("SELECT CONCAT(pid,'%c',imagename,'%c',version) "
+			 "FROM image_versions"
+			 "  WHERE deleted IS NULL AND uploader_path='%s'",
+			 1, IID_SEP_NAME, IID_SEP_VERS, ipath);
+	if (res != NULL) {
+		free(ipath);
+		if (mysql_num_rows(res) > 0)
+			goto constructid;
+		mysql_free_result(res);
+	}
+
+	/*
+	 * Next try looking up based on the full path.
 	 * Look up the path in image_versions, returning the version number
 	 * and a string composed of <pid>/<imagename>:<version>.
 	 */
 	res = mydb_query("SELECT CONCAT(pid,'%c',imagename,'%c',version) "
 			 "FROM image_versions"
 			 "  WHERE deleted IS NULL AND path='%s'",
-			 1, IID_SEP_NAME, IID_SEP_VERS, ipath ? ipath : path);
-	if (res == NULL) {
-		if (ipath)
-			free(ipath);
+			 1, IID_SEP_NAME, IID_SEP_VERS, ipath);
+	if (res != NULL) {
+		free(ipath);
+		if (mysql_num_rows(res) > 0)
+			goto constructid;
+		mysql_free_result(res);
+	}
+
+	/*
+	 * That didn't work, try looking up by image directory and name. 
+	 * Split off the directory part (including the final '/').
+	 * Note that we know there is at least one '/' since we start with one.
+	 */
+	dpath = mystrdup(ipath);
+	cp = strrchr(dpath, '/');
+	fname = mystrdup(cp + 1);
+	cp[1] = '\0';
+	free(ipath);
+
+	/*
+	 * Image file names in an image directory (IMAGEDIRS) setup look like:
+	 * 
+	 *    <imagename>.ndz[:<vers>]
+	 */
+	if (strlen(fname) < 5 || (cp = strstr(fname, ".ndz")) == NULL) {
+		if (debug)
+			FrisInfo("canonicalize(%s): ill-formed fname '%s'", path, fname);
+		free(fname);
+		free(dpath);
 		return NULL;
 	}
-	if (mysql_num_rows(res) == 0) {
-		mysql_free_result(res);
-		if (ipath)
-			free(ipath);
+	*cp = '\0';
+	cp += 4;
+	if (cp[0] == '\0')
+		version = 0;
+	else if (cp[0] == ':')
+		version = atoi(cp+1);
+	else {
+		if (debug)
+			FrisInfo("canonicalize(%s): ill-formed version in fname '%s'",
+				 path, fname);
+		free(fname);
+		free(dpath);
 		return NULL;
 	}
 
+	if (debug)
+		FrisInfo("canonicalize(%s): dpath=%s, fname=%s, version=%d",
+			 path, dpath, fname, version);
+
+	res = mydb_query("SELECT CONCAT(pid,'%c',imagename,'%c',version) "
+			 "FROM image_versions"
+			 "  WHERE deleted IS NULL AND path='%s'"
+			 "    AND imagename='%s' AND version=%d",
+			 1, IID_SEP_NAME, IID_SEP_VERS, dpath, fname, version);
+	free(fname);
+	free(dpath);
+	if (res != NULL) {
+		if (mysql_num_rows(res) > 0)
+			goto constructid;
+		mysql_free_result(res);
+	}
+
+	/*
+	 * Ah well, it was a good try.
+	 */
+	return NULL;
+
+	/*
+	 * We got a hit in the DB
+	 */
+ constructid:
 	/* XXX if rows > 1, we just return info from the first */
 	row = mysql_fetch_row(res);
 	if (row[0] == NULL) {
 		mysql_free_result(res);
-		if (ipath)
-			free(ipath);
 		return NULL;
 	}
 	iid = mystrdup(row[0]);
 	mysql_free_result(res);
  
 	/*
-	 * Tack on ",sig" to indicate that we want the signature for the
-	 * indicated image.
+	 * Tack on ",sig" to indicate that we want the signature
+	 * for the indicated image.
 	 */
-	if (ipath != NULL) {
-		if (iid != NULL) {
-			char *niid;
-			len = strlen(iid);
-			niid = mymalloc(len + 4);
-			strcpy(niid, iid);
-			niid[len++] = IID_SEP_META;
-			strcpy(&niid[len], "sig");
-			free(iid);
-			iid = niid;
-		}
-		free(ipath);
+	if (issig && iid != NULL) {
+		char *niid;
+		len = strlen(iid);
+		niid = mymalloc(len + 4);
+		strcpy(niid, iid);
+		niid[len++] = IID_SEP_META;
+		strcpy(&niid[len], "sig");
+		free(iid);
+		iid = niid;
 	}
 
 	return iid;
+}
+
+static int
+emulab_set_upload_status(struct config_imageinfo *ii, int status)
+{
+	char *imageid;
+	char *pid, *name, *vers, *meta;
+	int imageidx;
+	char msgbuf[256];	/* tinytext size */
+
+	if (ii->imageid == NULL)
+		return 1;
+
+	FrisLog("%s: Recording upload status %d", ii->imageid, status);
+
+	imageid = emulab_canonicalize_imageid(ii->imageid);
+	if (imageid == NULL) {
+		FrisError("%s: set_upload_status: "
+			  "could not map to a valid image", ii->imageid);
+		return 1;
+	}
+
+	parse_imageid(imageid, &pid, &name, &vers, &meta);
+	imageidx = emulab_imageid(pid, name);
+	if (debug)
+		FrisLog("%s: set_upload_status: "
+			"pid=%s, name=%s, vers=%s, meta=%s => %d", ii->imageid,
+			pid, name, vers ? vers : "", meta ? meta : "", imageidx);
+
+	if (imageidx) {
+		char *stat;
+
+		switch (status) {
+		case UE_NOERROR:
+			stat = "";
+			break;
+		case UE_OTHER:
+			stat = "terminated";
+			break;
+		case UE_TOOLONG:
+			stat = "timed-out";
+			break;
+		case UE_TOOBIG:
+			stat = "exceeded max size";
+			break;
+		case UE_NOSPACE:
+			stat = "exceeded quota";
+			break;
+		case UE_CONNERR:
+			stat = "connection error";
+			break;
+		case UE_FILEERR:
+			stat = "image file error";
+			break;
+		default:
+			stat = "unknown error";
+			break;
+		}
+		strncpy(msgbuf, stat, sizeof(msgbuf)-1);
+
+		if (!mydb_update("UPDATE image_versions"
+				 "  SET uploader_status='%s'"
+				 "  WHERE imageid=%d AND pid='%s'"
+				 "    AND imagename='%s' AND version='%s'",
+				 msgbuf, imageidx, pid, name, vers)) {
+			FrisError("%s: set_upload_status: "
+				  "could not update DB status", ii->imageid);
+			imageidx = 0;
+		}
+	} else {
+		FrisError("%s: set_upload_status: "
+			  "could not map to a current image", ii->imageid);
+	}
+	free(pid);
+	free(name);
+	if (vers)
+		free(vers);
+	if (meta)
+		free(meta);
+	free(imageid);
+
+	return imageidx ? 0 : 1;
 }
 
 static void
@@ -2484,6 +2648,7 @@ struct config emulab_config = {
 	emulab_free_host_authinfo,
 	emulab_get_server_address,
 	emulab_canonicalize_imageid,
+	emulab_set_upload_status,
 	emulab_save,
 	emulab_restore,
 	emulab_free,

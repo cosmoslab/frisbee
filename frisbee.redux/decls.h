@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -519,6 +519,18 @@ typedef struct {
 #define MS_ERROR_BADMTIME	9	/* attempt to set bad mtime */
 #define MS_ERROR_NOTIMPL	10	/* operation not implemented */
 #endif
+
+/*
+ * Frisbee uploader exit codes.
+ * These allow us to distinguish and report errors more accurately.
+ */
+#define UE_NOERROR		0	/* no error */
+#define UE_OTHER		1	/* unspecified error */
+#define UE_TOOLONG		2	/* exceeded max upload time */
+#define UE_TOOBIG		3	/* exceeded max upload size */
+#define UE_NOSPACE		4	/* FS full or quota exceeded */
+#define UE_CONNERR		5	/* connection error; e.g., timeout */
+#define UE_FILEERR		6	/* file error; e.g., cannot open */
 
 /*
  * Protos.

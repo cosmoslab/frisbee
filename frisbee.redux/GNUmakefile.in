@@ -339,6 +339,7 @@ trace.o:	decls.h trace.h log.h
 
 install:	$(INSTALL_SBINDIR)/mfrisbeed $(INSTALL_SBINDIR)/frisbeed $(INSTALL_SBINDIR)/frisbee $(INSTALL_SBINDIR)/frisuploadd mfrisbeed-null
 	$(INSTALL_PROGRAM) mfrisbeed-null $(INSTALL_DIR)/opsdir/sbin/mfrisbeed
+	$(INSTALL_PROGRAM) frisuploadd $(INSTALL_DIR)/opsdir/sbin/frisuploadd
 
 control-install: control
 	$(INSTALL_PROGRAM) mfrisbeed $(INSTALL_SBINDIR)/mfrisbeed

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -104,6 +104,7 @@ struct config {
 					 in_addr_t *, in_port_t *, in_port_t *,
 					 int *);
 	char *(*config_canonicalize_imageid)(char *);
+	int (*config_set_upload_status)(struct config_imageinfo *, int);
 	void *(*config_save)(void);
 	int (*config_restore)(void *);
 	void (*config_free)(void *);
@@ -125,6 +126,7 @@ extern int	config_get_server_address(struct config_imageinfo *, int, int,
 					  in_addr_t *, in_port_t *, in_port_t *,
 					  int *);
 extern char *	config_canonicalize_imageid(char *);
+extern int	config_set_upload_status(struct config_imageinfo *, int);
 extern void *	config_save(void);
 extern int	config_restore(void *);
 extern void	config_dump(FILE *);

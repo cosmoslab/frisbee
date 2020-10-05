@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -233,6 +233,13 @@ config_canonicalize_imageid(char *imageid)
 {
 	assert(myconfig != NULL);
 	return myconfig->config_canonicalize_imageid(imageid);
+}
+
+int
+config_set_upload_status(struct config_imageinfo *ii, int status)
+{
+	assert(myconfig != NULL);
+	return myconfig->config_set_upload_status(ii, status);
 }
 
 void
