@@ -337,9 +337,17 @@ log.o:		decls.h log.h
 network.o:	decls.h utils.h
 trace.o:	decls.h trace.h log.h
 
-install:	$(INSTALL_SBINDIR)/mfrisbeed $(INSTALL_SBINDIR)/frisbeed $(INSTALL_SBINDIR)/frisbee $(INSTALL_SBINDIR)/frisuploadd mfrisbeed-null
+$(INSTALL_DIR)/opsdir/sbin/mfrisbeed: mfrisbeed-null
+	@echo "Installing $<"
+	-mkdir -p $(INSTALL_DIR)/opsdir/sbin
 	$(INSTALL_PROGRAM) mfrisbeed-null $(INSTALL_DIR)/opsdir/sbin/mfrisbeed
-	$(INSTALL_PROGRAM) frisuploadd $(INSTALL_DIR)/opsdir/sbin/frisuploadd
+
+$(INSTALL_DIR)/opsdir/sbin/%: %
+	@echo "Installing $<"
+	-mkdir -p $(INSTALL_DIR)/opsdir/sbin
+	$(INSTALL_PROGRAM) $< $@
+
+install:	$(INSTALL_SBINDIR)/mfrisbeed $(INSTALL_SBINDIR)/frisbeed $(INSTALL_SBINDIR)/frisbee $(INSTALL_SBINDIR)/frisuploadd $(INSTALL_DIR)/opsdir/sbin/mfrisbeed $(INSTALL_DIR)/opsdir/sbin/frisuploadd
 
 control-install: control
 	$(INSTALL_PROGRAM) mfrisbeed $(INSTALL_SBINDIR)/mfrisbeed
