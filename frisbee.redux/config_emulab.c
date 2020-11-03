@@ -725,6 +725,52 @@ emulab_get_server_address(struct config_imageinfo *ii, int methods, int first,
 }
 
 /*
+ * Returns one if the given path is the uploader_path from some image.
+ * If imageid is non-NULL, return the <pid>/<name>:<version> string
+ * for the image in question.
+ */
+static int
+image_from_upath(char *path, char **imageid)
+{
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+
+	/*
+	 * XXX right now, the path may contain an AMD prefix.
+	 * Strip it off if so.
+	 */
+	if (AMDROOT) {
+		int arlen = strlen(AMDROOT);
+		if (strncmp(AMDROOT, path, arlen) == 0) {
+			path += arlen;
+			assert(path[0] == '/');
+		}
+	}
+
+	/*
+	 * Look the path up, conveniently composing a canonical name in
+	 * the process.
+	 */
+	res = mydb_query("SELECT CONCAT(pid,'%c',imagename,'%c',version) "
+			 "FROM image_versions"
+			 "  WHERE deleted IS NULL AND uploader_path='%s'",
+			 1, IID_SEP_NAME, IID_SEP_VERS, path);
+	if (res == NULL || mysql_num_rows(res) == 0) {
+		if (res)
+			mysql_free_result(res);
+		return 0;
+	}
+	if (imageid != NULL) {
+		/* XXX if rows > 1, we just return info from the first */
+		row = mysql_fetch_row(res);
+		assert(row[0] != NULL);
+		*imageid = mystrdup(row[0]);
+		mysql_free_result(res);
+	}
+	return 1;
+}
+
+/*
  * Check and see if the given image is in the set of standard directories
  * to which this node (actually pid/gid/eid/uid) has access.  The set is:
  *  - /share		      (GET only)
@@ -946,6 +992,10 @@ allow_stddirs(char *imageid,
 			ci->gids[j] = ei->sgids[j];
 		ci->ngids = ei->ngids;
 		set_put_values(put, 0);
+		if (ci->put_oldversion && image_from_upath(fpath, NULL)) {
+			free(ci->put_oldversion);
+			ci->put_oldversion = NULL;
+		}
 		ci->extra = NULL;
 	} else if (put != NULL && debug)
 		FrisInfo("authfail: image '%s' not in acceptable directory for '%s/%s'",
@@ -2390,18 +2440,11 @@ emulab_canonicalize_imageid(char *path)
 	}
 
 	/*
-	 * First see if this is the uploader_path for some image
+	 * First see if this is the uploader_path for some image.
 	 */
-	res = mydb_query("SELECT CONCAT(pid,'%c',imagename,'%c',version) "
-			 "FROM image_versions"
-			 "  WHERE deleted IS NULL AND uploader_path='%s'",
-			 1, IID_SEP_NAME, IID_SEP_VERS, ipath);
-	if (res != NULL) {
-		if (mysql_num_rows(res) > 0) {
-			free(ipath);
-			goto constructid;
-		}
-		mysql_free_result(res);
+	if (image_from_upath(ipath, &iid)) {
+		free(ipath);
+		goto constructid2;
 	}
 
 	/*
@@ -2439,7 +2482,8 @@ emulab_canonicalize_imageid(char *path)
 	 */
 	if (strlen(fname) < 5 || (cp = strstr(fname, ".ndz")) == NULL) {
 		if (debug)
-			FrisInfo("canonicalize(%s): ill-formed fname '%s'", path, fname);
+			FrisInfo("canonicalize(%s): ill-formed fname '%s'",
+				 path, fname);
 		free(fname);
 		free(dpath);
 		return NULL;
@@ -2498,6 +2542,7 @@ emulab_canonicalize_imageid(char *path)
 	 * Tack on ",sig" to indicate that we want the signature
 	 * for the indicated image.
 	 */
+ constructid2:
 	if (issig && iid != NULL) {
 		char *niid;
 		len = strlen(iid);
@@ -2537,7 +2582,8 @@ emulab_set_upload_status(struct config_imageinfo *ii, int status)
 	if (debug)
 		FrisLog("%s: set_upload_status: "
 			"pid=%s, name=%s, vers=%s, meta=%s => %d", ii->imageid,
-			pid, name, vers ? vers : "", meta ? meta : "", imageidx);
+			pid, name, vers ? vers : "", meta ? meta : "",
+			imageidx);
 
 	if (imageidx) {
 		char *stat;
