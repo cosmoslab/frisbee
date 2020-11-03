@@ -546,11 +546,12 @@ emulab_free_host_authinfo(struct config_host_authinfo *ai)
 	if (ai->imageinfo != NULL) {
 		for (i = 0; i < ai->numimages; i++) {
 			FREE(ai->imageinfo[i].imageid);
+			FREE(ai->imageinfo[i].dir);
 			FREE(ai->imageinfo[i].path);
 			FREE(ai->imageinfo[i].sig);
 			FREE(ai->imageinfo[i].get_options);
-			FREE(ai->imageinfo[i].put_oldversion);
 			FREE(ai->imageinfo[i].put_options);
+			FREE(ai->imageinfo[i].put_oldversion);
 			FREE(ai->imageinfo[i].pget_options);
 			FREE(ai->imageinfo[i].extra);
 		}
@@ -2396,9 +2397,10 @@ emulab_canonicalize_imageid(char *path)
 			 "  WHERE deleted IS NULL AND uploader_path='%s'",
 			 1, IID_SEP_NAME, IID_SEP_VERS, ipath);
 	if (res != NULL) {
-		free(ipath);
-		if (mysql_num_rows(res) > 0)
+		if (mysql_num_rows(res) > 0) {
+			free(ipath);
 			goto constructid;
+		}
 		mysql_free_result(res);
 	}
 
@@ -2412,9 +2414,10 @@ emulab_canonicalize_imageid(char *path)
 			 "  WHERE deleted IS NULL AND path='%s'",
 			 1, IID_SEP_NAME, IID_SEP_VERS, ipath);
 	if (res != NULL) {
-		free(ipath);
-		if (mysql_num_rows(res) > 0)
+		if (mysql_num_rows(res) > 0) {
+			free(ipath);
 			goto constructid;
+		}
 		mysql_free_result(res);
 	}
 
