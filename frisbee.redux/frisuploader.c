@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2015 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -220,6 +220,11 @@ recv_timeout(int sig)
 }
 
 /*
+ * Receive a file.
+ * If 'maxsize' is 0, then we read til EOF. Otherwise it indicates the
+ * maximum size we are willing to receive. Returns a designated UE_*
+ * exit code.
+ *
  * XXX multithread (socket read, file write)
  */
 static int
@@ -231,10 +236,17 @@ recv_file()
 	volatile int fd = -1;
 	volatile uint64_t remaining = maxsize;
 	struct timeval st, et;
-	int rv = 1;
+	int rv = UE_OTHER;
 	char *stat;
 
 	gettimeofday(&st, NULL);	/* XXX for early errors */
+
+	/*
+	 * If a maximum size was specified, allow us to read slightly more
+	 * than that in order to correctly identify exceeding that limit.
+	 */
+	if (maxsize)
+		remaining += 1;
 
 	/*
 	 * If we have an overall timeout (timeout > 0) then just set the
@@ -246,7 +258,7 @@ recv_file()
 		struct itimerval it;
 
 		if (sigsetjmp(toenv, 1)) {
-			rv = 2;
+			rv = UE_TOOLONG;
 			goto done;
 		}
 		it.it_value.tv_sec = timeout;
@@ -269,12 +281,14 @@ recv_file()
 		fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, 0644);
 	if (fd < 0) {
 		FrisPwarning(path);
+		rv = UE_FILEERR;
 		goto done;
 	}
 
 	conn = conn_accept_tcp(sock, &clientip, idletimeout, idletimeout);
 	if (conn == NULL) {
 		FrisError("Error accepting from %s", inet_ntoa(clientip));
+		rv = UE_CONNERR;
 		goto done;
 	}
 	FrisLog("%s: upload from %s started", path, inet_ntoa(clientip));
@@ -290,6 +304,7 @@ recv_file()
 		ncc = conn_read(conn, wbuf, cc);
 		if (ncc < 0) {
 			FrisPwarning("socket read");
+			rv = UE_CONNERR;
 			goto done;
 		}
 		if (ncc == 0)
@@ -298,19 +313,40 @@ recv_file()
 		cc = write(fd, wbuf, ncc);
 		if (cc < 0) {
 			FrisPwarning("file write");
+			switch (errno) {
+			case EFBIG:
+			case ENOSPC:
+			case EDQUOT:
+				rv = UE_NOSPACE;
+				break;
+			default:
+				rv = UE_FILEERR;
+				break;
+			}
 			goto done;
 		}
 		remaining -= cc;
 		if (cc != ncc) {
 			FrisError("short write on file (%d != %d)", cc, ncc);
+			rv = UE_FILEERR;
 			goto done;
 		}
 	}
 	/*
-	 * Note that coming up short (remaining > 0) is not an error
-	 * unless we timed out.
+	 * If a maxsize was specified and remaining is zero, then we have
+	 * read slightly more than was allowed and we signal a maxsize
+	 * exceeded error.
 	 */
-	rv = conn_timeout(conn) ? 2 : 0;
+	if (maxsize && remaining == 0)
+		rv = UE_TOOBIG;
+	/*
+	 * Otherwise, coming up short (maxsize == 0 or remaining > 0)
+	 * is not an error unless we timed out.
+	 */
+	else if (conn_timeout(conn))
+		rv = UE_TOOLONG;
+	else
+		rv = UE_NOERROR;
 
  done:
 	gettimeofday(&et, NULL);
@@ -327,7 +363,7 @@ recv_file()
 	if (fd >= 0) {
 		if (rv == 0 && fsync(fd) != 0) {
 			perror(path);
-			rv = 1;
+			rv = UE_FILEERR;
 		}
 		close(fd);
 	}
@@ -336,7 +372,32 @@ recv_file()
 
 	timersub(&et, &st, &et);
 
-	stat = rv == 0 ? "completed" : (rv == 1 ? "terminated" : "timed-out");
+	if (maxsize && remaining)
+		remaining -= 1;
+
+	switch (rv) {
+	case UE_NOERROR:
+		stat = "completed";
+		break;
+	case UE_OTHER:
+		stat = "terminated";
+		break;
+	case UE_TOOLONG:
+		stat = "timed-out";
+		break;
+	case UE_TOOBIG:
+		stat = "exceeded max size";
+		break;
+	case UE_NOSPACE:
+		stat = "exceeded quota";
+		break;
+	case UE_CONNERR:
+		stat = "connection error";
+		break;
+	case UE_FILEERR:
+		stat = "image file error";
+		break;
+	}
 	if (maxsize && remaining)
 		FrisLog("%s: upload %s after %llu (of max %llu) bytes "
 			"in %d.%03d seconds",

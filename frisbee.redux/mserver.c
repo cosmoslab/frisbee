@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -297,6 +297,7 @@ struct uploadextra {
 	uint64_t isize;
 	uint32_t mtime;
 	int itimeout;
+	uint32_t hostip;
 };
 
 static int killchild(struct childinfo *);
@@ -310,7 +311,7 @@ static struct childinfo *startclient(struct config_imageinfo *,
 				     in_port_t, int, int *);
 static struct childinfo *startuploader(struct config_imageinfo *,
 				       in_addr_t, in_addr_t, uint64_t,
-				       uint32_t, int, int *);
+				       uint32_t, int, uint32_t, int *);
 
 static void
 free_imageinfo(struct config_imageinfo *ii)
@@ -326,12 +327,14 @@ free_imageinfo(struct config_imageinfo *ii)
 			free(ii->sig);
 		if (ii->get_options)
 			free(ii->get_options);
-		if (ii->put_oldversion)
-			free(ii->put_oldversion);
 		if (ii->put_options)
 			free(ii->put_options);
+		if (ii->put_oldversion)
+			free(ii->put_oldversion);
 		if (ii->pget_options)
 			free(ii->pget_options);
+		if (ii->extra)
+			free(ii->extra);
 		free(ii);
 	}
 }
@@ -375,15 +378,15 @@ copy_imageinfo(struct config_imageinfo *ii)
 		goto fail;
 	nii->get_methods = ii->get_methods;
 	nii->get_timeout = ii->get_timeout;
-	if (ii->put_oldversion &&
-	    (nii->put_oldversion = strdup(ii->put_oldversion)) == NULL)
-		goto fail;
 	if (ii->put_options &&
 	    (nii->put_options = strdup(ii->put_options)) == NULL)
 		goto fail;
 	nii->put_maxsize = ii->put_maxsize;
 	nii->put_timeout = ii->put_timeout;
 	nii->put_itimeout = ii->put_itimeout;
+	if (ii->put_oldversion &&
+	    (nii->put_oldversion = strdup(ii->put_oldversion)) == NULL)
+		goto fail;
 	if (ii->pget_options &&
 	    (nii->pget_options = strdup(ii->pget_options)) == NULL)
 		goto fail;
@@ -1151,7 +1154,7 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	struct stat sb;
 	uint64_t isize;
 	uint32_t mtime, timo;
-	int rv, wantstatus;
+	int rv, wantstatus, childexitstatus;
 	PutReply reply;
 	char *op;
 
@@ -1175,6 +1178,19 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 		cimageid = NULL;
 	}
 	wantstatus = msg->body.putrequest.status;
+
+	/*
+	 * XXX oh my, a value of 100 or greater indicates a child
+	 * PUT-only server reporting the status of an upload for an
+	 * image that we serve GETs for. We need to record this exit
+	 * status (assuming everything else about the request checks out).
+	 */
+	if (wantstatus >= 100) {
+		childexitstatus = wantstatus - 100;
+		wantstatus = 1;
+	} else
+		childexitstatus = -1;
+
 	op = wantstatus ? "PUTSTATUS" : "PUT";
 	isize = ((uint64_t)ntohl(msg->body.putrequest.hisize) << 32) |
 		ntohl(msg->body.putrequest.losize);
@@ -1414,7 +1430,7 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	}
 	myaddr = ntohl(sip->sin_addr.s_addr);
 	ci = startuploader(ii, myaddr, ntohl(cip->sin_addr.s_addr),
-			   isize, mtime, (int)timo, &rv);
+			   isize, mtime, (int)timo, host.s_addr, &rv);
 	if (ci == NULL) {
 		FrisLog("%s: could not start uploader: %s",
 			imageid, GetMSError(rv));
@@ -1460,6 +1476,16 @@ handle_put(int sock, struct sockaddr_in *sip, struct sockaddr_in *cip,
 	msg->body.putreply.port = htons(ci->loport);
 
  reply:
+	/*
+	 * XXX a child PUT-only server is reporting an exit status.
+	 * If we have successfully looked up the image, record the status.
+	 */
+	if (ii && childexitstatus >= 0 &&
+	    config_set_upload_status(ii, childexitstatus)) {
+		FrisLog("%s: could not record PUT server exit status",
+			imageid);
+	}
+	
 	msg->body.putreply.error = htons(msg->body.putreply.error);
 	if (debug) {
 		FrisInfo("%s reply: sigtype=%d, sig=0x%08x..., "
@@ -1506,16 +1532,26 @@ handle_request(int sock)
 			FrisError("request message too small");
 		return;
 	}
+	if (strncmp((char *)msg.hdr.version, MS_MSGVERS_1,
+		    sizeof(msg.hdr.version))) {
+		FrisError("incorrect version in request message");
+		return;
+	}
+
 	switch (ntohl(msg.hdr.type)) {
 	case MS_MSGTYPE_GETREQUEST:
 		if (cc < sizeof msg.hdr + sizeof msg.body.getrequest)
 			FrisError("GET request message too small");
+		else if (ntohs(msg.body.getrequest.idlen) > MS_MAXIDLEN)
+			FrisError("GET request idlen too long");
 		else
 			handle_get(sock, &me, &you, &msg);
 		break;
 	case MS_MSGTYPE_PUTREQUEST:
 		if (cc < sizeof msg.hdr + sizeof msg.body.putrequest)
 			FrisError("PUT request message too small");
+		else if (ntohs(msg.body.putrequest.idlen) > MS_MAXIDLEN)
+			FrisError("PUT request idlen too long");
 		else
 			handle_put(sock, &me, &you, &msg);
 		break;
@@ -2220,7 +2256,7 @@ static void
 finishupload(struct childinfo *ci, int status)
 {
 	char *bakname, *tmpname, *realname;
-	int didbackup;
+	int didbackup, ecode;
 	struct uploadextra *ue;
 	time_t mtime;
 
@@ -2242,6 +2278,40 @@ finishupload(struct childinfo *ci, int status)
 		realname = ci->imageinfo->path;
 	}
 
+	/*
+	 * Record the status
+	 */
+	ecode = (unsigned int)status >> 8;
+	if (config_set_upload_status(ci->imageinfo, ecode))
+		FrisLog("%s: could not record upload exit status",
+			ci->imageinfo->imageid);
+
+	/*
+	 * XXX in our special hack use of mirror mode, report the exit
+	 * status to our parent as well.
+	 */
+	if (mirrormode) {
+		in_addr_t authip;
+		PutReply reply;
+
+		authip = usechildauth ? ntohl(ue->hostip) : 0;
+		if (!ClientNetPutRequest(ntohl(parentip.s_addr), parentport,
+					 authip, ci->imageinfo->imageid,
+					 0, 0, 0, ecode+100, 5, &reply))
+			reply.error = MS_ERROR_FAILED;
+		if (debug)
+			FrisLog("Parent PUT exit status %d returns %d\n",
+				status, reply.error);
+		if (reply.error) {
+			struct in_addr hostip;
+			
+			hostip.s_addr = ue->hostip;
+			FrisLog("%s: client %s PUT exit status %d failed: %s",
+				ci->imageinfo->imageid,
+				inet_ntoa(hostip), status, GetMSError(reply.error));
+		}
+	}
+	
 	if (status != 0) {
 		if (tmpname) {
 			FrisError("%s: upload failed, removing tmpfile %s",
@@ -2292,7 +2362,8 @@ finishupload(struct childinfo *ci, int status)
  */
 static struct childinfo *
 startuploader(struct config_imageinfo *ii, in_addr_t meaddr, in_addr_t youaddr,
-	      uint64_t isize, uint32_t mtime, int timo, int *errorp)
+	      uint64_t isize, uint32_t mtime, int timo, uint32_t hostip,
+	      int *errorp)
 {
 	struct childinfo *ci;
 	struct uploadextra *ue;
@@ -2373,6 +2444,7 @@ startuploader(struct config_imageinfo *ii, in_addr_t meaddr, in_addr_t youaddr,
 	ue->isize = isize;
 	ue->mtime = mtime;
 	ue->itimeout = itimo;
+	ue->hostip = hostip;
 
 	/*
 	 * Arrange to upload the image as <path>.tmp and then

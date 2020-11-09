@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2010-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -434,6 +434,13 @@ upload_canonicalize_imageid(char *imageid)
 	return NULL;
 }
 
+static int
+upload_set_upload_status(struct config_imageinfo *ii, int status)
+{
+	/* This status has already been logged by our caller, so do nothing */
+	return 0;
+}
+
 static void
 upload_dump(FILE *fd)
 {
@@ -448,6 +455,7 @@ struct config upload_config = {
 	upload_free_host_authinfo,
 	upload_get_server_address,
 	upload_canonicalize_imageid,
+	upload_set_upload_status,
 	upload_save,
 	upload_restore,
 	upload_free,
