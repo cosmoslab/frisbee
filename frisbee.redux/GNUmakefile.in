@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2018 University of Utah and the Flux Group.
+# Copyright (c) 2000-2020 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -30,6 +30,12 @@ DISTFILES	= TODO client.c decls.h event.c event.h log.c log.h \
 EXPANDCOPYRIGHT	= /usr/site/lib/copyright/expand-copyr
 
 #
+# Use 64-bit block numbers and sizes.
+# XXX should be in sync with imagezip/GNUmakefile
+#
+WITH_64BITIZ	= 1
+
+#
 # XXX should be in sync with imagezip/GNUmakefile
 #
 WITH_MBR	= 1
@@ -38,9 +44,10 @@ WITH_GPT	= 1
 #
 # Support encrypted and signed-checksumed images.
 # Requires openssl libraries.
+# XXX should be in sync with imagezip/GNUmakefile
 #
-WITH_CRYPTO	= 1
-WITH_SIGNING	= 1
+WITH_CRYPTO	= 0
+WITH_SIGNING	= 0
 
 #
 # Support direct sending of IGMP query/report messages.
