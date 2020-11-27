@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -293,7 +293,7 @@ dumpfile(char *name, int fd)
 			if (quickcheck)
 				return 0;
 
-			if (checksums && magic < COMPRESSED_V4) {
+			if (checksums && magic < COMPRESSED_V6) {
 				printf("%s: WARNING: -c given, but file version "
 				       "doesn't support checksums!\n",name);
 				checksums = 0;
@@ -333,18 +333,7 @@ dumpfile(char *name, int fd)
 				       name, (unsigned long long)filesize,
 				       (unsigned long)(filesize / CHUNKSIZE),
 				       magic - COMPRESSED_MAGIC_BASE + 1);
-				if (magic >= COMPRESSED_V4) {
-					sigtype = hdr->csum_type;
-					if (sigtype != CSUM_NONE) {
-						printf(", ");
-						if (sigtype & CSUM_SIGNED)
-							printf("signed ");
-						printf("csum (0x%x)", sigtype);
-					}
-					enctype = hdr->enc_cipher;
-					if (enctype != ENC_NONE)
-						printf(", encrypted (%d)",
-						       enctype);
+				if (magic >= COMPRESSED_V5) {
 					memcpy(imageid, hdr->imageid,
 					       UUID_LENGTH);
 					if (detail > 0) {
@@ -354,6 +343,21 @@ dumpfile(char *name, int fd)
 							      UUID_LENGTH);
 						printf("\n  uuid: %s", idbuf);
 					}
+				}
+				if (magic >= COMPRESSED_V6) {
+					struct blockhdr_V6 *hdr6 =
+						(struct blockhdr_V6 *)hdr;
+					sigtype = hdr6->csum_type;
+					if (sigtype != CSUM_NONE) {
+						printf(", ");
+						if (sigtype & CSUM_SIGNED)
+							printf("signed ");
+						printf("csum (0x%x)", sigtype);
+					}
+					enctype = hdr6->enc_cipher;
+					if (enctype != ENC_NONE)
+						printf(", encrypted (%d)",
+						       enctype);
 				}
 				printf("\n");
 			}
@@ -496,20 +500,28 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 		reg = (region_t *)((struct blockhdr_V5 *)hdr + 1);
 		first = hdr->firstsect64;
 		last = hdr->lastsect64;
-		/* fall into... */
-	case COMPRESSED_V4:
-		if (reg == NULL) {
-			reg = (region_t *)((struct blockhdr_V4 *)hdr + 1);
-			first = hdr->firstsect;
-			last = hdr->lastsect;
-		}
 		if (chunkno > 0) {
-			if (sigtype != hdr->csum_type) {
+			if (memcmp(imageid, hdr->imageid, UUID_LENGTH)) {
+				printf("%s: wrong image ID in chunk %d\n",
+				       name, chunkno);
+				return 1;
+			}
+		}
+		break;
+	case COMPRESSED_V6:
+	{
+		struct blockhdr_V6 *hdr6 = (struct blockhdr_V6 *)hdr;
+
+		reg = (region_t *)((struct blockhdr_V6 *)hdr + 1);
+		first = hdr->firstsect64;
+		last = hdr->lastsect64;
+		if (chunkno > 0) {
+			if (sigtype != hdr6->csum_type) {
 				printf("%s: wrong checksum type in chunk %d\n",
 				       name, chunkno);
 				return 1;
 			}
-			if (enctype != hdr->enc_cipher) {
+			if (enctype != hdr6->enc_cipher) {
 				printf("%s: wrong cipher type in chunk %d\n",
 				       name, chunkno);
 				return 1;
@@ -520,16 +532,17 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 				return 1;
 			}
 		}
-		if (checksums && hdr->csum_type != CSUM_NONE) {
-			if ((hdr->csum_type & CSUM_TYPE) != CSUM_SHA1) {
+		if (checksums && hdr6->csum_type != CSUM_NONE) {
+			if ((hdr6->csum_type & CSUM_TYPE) != CSUM_SHA1) {
 				printf("%s: unsupported checksum type %d in "
 				       "chunk %d", name,
-				       (hdr->csum_type & CSUM_TYPE),
+				       (hdr6->csum_type & CSUM_TYPE),
 				       chunkno);
 				return 1;
 			}
 		}
 		break;
+	}
 	default:
 		printf("%s: bad magic (%x!=%x) in chunk %d\n",
 		       name, hdr->magic, magic, chunkno);
@@ -580,12 +593,13 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 				printf("%d relocs, ", hdr->reloccount);
 		}
 		printf("%d regions\n", hdr->regioncount);
-		if (hdr->magic >= COMPRESSED_V4) {
+		if (hdr->magic >= COMPRESSED_V6) {
+			struct blockhdr_V6 *hdr6 = (struct blockhdr_V6 *)hdr;
 			int len;
 
-			if (hdr->csum_type != CSUM_NONE) {
+			if (hdr6->csum_type != CSUM_NONE) {
 				len = 0;
-				switch (hdr->csum_type) {
+				switch (hdr6->csum_type) {
 				case CSUM_SIGNED|CSUM_SHA1:
 					len = CSUM_MAX_LEN;
 					break;
@@ -597,15 +611,15 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 					char csumstr[CSUM_MAX_LEN*2+1];
 
 					mem_to_hexstr(csumstr,
-						      hdr->checksum, len);
+						      hdr6->checksum, len);
 					printf("    Checksum: 0x%s", csumstr);
 				}
 				printf("\n");
 			}
 
-			if (hdr->enc_cipher != ENC_NONE) {
+			if (hdr6->enc_cipher != ENC_NONE) {
 				len = 0;
-				switch (hdr->enc_cipher) {
+				switch (hdr6->enc_cipher) {
 				case ENC_BLOWFISH_CBC:
 					len = ENC_MAX_KEYLEN;
 					break;
@@ -614,7 +628,7 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 					char ivstr[ENC_MAX_KEYLEN*2+1];
 
 					mem_to_hexstr(ivstr,
-						      hdr->enc_iv, len);
+						      hdr6->enc_iv, len);
 					printf("    CipherIV: 0x%s", ivstr);
 				}
 				printf("\n");
@@ -722,7 +736,6 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 				break;
 			case COMPRESSED_V2:
 			case COMPRESSED_V3:
-			case COMPRESSED_V4:
 			case COMPRESSED_V5:
 				if (i == 0 && first < rstart)
 					printf("F: [%08lx-%08lx]\n",

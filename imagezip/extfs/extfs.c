@@ -123,7 +123,8 @@ read_linuxslice(int slice, iz_type stype, iz_lba start, iz_size size,
 	if (excludenonfs && fssect < size) {
 		warnx("Linux Slice %d: filesystem smaller than partition, "
 		      "excluding [%lu-%lu]",
-		      dosslice, start+fssect, start+size-1);
+		      dosslice, (unsigned long)start+fssect,
+		      (unsigned long)start+size-1);
 		addskip(start + fssect, size - fssect);
 	}
 
@@ -366,8 +367,8 @@ read_linuxswap(int slice, iz_type stype, iz_lba start, iz_size size,
 		fprintf(stderr,
 			"  P%d (Linux Swap)\n", slice + 1 /* DOS Numbering */);
 		fprintf(stderr,
-			"        start %12ld, size %9ld\n",
-			start, size);
+			"        start %12lu, size %9lu\n",
+			(unsigned long)start, (unsigned long)size);
 	}
 
 	start += bytestosec(0x8000);

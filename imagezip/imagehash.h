@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -30,22 +30,24 @@
 
 #define HASH_MAGIC	".ndzsig"
 #define HASHBLK_SIZE	(64*1024)
-#define HASH_MAXSIZE	20
+#define HASH_MAXSIZE	32
 
 #define HASH_CHUNKNO(c)		((c) & ~(1 << 31))
 #define HASH_CHUNKDOESSPAN(c)	(((c) & (1 << 31)) ? 1 : 0)
 #define HASH_CHUNKSETSPAN(c)	((c) | (1 << 31))
 
 struct hashregion {
-	struct region_64 region;
+	uint64_t start;
+	uint32_t size;
 	uint32_t chunkno;
 	unsigned char hash[HASH_MAXSIZE];
 };
 
 struct hashregion_32 {
-	struct region_32 region;
+	uint32_t start;
+	uint32_t size;
 	uint32_t chunkno;
-	unsigned char hash[HASH_MAXSIZE];
+	unsigned char hash[20];
 };
 
 struct hashinfo {
@@ -58,8 +60,9 @@ struct hashinfo {
 	struct hashregion regions[0]; /* V3: hash regions have 64 byte vals */
 };
 
-#define HASH_TYPE_MD5	1
-#define HASH_TYPE_SHA1	2
-#define HASH_TYPE_RAW	3
+#define HASH_TYPE_MD5		1
+#define HASH_TYPE_SHA1		2
+#define HASH_TYPE_RAW		3
+#define HASH_TYPE_SHA256	4	/* V3 only */
 
 #endif /* _IMAGEHASH_H_ */

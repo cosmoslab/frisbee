@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009-2013 University of Utah and the Flux Group.
+ * Copyright (c) 2009-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -138,7 +138,8 @@ decrypt_checksum(unsigned char *alleged_sum)
 #endif
 
 int
-verify_checksum(blockhdr_t *blockhdr, const unsigned char *bodybufp, int type)
+verify_checksum(struct blockhdr_V6 *blockhdr, const unsigned char *bodybufp,
+		int type)
 {
 	SHA_CTX sum_context;
 	int sum_length;

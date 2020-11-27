@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -61,7 +61,7 @@
 
 typedef struct readbuf {
 	queue_chain_t chain;
-	struct region region;
+	struct region_64 region;
 	unsigned char data[0];
 } readbuf_t;
 static unsigned long maxreadbufmem = MAXREADBUFMEM;
@@ -108,14 +108,14 @@ static char *spewhash(unsigned char *h, int hlen);
 
 static char *signame(char *name);
 static int imagecmp(char *ifile, char *dev);
-static int datacmp(uint32_t off, uint32_t size, unsigned char *idata);
+static int datacmp(uint64_t off, uint32_t size, unsigned char *idata);
 
 static int startreader(char *name, struct hashinfo *hinfo);
 static void stopreader(void);
 static struct readbuf *getblock(struct hashregion *reg);
 static void putblock(readbuf_t *rbuf);
 static void readblock(readbuf_t *rbuf);
-static readbuf_t *alloc_readbuf(uint32_t start, uint32_t size, int dowait);
+static readbuf_t *alloc_readbuf(uint64_t start, uint32_t size, int dowait);
 static void free_readbuf(readbuf_t *rbuf);
 static void dump_readbufs(void);
 static void dump_stats(int sig);
@@ -163,6 +163,8 @@ main(int argc, char **argv)
 				hashtype = HASH_TYPE_MD5;
 			else if (strcmp(optarg, "sha1") == 0)
 				hashtype = HASH_TYPE_SHA1;
+			else if (strcmp(optarg, "sha256") == 0)
+				hashtype = HASH_TYPE_SHA256;
 			else if (strcmp(optarg, "raw") == 0)
 				hashtype = HASH_TYPE_RAW;
 			else {
@@ -294,6 +296,9 @@ main(int argc, char **argv)
 		case HASH_TYPE_SHA1:
 			hashlen = 20;
 			break;
+		case HASH_TYPE_SHA256:
+			hashlen = 32;
+			break;
 		}
 		hashblksizeinsec = hashinfo->blksize;
 
@@ -414,12 +419,18 @@ gethashinfo(char *name, struct hashinfo **hinfop)
 	return hashimage(name, hinfop);
 }
 
+/*
+ * Read the contents of a hash file.
+ * Internally, we represent everything in 64-bit values, so we convert
+ * older 32-bit hash files here.
+ */
 static int
 readhashinfo(char *name, struct hashinfo **hinfop)
 {
 	struct hashinfo hi, *hinfo;
 	char *hname;
 	int fd, nbytes, cc;
+	struct hashregion_32 *cvtbuf = NULL;
 
 	hname = signame(name);
 	fd = open(hname, O_RDONLY, 0666);
@@ -444,7 +455,7 @@ readhashinfo(char *name, struct hashinfo **hinfop)
 	}
 	if (strcmp((char *)hi.magic, HASH_MAGIC) != 0 ||
 	    !(hi.version == HASH_VERSION_1 || hi.version == HASH_VERSION_2 ||
-	      hi.version == HASH_VERSION3)) {
+	      hi.version == HASH_VERSION_3)) {
 		fprintf(stderr, "%s: not a valid signature file\n", hname);
 		goto bad;
 	}
@@ -452,25 +463,57 @@ readhashinfo(char *name, struct hashinfo **hinfop)
 	case HASH_VERSION_1:
 	case HASH_VERSION_2:
 		nbytes = hi.nregions * sizeof(struct hashregion_32);
+		cvtbuf = malloc(nbytes);
+		if (cvtbuf == NULL) {
+			fprintf(stderr, "%s: not enough memory for info\n",
+				hname);
+			goto bad;
+		}
 		break;
 	default:
 		nbytes = hi.nregions * sizeof(struct hashregion);
 		break;
 	}
-	hinfo = malloc(sizeof(hi) + nbytes);
+	hinfo = malloc(sizeof(hi) + hi.nregions * sizeof(struct hashregion));
 	if (hinfo == 0) {
 		fprintf(stderr, "%s: not enough memory for info\n", hname);
 		goto bad;
 	}
 	*hinfo = hi;
-	cc = read(fd, hinfo->regions, nbytes);
-	if (cc != nbytes) {
-		free(hinfo);
-		goto readbad;
-	}
+	if (cvtbuf) {
+		struct hashregion_32 *from;
+		struct hashregion *to;
+		int i;
 
+		cc = read(fd, cvtbuf, nbytes);
+		if (cc != nbytes) {
+			free(hinfo);
+			free(cvtbuf);
+			goto readbad;
+		}
+		from = cvtbuf;
+		to = hinfo->regions;
+		for (i = 0; i < hi.nregions; i++) {
+			to->start = from->start;
+			to->size = from->size;
+			to->chunkno = from->chunkno;
+			memcpy(to->hash, from->hash, sizeof(from->hash));
+			memset(to->hash+sizeof(from->hash), 0,
+			       sizeof(to->hash)-sizeof(from->hash));
+			to++, from++;
+		}
+		free(cvtbuf);
+		hinfo->version = HASH_VERSION;
+	} else {
+		cc = read(fd, hinfo->regions, nbytes);
+		if (cc != nbytes) {
+			free(hinfo);
+			goto readbad;
+		}
+	}
 	close(fd);
 	free(hname);
+
 	*hinfop = hinfo;
 	switch (hinfo->hashtype) {
 	case HASH_TYPE_MD5:
@@ -479,6 +522,9 @@ readhashinfo(char *name, struct hashinfo **hinfop)
 		break;
 	case HASH_TYPE_SHA1:
 		hashlen = 20;
+		break;
+	case HASH_TYPE_SHA256:
+		hashlen = 32;
 		break;
 	}
 	nhregions = hinfo->nregions;
@@ -503,56 +549,14 @@ readhashinfo(char *name, struct hashinfo **hinfop)
 #define REGPERBLK	8192	/* ~256KB -- must be power of 2 */
 
 static void
-addhash32(struct hashinfo **hinfop, uint32_t chunkno, uint32_t start,
-	  uint32_t size, unsigned char hash[HASH_MAXSIZE])
-{
-	struct hashinfo *hinfo = *hinfop;
-	struct hasregion_32 regions;
-	int nreg;
-
-	if (report) {
-		printf("%s\t%u\t%u",
-		       spewhash(hash, hashlen), start, size);
-		if (report > 1)
-			printf("\t%u\tU\t%s", chunkno, fileid);
-		putchar('\n');
-		return;
-	}
-
-	if (hinfo == 0) {
-		nreg = 0;
-		hinfo = calloc(1, sizeof(*hinfo));
-	} else {
-		nreg = hinfo->nregions;
-	}
-	if ((nreg % REGPERBLK) == 0) {
-		hinfo = realloc(hinfo, sizeof(*hinfo) +
-				(nreg+REGPERBLK)*sizeof(struct hashregion_32));
-		if (hinfo == 0) {
-			fprintf(stderr, "out of memory for hash map\n");
-			exit(1);
-		}
-		*hinfop = hinfo;
-	}
-
-	regions = (struct hashregion_32 *)&hinfo->regions[0];
-	regions[nreg].chunkno = chunkno;
-	regions[nreg].region.start = start;
-	regions[nreg].region.size = size;
-	memcpy(regions[nreg].hash, hash, HASH_MAXSIZE);
-	hinfo->nregions++;
-	nhregions = hinfo->nregions;
-}
-
-static void
 addhash(struct hashinfo **hinfop, uint32_t chunkno, uint64_t start,
-	uint64_t size, unsigned char hash[HASH_MAXSIZE])
+	uint32_t size, unsigned char hash[HASH_MAXSIZE])
 {
 	struct hashinfo *hinfo = *hinfop;
 	int nreg;
 
 	if (report) {
-		printf("%s\t%lu\t%lu",
+		printf("%s\t%lu\t%u",
 		       spewhash(hash, hashlen), start, size);
 		if (report > 1)
 			printf("\t%u\tU\t%s", chunkno, fileid);
@@ -577,8 +581,8 @@ addhash(struct hashinfo **hinfop, uint32_t chunkno, uint64_t start,
 	}
 
 	hinfo->regions[nreg].chunkno = chunkno;
-	hinfo->regions[nreg].region.start = start;
-	hinfo->regions[nreg].region.size = size;
+	hinfo->regions[nreg].start = start;
+	hinfo->regions[nreg].size = size;
 	memcpy(hinfo->regions[nreg].hash, hash, HASH_MAXSIZE);
 	hinfo->nregions++;
 	nhregions = hinfo->nregions;
@@ -589,21 +593,38 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 {
 	uint32_t i;
 	struct hashregion *reg;
+	int is32 = 1;
 
 	if (detail > 1) {
 		if (!terse) {
+			char *type = "??";
+
+			switch (hinfo->hashtype) {
+			case HASH_TYPE_MD5:
+			default:
+				type = "MD5";
+				break;
+			case HASH_TYPE_SHA1:
+				type = "SHA1";
+				break;
+			case HASH_TYPE_SHA256:
+				type = "SHA256";
+				break;
+			}
+
 			switch (hinfo->version) {
 			case HASH_VERSION_1:
-				printf("sig version 1, blksize=%d sectors:\n",
-				       bytestosec(HASHBLK_SIZE));
+				printf("sig version 1, blksize=%u, type=%s, sectors:\n",
+				       (unsigned)bytestosec(HASHBLK_SIZE), type);
 				break;
 			case HASH_VERSION_2:
-				printf("sig version 2, blksize=%d sectors:\n",
-				       hinfo->blksize);
+				printf("sig version 2, blksize=%u, type=%s, sectors:\n",
+				       hinfo->blksize, type);
 				break;
 			case HASH_VERSION_3:
-				printf("sig version 3, blksize=%d sectors:\n",
-				       hinfo->blksize);
+				is32 = 0;
+				printf("sig version 3, blksize=%u, type=%s, sectors:\n",
+				       hinfo->blksize, type);
 				break;
 			default:
 				printf("unknown signature version (%x), "
@@ -614,15 +635,13 @@ dumphash(char *name, struct hashinfo *hinfo, int withchunk)
 		for (i = 0; i < hinfo->nregions; i++) {
 			reg = &hinfo->regions[i];
 			if (terse) {
-				printf("%s\t%d\t%d\n",
+				printf("%s\t%lu\t%u\n",
 				       spewhash(reg->hash, hashlen),
-				       reg->region.start, reg->region.size);
+				       reg->start, reg->size);
 				continue;
 			}
-			printf("[%u-%u] (%d): ",
-			       reg->region.start,
-			       reg->region.start + reg->region.size-1,
-			       reg->region.size);
+			printf("[%lu-%lu] (%u): ",
+			       reg->start, reg->start + reg->size-1, reg->size);
 			if (withchunk) {
 				/* upper bit indicates chunkrange */
 				if (HASH_CHUNKDOESSPAN(reg->chunkno)) {
@@ -685,12 +704,15 @@ createhash(char *name, struct hashinfo **hinfop)
 	 * Hash the image file
 	 */
 	if (hashimage(name, hinfop)) {
+		close(ofd);
 		free(hfile);
 		return -1;
 	}
 
 	if (*hinfop == NULL) {
 		fprintf(stderr, "%s: not a valid image (empty file?)\n", name);
+		close(ofd);
+		free(hfile);
 		return -1;
 	}
 
@@ -699,10 +721,63 @@ createhash(char *name, struct hashinfo **hinfop)
 	 */
 	hinfo = *hinfop;
 	strcpy((char *)hinfo->magic, HASH_MAGIC);
-	hinfo->version = HASH_VERSION_2;
+	hinfo->version = hashversion;
 	hinfo->hashtype = hashtype;
 	hinfo->blksize = hashblksizeinsec;
-	count = sizeof(*hinfo) + hinfo->nregions*sizeof(struct hashregion);
+
+	/*
+	 * We need to write out old style hash descriptors.
+	 *
+	 * XXX since old-style regions are smaller, we can overwrite in
+	 * place without loosing anything. Note however, the special case
+	 * for the first descriptor. Empirically we have determined that,
+	 * because these entries are only shifted by 4 bytes, the memcpy of
+	 * the hash happened in such a way as to punk bytes 12-15 of the
+	 * resulting hash. Weird. Probably some combo of little-endian
+	 * and optimized copying in memcpy() caused a partial overlap.
+	 */
+	if (hashversion < HASH_VERSION_3) {
+		struct hashregion *hreg;
+		struct hashregion_32 *hreg32;
+		int i;
+
+		if (hashtype == HASH_TYPE_SHA256) {
+			fprintf(stderr, "%s: incompatible hash type\n", hfile);
+			close(ofd);
+			free(hfile);
+			return -1;
+		}
+		hreg = hinfo->regions;
+		hreg32 = (struct hashregion_32 *)hreg;
+		for (i = 0; i < hinfo->nregions; i++) {
+			if (hreg->start > UINT32_MAX) {
+				fprintf(stderr, "%s: start value > 32-bits\n",
+					hfile);
+				close(ofd);
+				free(hfile);
+				return -1;
+			}
+			if (i == 0) {
+				struct hashregion_32 h32;
+				h32.start = (uint32_t)hreg->start;
+				h32.size = hreg->size;
+				h32.chunkno = hreg->chunkno;
+				memcpy(h32.hash, hreg->hash, sizeof(h32.hash));
+				memcpy(hreg32, &h32, sizeof(h32));
+			} else {
+				hreg32->start = (uint32_t)hreg->start;
+				hreg32->size = hreg->size;
+				hreg32->chunkno = hreg->chunkno;
+				memcpy(hreg32->hash, hreg->hash, sizeof(hreg32->hash));
+			}
+			hreg++;
+			hreg32++;
+		}
+		count = sizeof(*hinfo) +
+			hinfo->nregions*sizeof(struct hashregion_32);
+	} else
+		count = sizeof(*hinfo) +
+			hinfo->nregions*sizeof(struct hashregion);
 	cc = write(ofd, hinfo, count);
 	close(ofd);
 	if (cc != count) {
@@ -788,6 +863,9 @@ comparehashinfo(struct hashinfo *siginfo, struct hashinfo *imageinfo)
 	case HASH_TYPE_SHA1:
 		hashlen = 20;
 		break;
+	case HASH_TYPE_SHA256:
+		hashlen = 32;
+		break;
 	}
 
 	if (siginfo->version > HASH_VERSION_1)
@@ -805,15 +883,12 @@ comparehashinfo(struct hashinfo *siginfo, struct hashinfo *imageinfo)
 				HASH_CHUNKDOESSPAN(ir->chunkno) ? 'S' : '-',
 				HASH_CHUNKNO(ir->chunkno));
 		}
-		if (sr->region.start != ir->region.start ||
-		    sr->region.size != ir->region.size) {
+		if (sr->start != ir->start || sr->size != ir->size) {
 			fprintf(stderr,
 				"Sig/image entry %d have different ranges "
-				"([%u-%u] != [%u-%u])\n",
-				i, sr->region.start,
-				sr->region.start + sr->region.size - 1,
-				ir->region.start,
-				ir->region.start + ir->region.size - 1);
+				"([%lu-%lu] != [%lu-%lu])\n",
+				i, sr->start, sr->start + sr->size - 1,
+				ir->start, ir->start + ir->size - 1);
 			return -1;
 		}
 		if (memcmp(sr->hash, ir->hash, hashlen)) {
@@ -866,6 +941,11 @@ checkhash(char *name, struct hashinfo *hinfo)
 		hashfunc = SHA1;
 		hashstr = "SHA1 digest";
 		break;
+	case HASH_TYPE_SHA256:
+		hashlen = 32;
+		hashfunc = SHA256;
+		hashstr = "SHA256 digest";
+		break;
 	}
 	fprintf(stderr, "Checking disk contents using %s\n", hashstr);
 
@@ -874,7 +954,7 @@ checkhash(char *name, struct hashinfo *hinfo)
 			nchunks++;
 			chunkno = HASH_CHUNKNO(reg->chunkno);
 		}
-		size = sectobytes(reg->region.size);
+		size = sectobytes(reg->size);
 		rbuf = getblock(reg);
 #ifdef TIMEIT
 		sstamp = rdtsc();
@@ -888,8 +968,8 @@ checkhash(char *name, struct hashinfo *hinfo)
 		ndatabytes += size;
 
 		if (detail > 2) {
-			printf("[%u-%u]:\n", reg->region.start,
-			       reg->region.start + reg->region.size - 1);
+			printf("[%lu-%lu]:\n", reg->start,
+			       reg->start + reg->size - 1);
 			printf("  sig  %s\n", spewhash(reg->hash, hashlen));
 			printf("  disk %s\n", spewhash(hash, hashlen));
 		}
@@ -916,17 +996,17 @@ checkhash(char *name, struct hashinfo *hinfo)
 			badhashdata += size;
 			if (!inbad) {
 				inbad = 1;
-				badstart = reg->region.start;
-				badsize = reg->region.size;
+				badstart = reg->start;
+				badsize = reg->size;
 			} else {
-				if (badstart + badsize == reg->region.start)
-					badsize += reg->region.size;
+				if (badstart + badsize == reg->start)
+					badsize += reg->size;
 				else
 					reportbad = 1;
 			}
 			if (detail > 1) {
-				printf("BAD [%u-%u]:\n", reg->region.start,
-				       reg->region.start + reg->region.size - 1);
+				printf("BAD [%lu-%lu]:\n", reg->start,
+				       reg->start + reg->size - 1);
 				printf("  sig  %s\n",
 				       spewhash(reg->hash, hashlen));
 				printf("  disk %s\n",
@@ -1010,37 +1090,46 @@ hexdump(unsigned char *p, int nchar)
 	}
 }
 
-static struct blockreloc *relocptr;
-static int reloccount;
+static union blockreloc *relocptr;
+static int reloccount, reloc32;
 
 static void
-setrelocs(struct blockreloc *reloc, int nrelocs)
+setrelocs(union blockreloc *reloc, int nrelocs, int is32)
 {
 	relocptr = reloc;
 	reloccount = nrelocs;
+	reloc32 = is32;
 }
 
 /*
- * Return 1 if data region overlaps with a relocation
+ * Return non-zero if data region overlaps with a relocation.
+ * Optionally returns start/end of overlapping reloc.
  */
-static struct blockreloc *
-hasrelocs(off_t start, off_t size)
+int
+hasrelocs(off_t start, off_t size, off_t *rstartp, off_t *rendp)
 {
 	off_t rstart, rend;
-	struct blockreloc *reloc = relocptr;
+	union blockreloc *reloc = RELOC_ADDR(reloc32, relocptr, 0);
 	int nrelocs = reloccount;
 
 	while (nrelocs--) {
-		if (reloc->type < 1 || reloc->type > 5) {
-			fprintf(stderr, "bad reloc: type=%d\n", reloc->type);
+		uint32_t rtype = RELOC_TYPE(reloc32, reloc);
+		if (rtype < 1 || rtype > 5) {
+			fprintf(stderr, "bad reloc: type=%d\n", rtype);
 			relocptr = 0;
 			reloccount = 0;
 			break;
 		}
-		rstart = sectobytes(reloc->sector) + reloc->sectoff;
-		rend = rstart + reloc->size;
-		if (rend > start && rstart < start + size)
-			return reloc;
+		rstart = sectobytes(RELOC_SECTOR(reloc32, reloc)) +
+			RELOC_SECTOFF(reloc32, reloc);
+		rend = rstart + RELOC_SIZE(reloc32, reloc);
+		if (rend > start && rstart < start + size) {
+			if (rstartp)
+				*rstartp = rstart;
+			if (rendp)
+				*rendp = rend;
+			return 1;
+		}
 		reloc++;
 	}
 	return 0;
@@ -1050,8 +1139,7 @@ static void
 fullcmp(void *p1, void *p2, off_t sz, uint32_t soff)
 {
 	unsigned char *ip, *dp;
-	off_t off, boff, byoff;
-	struct blockreloc *reloc;
+	off_t off, boff, byoff, rstart, rend;
 
 	byoff = sectobytes(soff);
 	ip = (unsigned char *)p1;
@@ -1062,14 +1150,15 @@ fullcmp(void *p1, void *p2, off_t sz, uint32_t soff)
 		if (ip[off] == dp[off]) {
 			if (boff != -1 &&
 			    off+1 < sz && ip[off+1] == dp[off+1]) {
-				fprintf(stderr, " [%llu-%llu] (sect %u): bad",
-					(unsigned long long)byoff+boff,
-					(unsigned long long)byoff+off-1, soff);
-				reloc = hasrelocs(byoff+boff, off-boff);
-				if (reloc)
-					fprintf(stderr, " (overlaps reloc [%llu-%llu])",
-						(unsigned long long)sectobytes(reloc->sector)+reloc->sectoff,
-						(unsigned long long)sectobytes(reloc->sector)+reloc->sectoff+reloc->size-1);
+				fprintf(stderr, " [%lu-%lu] (sect %u): bad",
+					(unsigned long)byoff+boff,
+					(unsigned long)byoff+off-1, soff);
+				if (hasrelocs(byoff+boff, off-boff,
+					      &rstart, &rend))
+					fprintf(stderr,
+						" (overlaps reloc [%lu-%lu])",
+						(unsigned long)rstart,
+						(unsigned long)rend-1);
 				fprintf(stderr, "\n");
 				if (detail > 1) {
 					fprintf(stderr, "  image: ");
@@ -1087,14 +1176,12 @@ fullcmp(void *p1, void *p2, off_t sz, uint32_t soff)
 		off++;
 	}
 	if (boff != -1) {
-		fprintf(stderr, " [%llu-%llu] bad",
-			(unsigned long long)byoff+boff,
-			(unsigned long long)byoff+off-1);
-		reloc = hasrelocs(byoff+boff, off-boff);
-		if (reloc)
-			fprintf(stderr, " (overlaps reloc [%llu-%llu])",
-				(unsigned long long)sectobytes(reloc->sector)+reloc->sectoff,
-				(unsigned long long)sectobytes(reloc->sector)+reloc->sectoff+reloc->size-1);
+		fprintf(stderr, " [%lu-%lu] bad",
+			(unsigned long)byoff+boff,
+			(unsigned long)byoff+off-1);
+		if (hasrelocs(byoff+boff, off-boff, &rstart, &rend))
+			fprintf(stderr, " (overlaps reloc [%lu-%lu])",
+				(unsigned long)rstart, (unsigned long)rend-1);
 		fprintf(stderr, "\n");
 		if (detail > 1) {
 			fprintf(stderr, "  image: ");
@@ -1107,7 +1194,7 @@ fullcmp(void *p1, void *p2, off_t sz, uint32_t soff)
 }
 
 static int
-datacmp(uint32_t off, uint32_t size, unsigned char *idata)
+datacmp(uint64_t off, uint32_t size, unsigned char *idata)
 {
 	readbuf_t *rbuf;
 
@@ -1120,7 +1207,7 @@ datacmp(uint32_t off, uint32_t size, unsigned char *idata)
 	if (detail)
 		fullcmp(idata, rbuf->data, sectobytes(size), off);
 	else
-		fprintf(stderr, " [%u-%u]: bad data\n", off, off + size - 1);
+		fprintf(stderr, " [%lu-%lu]: bad data\n", off, off + size - 1);
 	putblock(rbuf);
 	return 1;
 }
@@ -1196,7 +1283,7 @@ static int
 hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 {
 	blockhdr_t *blockhdr;
-	struct region *regp;
+	union region *regp;
 	z_stream z;
 	int err, nreg;
 	unsigned char hash[HASH_MAXSIZE];
@@ -1204,6 +1291,7 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 				   unsigned char *);
 	readbuf_t *rbuf;
 	int errors = 0;
+	int is32 = 1;
 #ifdef TIMEIT
 	u_int64_t sstamp, estamp;
 #endif
@@ -1215,8 +1303,7 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 	if (chunkno == -1) {
 		if (spanoff >= 0)
 			addhash(hinfop, lhash.chunkno,
-				lhash.region.start, lhash.region.size,
-				lhash.hash);
+				lhash.start, lhash.size, lhash.hash);
 		if (ldata)
 			free(ldata);
 		spanoff = -1;
@@ -1246,19 +1333,29 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 	z.next_in = (Bytef *)chunkbufp;
 	z.avail_in = blockhdr->size;
 	
-	setrelocs(0, 0);
+	setrelocs(0, 0, 1);
 	switch (blockhdr->magic) {
 	case COMPRESSED_V1:
-		regp = (struct region *)((struct blockhdr_V1 *)blockhdr + 1);
-		break;
+		fprintf(stderr, "Do not support V1 images.\n");
+		exit(1);
 
 	case COMPRESSED_V2:
 	case COMPRESSED_V3:
-		regp = (struct region *)((struct blockhdr_V2 *)blockhdr + 1);
+		is32 = 1;
+		regp = (union region *)((struct blockhdr_V2 *)blockhdr + 1);
 		if (blockhdr->reloccount)
-			setrelocs((struct blockreloc *)
-				  (regp + blockhdr->regioncount),
-				  blockhdr->reloccount);
+			setrelocs((union blockreloc *)
+				  (&regp->r32 + blockhdr->regioncount),
+				  blockhdr->reloccount, 1);
+		break;
+
+	case COMPRESSED_V5:
+		is32 = 0;
+		regp = (union region *)((struct blockhdr_V5 *)blockhdr + 1);
+		if (blockhdr->reloccount)
+			setrelocs((union blockreloc *)
+				  (&regp->r64 + blockhdr->regioncount),
+				  blockhdr->reloccount, 0);
 		break;
 
 	default:
@@ -1279,6 +1376,10 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 		hashfunc = SHA1;
 		hashlen = 20;
 		break;
+	case HASH_TYPE_SHA256:
+		hashfunc = SHA256;
+		hashlen = 32;
+		break;
 	case HASH_TYPE_RAW:
 		hashfunc = 0;
 		hashlen = 0;
@@ -1298,8 +1399,8 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 		uint32_t rstart, rsize, hsize;
 		int startoff = 0;
 
-		rstart = regp->start;
-		rsize = regp->size;
+		rstart = REG_START(is32, regp);
+		rsize = REG_SIZE(is32, regp);
 		ndatabytes += sectobytes(rsize);
 
 		/*
@@ -1358,7 +1459,8 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 			 * If the region has relocs, then we don't hash
 			 */
 			if (!doall &&
-			    hasrelocs(sectobytes(rstart), sectobytes(hsize)))
+			    hasrelocs(sectobytes(rstart), sectobytes(hsize),
+				      NULL, NULL))
 				goto hdone;
 
 			/*
@@ -1379,7 +1481,6 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 				goto nosplit;
 
 			if (spanoff >= 0) {
-				struct region *lreg = &lhash.region;
 				size_t bytes = sectobytes(hsize);
 
 				/*
@@ -1387,8 +1488,8 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 				 * hashblksize range that spans chunk
 				 * boundaries.
 				 */
-				if (rstart == lreg->start + lreg->size &&
-				    hsize + lreg->size <= hashblksizeinsec) {
+				if (rstart == lhash.start + lhash.size &&
+				    hsize + lhash.size <= hashblksizeinsec) {
 					assert(spanoff+bytes <= hashblksize);
 					assert(ldata != NULL);
 					memcpy(ldata+spanoff, rbuf->data,
@@ -1398,7 +1499,7 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 					lhash.chunkno =
 						HASH_CHUNKSETSPAN(lhash.chunkno);
 					addhash(hinfop, lhash.chunkno,
-						lreg->start, lreg->size+hsize,
+						lhash.start, lhash.size+hsize,
 						hash);
 					spanoff = -1;
 					goto hdone;
@@ -1408,7 +1509,7 @@ hashchunk(int chunkno, char *chunkbufp, struct hashinfo **hinfop)
 				 * just dump the hash info we saved.
 				 */
 				addhash(hinfop, lhash.chunkno,
-					lreg->start, lreg->size, lhash.hash);
+					lhash.start, lhash.size, lhash.hash);
 #if 0
 fprintf(stderr, "HACK: failed: [%u-%u][%u-%u]\n", lreg->start, lreg->start+lreg->size-1, rstart, rstart+hsize-1);
 #endif
@@ -1426,8 +1527,8 @@ fprintf(stderr, "HACK: failed: [%u-%u][%u-%u]\n", lreg->start, lreg->start+lreg-
 			    ((rstart + rsize) % hashblksizeinsec) != 0) {
 				size_t bytes = sectobytes(hsize);
 
-				lhash.region.start = rstart;
-				lhash.region.size = rsize;
+				lhash.start = rstart;
+				lhash.size = rsize;
 				lhash.chunkno = chunkno;
 				(void)(*hashfunc)(rbuf->data, bytes,
 						  lhash.hash);
@@ -1447,7 +1548,7 @@ fprintf(stderr, "HACK: failed: [%u-%u][%u-%u]\n", lreg->start, lreg->start+lreg-
 			rstart += hsize;
 			rsize -= hsize;
 		}
-		regp++;
+		regp = REG_NEXT(is32, regp);
 	}
 	free_readbuf(rbuf);
 	if (z.avail_in != 0) {
@@ -1561,6 +1662,9 @@ hashfilechunk(int chunkno, char *chunkbufp, int chunksize,
 	case HASH_TYPE_SHA1:
 		hashfunc = SHA1;
 		break;
+	case HASH_TYPE_SHA256:
+		hashfunc = SHA256;
+		break;
 	case HASH_TYPE_RAW:
 		hashfunc = 0;
 		break;
@@ -1572,7 +1676,8 @@ hashfilechunk(int chunkno, char *chunkbufp, int chunksize,
 	 */
 	resid = chunksize - sectobytes(bytestosec(chunksize));
 	while (chunksize > 0) {
-		uint64_t rstart, rsize;
+		uint64_t rstart;
+		uint32_t rsize;
 
 		if (chunksize > hashblksize)
 			nbytes = hashblksize;
@@ -1644,7 +1749,7 @@ dump_readbufs(void)
 }
 
 static readbuf_t *
-alloc_readbuf(uint32_t start, uint32_t size, int dowait)
+alloc_readbuf(uint64_t start, uint32_t size, int dowait)
 {
 	readbuf_t *rbuf;
 	size_t bufsize;
@@ -1795,8 +1900,8 @@ getblock(struct hashregion *reg)
 		gotone = 1;
 		pthread_mutex_unlock(&readqueue_mutex);
 
-		if (rbuf->region.start != reg->region.start &&
-		    rbuf->region.size != reg->region.size) {
+		if (rbuf->region.start != reg->start &&
+		    rbuf->region.size != reg->size) {
 			fprintf(stderr, "reader/hasher out of sync!\n");
 			exit(2);
 		}
@@ -1804,7 +1909,7 @@ getblock(struct hashregion *reg)
 		return rbuf;
 	}
 #endif
-	rbuf = alloc_readbuf(reg->region.start, reg->region.size, 1);
+	rbuf = alloc_readbuf(reg->start, reg->size, 1);
 	readblock(rbuf);
 	return rbuf;
 }
@@ -1838,7 +1943,7 @@ readblock(readbuf_t *rbuf)
 			perror(devfile);
 		else
 			fprintf(stderr,
-				"%s: incomplete read (%d) at sect %u\n",
+				"%s: incomplete read (%d) at sect %lu\n",
 				devfile, (int)cc, rbuf->region.start);
 		exit(3);
 	}
@@ -1862,9 +1967,9 @@ diskreader(void *arg)
 
 	for (i = 0, reg = hinfo->regions; i < hinfo->nregions; i++, reg++) {
 		/* XXX maxreadbufmem has to at least hold one hash region */
-		if (maxreadbufmem < sectobytes(reg->region.size))
-			maxreadbufmem = sectobytes(reg->region.size);
-		rbuf = alloc_readbuf(reg->region.start, reg->region.size, 1);
+		if (maxreadbufmem < sectobytes(reg->size))
+			maxreadbufmem = sectobytes(reg->size);
+		rbuf = alloc_readbuf(reg->start, reg->size, 1);
 		readblock(rbuf);
 		pthread_mutex_lock(&readqueue_mutex);
 		queue_enter(&readqueue, rbuf, readbuf_t *, chain);

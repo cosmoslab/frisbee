@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -1390,7 +1390,7 @@ write_subblock(int chunkno, const char *chunkbufp, int chunksize)
 /* returns the number of characters decrypted */
 static int
 decrypt_buffer(unsigned char *dest, const unsigned char *source,
-	       const blockhdr_t *header)
+	       const struct blockhdr_V6 *header)
 {
 	/* init */
 	int update_count = 0;
@@ -1474,7 +1474,7 @@ inflate_subblock(const char *chunkbufp)
 	 * XXX this assumes that version nums are monotonically increasing,
 	 * I cannot imagine why they would not be in the future!
 	 */
-	if (blockhdr->magic < COMPRESSED_V4 &&
+	if (blockhdr->magic < COMPRESSED_V6 &&
 	    (do_checksum || do_decrypt)) {
 		fprintf(stderr,
 			"%s requested but image is old format (V%d)\n",
@@ -1485,22 +1485,12 @@ inflate_subblock(const char *chunkbufp)
 #endif
 	switch (blockhdr->magic) {
 	case COMPRESSED_V1:
-	{
-		static int didwarn;
-
-		curregion = (region_t *)
-			((struct blockhdr_V1 *)blockhdr + 1);
-		if (dofill && !didwarn) {
-			fprintf(stderr,
-				"WARNING: old image file format, "
-				"may not zero all unused blocks\n");
-			didwarn = 1;
-		}
-		break;
-	}
+		fprintf(stderr, "No longer support V1 images.\n");
+		exit(1);
 
 	case COMPRESSED_V2:
 	case COMPRESSED_V3:
+		is32 = 1;
 		imageversion = 2;
 		curregion = (region_t *)
 			((struct blockhdr_V2 *)blockhdr + 1);
@@ -1513,24 +1503,13 @@ inflate_subblock(const char *chunkbufp)
 		break;
 
 	case COMPRESSED_V5:
+	case COMPRESSED_V6:
 		is32 = 0;
-		imageversion = 5;
+		imageversion = (blockhdr->magic == COMPRESSED_V5) ? 5 : 6;
 		curregion = (region_t *)
 			((struct blockhdr_V5 *)blockhdr + 1);
 		firstsect = blockhdr->firstsect64;
 		lastsect = blockhdr->lastsect64;
-		/* fall into... */
-	case COMPRESSED_V4:
-#ifdef WITH_CRYPTO
-		/*
-		 * Verify the checksum before looking at anything else.
-		 */
-		if (do_checksum &&
-		    !verify_checksum((blockhdr_t *)blockhdr,
-				     (const unsigned char *)blockhdr,
-				     blockhdr->csum_type))
-			exit(1);
-#endif
 
 		/*
 		 * Track the current image UUID.
@@ -1557,37 +1536,44 @@ inflate_subblock(const char *chunkbufp)
 			fprintf(stderr, "  Should be: 0x%s\n", uuidstr);
 			exit(1);
 		}
-
 #ifdef WITH_CRYPTO
-		/*
-		 * Decrypt the rest of the chunk if encrypted.
-		 */
-		if (do_decrypt) {
-			if (blockhdr->enc_cipher == ENC_NONE) {
-				fprintf(stderr, "Chunk has no cipher\n");
-				exit(1);
-			}
-			if (blockhdr->enc_cipher != cipher) {
-				fprintf(stderr,
-					"Wrong cipher type %d in chunk\n",
-					blockhdr->enc_cipher);
-				exit(1);
-			}
+		if (imageversion == 6) {
+			struct blockhdr_V6 *bhdr6 =
+				(struct blockhdr_V6 *)blockhdr;
 
-			((blockhdr_t *)blockhdr)->size
-				= decrypt_buffer((unsigned char *)plaintext,
-						 (unsigned char *)chunkbufp,
-						 blockhdr);
-			chunkbufp = plaintext;
+			/*
+			 * Verify the checksum before looking at anything else.
+			 */
+			if (do_checksum &&
+			    !verify_checksum(bhdr6,
+					     (const unsigned char *)bhdr6,
+					     bhdr6->csum_type))
+				exit(1);
+
+			/*
+			 * Decrypt the rest of the chunk if encrypted.
+			 */
+			if (do_decrypt) {
+				if (bhdr6->enc_cipher == ENC_NONE) {
+					fprintf(stderr,
+						"Chunk has no cipher\n");
+					exit(1);
+				}
+				if (bhdr6->enc_cipher != cipher) {
+					fprintf(stderr,
+						"Wrong cipher type %d in chunk\n",
+						bhdr6->enc_cipher);
+					exit(1);
+				}
+
+				blockhdr->size
+					= decrypt_buffer((unsigned char *)plaintext,
+							 (unsigned char *)chunkbufp,
+							 bhdr6);
+				chunkbufp = plaintext;
+			}
 		}
 #endif
-		if (imageversion != 5) {
-			imageversion = 4;
-			curregion = (region_t *)
-				((struct blockhdr_V4 *)blockhdr + 1);
-			firstsect = blockhdr->firstsect;
-			lastsect = blockhdr->lastsect;
-		}
 		getrelocinfo(blockhdr);
 		break;
 
@@ -2079,7 +2065,6 @@ getrelocinfo(const blockhdr_t *hdr)
 	}
 	isreloc32 = (hdr->magic == COMPRESSED_V5) ? 0 : 1;
 
-	assert(numrelocs == 0 || hdr->magic != COMPRESSED_V1);
 	if ((numrelocs = hdr->reloccount) == 0)
 		return;
 
@@ -2096,14 +2081,14 @@ getrelocinfo(const blockhdr_t *hdr)
 			((const char *)hdr + sizeof(struct blockhdr_V2) +
 			 hdr->regioncount * sizeof(struct region_32));
 		break;
-	case COMPRESSED_V4:
-		relocs = (const blockreloc_t *)
-			((const char *)hdr + sizeof(struct blockhdr_V4) +
-			 hdr->regioncount * sizeof(struct region_32));
-		break;
 	case COMPRESSED_V5:
 		relocs = (const blockreloc_t *)
 			((const char *)hdr + sizeof(struct blockhdr_V5) +
+			 hdr->regioncount * sizeof(struct region_64));
+		break;
+	case COMPRESSED_V6:
+		relocs = (const blockreloc_t *)
+			((const char *)hdr + sizeof(struct blockhdr_V6) +
 			 hdr->regioncount * sizeof(struct region_64));
 		break;
 	default:

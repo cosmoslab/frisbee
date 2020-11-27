@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -41,9 +41,11 @@
  *	Note that there is no change to the header structure however.
  *
  *	V4 of the block descriptor adds support for integrety protection
- *	and encryption.
+ *	and encryption. V4 HAS BEEN DEPRECATED and we are pretending it
+ *	never existed. We will re-add the security features as part of
+ *	V6 or a later version.
  *
- *	V5 introduced 64-bit blocknumbers.
+ *	V5 introduced 64-bit blocknumbers and integrity protection from V4.
  */
 #define COMPRESSED_MAGIC_BASE		0x69696969
 #define COMPRESSED_V1			(COMPRESSED_MAGIC_BASE+0)
@@ -51,7 +53,9 @@
 #define COMPRESSED_V3			(COMPRESSED_MAGIC_BASE+2)
 #define COMPRESSED_V4			(COMPRESSED_MAGIC_BASE+3)
 #define COMPRESSED_V5			(COMPRESSED_MAGIC_BASE+4)
+#define COMPRESSED_V6			(COMPRESSED_MAGIC_BASE+5)
 
+/* XXX V6 not ready for prime time yet. */
 #define COMPRESSED_MAGIC_CURRENT	COMPRESSED_V5
 
 /*
@@ -90,55 +94,32 @@ struct blockhdr_V2 {
 	int32_t		reloccount;	/* number of reloc entries */
 };
 
+/*
+ * XXX Version 3 of the image format introduced no header changes.
+ */
+
+/*
+ * XXX Version 4 of the block descriptor was never released. It included
+ * the original "secure image" support, which has now been deferred.
+ *
+ * The reasoning being, we need 64-bit images more immediately and don't
+ * want to impose all the crypto requirements of images that just need
+ * 64-bit blocks. Expect the secure image support to reappear in V6.
+ */
+#if defined(WITH_CRYPTO) || defined(SIGN_CHECKSUM)
+#error "Secure image creation not supported right now."
+#endif
+
+/* Standard 128 bit field */
 #define UUID_LENGTH		16
-
-/*
- * Authentication/integrity/encryption constants for V4.
- */
-#define ENC_MAX_KEYLEN		32	/* XXX same as EVP_MAX_KEY_LENGTH */
-#define CSUM_MAX_LEN		64
-#define SIG_MAX_KEYLEN		256	/* must be > CSUM_MAX_LEN+41 */
-
-/*
- * Version 4 of the block descriptor adds support for authentication,
- * integrety protection and encryption.
- *
- * An optionally-signed checksum (hash) of each header+chunk is stored in
- * the header (checksum) along with the hash algorithm used (csum_type).
- * The pubkey used to sign the hash is transfered out-of-band.
- *
- * To ensure that all valid signed chunks are part of the same image,
- * a unique identifier is stored in the header (imageid) of each chunk
- * associated with the same image.
- *
- * Optionally, the contents of each chunk (but not the header) is encrypted
- * using the indicated cipher (enc_cipher) and initialization vector (enc_iv).
- */
-struct blockhdr_V4 {
-	uint32_t	magic;		/* magic/version */
-	uint32_t	size;		/* Size of compressed part */
-	int32_t		blockindex;	/* which block we are */
-	int32_t		blocktotal;	/* V1: total number of blocks */
-	int32_t		regionsize;	/* sizeof header + regions */
-	int32_t		regioncount;	/* number of regions */
-	/* V2 follows */
-	uint32_t	firstsect;	/* first sector described by block */
-	uint32_t	lastsect;	/* first sector past block */
-	int32_t		reloccount;	/* number of reloc entries */
-	/* V4 follows */
-	uint16_t	enc_cipher;	/* cipher was used to encrypt */
-	uint16_t	csum_type;	/* checksum algortihm used */
-	uint8_t		enc_iv[ENC_MAX_KEYLEN];
-					/* Initialization vector */
-	unsigned char	checksum[SIG_MAX_KEYLEN];
-					/* (Signed) checksum */
-	unsigned char	imageid[UUID_LENGTH];
-					/* Unique ID for the whole image */
-};
 
 /*
  * Version 5 of the block descriptor adds support for 64-bit sectors/sizes.
  * Images of this format also use 64-bit region and relocation structs.
+ *
+ * It also adds the per-image unique image ID from the never released V4.
+ * This UUID goes in each chunk of the image to help prevent mixing of
+ * image chunks when distributed via frisbee. Use of the UUID is optional.
  */
 struct blockhdr_V5 {
 	uint32_t	magic;		/* magic/version */
@@ -151,22 +132,67 @@ struct blockhdr_V5 {
 	uint32_t	firstsect;	/* first sector described by block */
 	uint32_t	lastsect;	/* first sector past block */
 	int32_t		reloccount;	/* number of reloc entries */
-	/* V4 follows */
+	/* V3 introduced no header changes */
+	/* V4 was never released; security changes deferred til V6 */
+	/* V5 follows */
+	uint64_t	firstsect64;	/* first sector described by block */
+	uint64_t	lastsect64;	/* first sector past block */
+	unsigned char	imageid[UUID_LENGTH];
+					/* Unique ID for the whole image */
+};
+
+/*
+ * Authentication/integrity/encryption constants for V6.
+ */
+#define ENC_MAX_KEYLEN		32	/* XXX same as EVP_MAX_KEY_LENGTH */
+#define CSUM_MAX_LEN		64
+#define SIG_MAX_KEYLEN		256	/* must be > CSUM_MAX_LEN+41 */
+
+/*
+ * Version 6 of the block descriptor adds support for authentication,
+ * integrety protection and encryption.
+ *
+ * An optionally-signed checksum (hash) of each header+chunk is stored in
+ * the header (checksum) along with the hash algorithm used (csum_type).
+ * The pubkey used to sign the hash is transfered out-of-band.
+ *
+ * To ensure that all valid signed chunks are part of the same image,
+ * the per-image unique identifier from V5 that is stored in the header
+ * (imageid) of each chunk is now mandatory. A random UUID is created and
+ * used if the user does not provide one.
+ *
+ * Optionally, the contents of each chunk (but not the header) is encrypted
+ * using the indicated cipher (enc_cipher) and initialization vector (enc_iv).
+ */
+struct blockhdr_V6 {
+	uint32_t	magic;		/* magic/version */
+	uint32_t	size;		/* Size of compressed part */
+	int32_t		blockindex;	/* which block we are */
+	int32_t		blocktotal;	/* V1: total number of blocks */
+	int32_t		regionsize;	/* sizeof header + regions */
+	int32_t		regioncount;	/* number of regions */
+	/* V2 follows */
+	uint32_t	firstsect;	/* first sector described by block */
+	uint32_t	lastsect;	/* first sector past block */
+	int32_t		reloccount;	/* number of reloc entries */
+	/* V3 introduced no header changes */
+	/* V4 was never released; security changes deferred til V6 */
+	/* V5 follows */
+	uint64_t	firstsect64;	/* first sector described by block */
+	uint64_t	lastsect64;	/* first sector past block */
+	unsigned char	imageid[UUID_LENGTH];
+					/* Unique ID for the whole image */
+	/* V6 follows */
 	uint16_t	enc_cipher;	/* cipher was used to encrypt */
 	uint16_t	csum_type;	/* checksum algortihm used */
 	uint8_t		enc_iv[ENC_MAX_KEYLEN];
 					/* Initialization vector */
 	unsigned char	checksum[SIG_MAX_KEYLEN];
 					/* (Signed) checksum */
-	unsigned char	imageid[UUID_LENGTH];
-					/* Unique ID for the whole image */
-	/* V5 follows */
-	uint64_t	firstsect64;	/* first sector described by block */
-	uint64_t	lastsect64;	/* first sector past block */
 };
 
 /*
- * Coming some day in V6:
+ * Coming some day in V7:
  *
  * Flag field?
  *   For example, to indicate a delta image. Would probably take over the
@@ -270,6 +296,15 @@ typedef union blockreloc {
 	    (blockreloc_t *)((struct blockreloc_32 *)(ptr) + 1) : \
 	    (blockreloc_t *)((struct blockreloc_64 *)(ptr) + 1))
 
+#define RELOC_TYPE(is32, ptr) \
+	(is32 ? (ptr)->r32.type : (ptr)->r64.type)
+#define RELOC_SECTOR(is32, ptr) \
+	(is32 ? (ptr)->r32.sector : (ptr)->r64.sector)
+#define RELOC_SECTOFF(is32, ptr) \
+	(is32 ? (ptr)->r32.sectoff : (ptr)->r64.sectoff)
+#define RELOC_SIZE(is32, ptr) \
+	(is32 ? (ptr)->r32.size : (ptr)->r64.size)
+
 #define RELOC_NONE		0
 #define RELOC_FBSDDISKLABEL	1	/* FreeBSD disklabel */
 #define RELOC_OBSDDISKLABEL	2	/* OpenBSD disklabel */
@@ -340,6 +375,10 @@ if (is32) { \
 #define REG_SIZE(is32, ptr) \
 	(is32 ? (uint64_t)ptr->r32.size : ptr->r64.size)
 
+#define REG_END(is32, ptr) \
+	(is32 ? \
+	    (ptr->r32.start + ptr->r32.size) : (ptr->r64.start + ptr->r64.size))
+	
 /*
  * Each block has its own region header info.
  *
@@ -354,7 +393,10 @@ if (is32) { \
  * At 4K, with a V2 image having a 36 byte header and 8 byte region
  * descriptors, we can fix 507 regions into a single chunk.
  *
- * At 4K, with a V5 image having a 360 byte header and 16 byte region
+ * At 4K, with a V5 image having a 68 byte header and 16 byte region
+ * descriptors, we can fix 251 regions into a single chunk.
+ *
+ * At 4K, with a V6 image having a 362 byte header and 16 byte region
  * descriptors, we can fix 233 regions into a single chunk.
  */
 #define DEFAULTREGIONSIZE	4096

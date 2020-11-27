@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2018 University of Utah and the Flux Group.
+# Copyright (c) 2000-2020 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -37,6 +37,11 @@ EXPANDCOPYRIGHT	= /usr/site/lib/copyright/expand-copyr
 WITH_RANGEMAP	= 0
 
 #
+# Use 64-bit block numbers and sizes.
+#
+WITH_64BITIZ	= 1
+
+#
 # At least support MBR partitioning
 #
 WITH_MBR	= 1
@@ -51,9 +56,13 @@ WITH_ERASE	= 0
 #
 # Support encrypted and signed-checksumed images.
 # Requires openssl libraries.
+# XXX these have been temporarily disabled
 #
-WITH_CRYPTO	= 1
-WITH_SIGNING	= 1
+WITH_CRYPTO	= 0
+WITH_SIGNING	= 0
+
+# XXX broken right now til I finish conversion to 64-bit
+WITH_LIBNDZ	= 0
 
 #
 # Support for auto-generation of old image versions
@@ -109,7 +118,7 @@ WITH_NTFS	= @WINSUPPORT@
 WITH_FAT	= @WINSUPPORT@
 
 # Note: requires WITH_CRYPTO
-WITH_HASH	= 1
+WITH_HASH	= 0
 WITH_HASHALIGN	= 0
 
 include $(OBJDIR)/Makeconf
@@ -133,7 +142,10 @@ endif
 # Necessary sometimes.
 #PTHREADCFLAGS	+= -DCONDVARS_WORK
 
-PROGS		= imagezip imageunzip imagedump imagerezip imagedelta imageundelta
+PROGS		= imagezip imageunzip imagedump
+ifeq ($(WITH_LIBNDZ),1)
+PROGS		+= imagerezip imagedelta imageundelta
+endif
 CFLAGS		= $(SUBDIRCFLAGS) -I$(SRCDIR) $(LDSTATIC)
 LIBS 		= -lz
 ZIPCFLAGS	= $(CFLAGS) -Wall
@@ -143,7 +155,14 @@ UNZIPLIBS	= $(LIBS) $(PTHREADLIBS)
 UNZIPDIRS	=
 HASHCFLAGS	= $(CFLAGS) $(PTHREADCFLAGS) -Wall
 HASHLIBS	= $(LIBS) -lcrypto $(PTHREADLIBS)
+ifeq ($(WITH_LIBNDZ),1)
 NDZLIBS		= libndz/libndz.a $(LIBS)
+endif
+
+# 64-bit
+ifeq ($(WITH_64BIT),1)
+CFLAGS		+= -DWITH_64BITIZ
+endif
 
 # Secure images
 ifeq ($(WITH_CRYPTO),1)
@@ -160,7 +179,9 @@ ifeq ($(WITH_V3COMPAT),1)
 CFLAGS		+= -DWITH_V3COMPAT
 endif
 
+ifeq ($(WITH_LIBNDZ),1)
 SUBDIRS		+= libndz
+endif
 
 # MBR
 ifeq ($(WITH_MBR),1)

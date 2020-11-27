@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -285,14 +285,17 @@ readifile(struct fileinfo *info)
 	info->sigmap = NULL;
 }
 
+/*
+ * XXX Currently only supports V3 format images.
+ */
 struct chunkstate {
     ndz_chunk_t chunkobj;
     ndz_chunkno_t chunkno;
     unsigned char *chunkdatabuf;
     blockhdr_t *header;
     uint32_t headerleft;
-    region_t *region;
-    region_t *curregion;
+    struct region_32 *region;
+    struct region_32 *curregion;
 };
 
 static int
@@ -309,7 +312,7 @@ initnewchunk(struct chunkstate *cstate, struct ndz_file *ndz)
 
     /*
      * XXX we still do V3 (actually V2 format) headers.
-     * We still don't really support V4 yet...
+     * We still don't really support V5 and above yet...
      */
     hdr = (struct blockhdr_V2 *)cstate->header;
     hdr->magic = COMPRESSED_V3;
@@ -321,9 +324,9 @@ initnewchunk(struct chunkstate *cstate, struct ndz_file *ndz)
     hdr->lastsect = 0;
     hdr->reloccount = 0;
 
-    cstate->region = (struct region *)(hdr + 1);
+    cstate->region = (struct region_32 *)(hdr + 1);
     cstate->curregion = cstate->region;
-    cstate->headerleft = hdr->regionsize - sizeof(blockhdr_t);
+    cstate->headerleft = hdr->regionsize - sizeof(*hdr);
 
     return 0;
 }
@@ -380,7 +383,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 	if (new.ndz->relocentries > 0)
 	    cstate->headerleft -=
 		(ndz_reloc_inrange(new.ndz, rstart, 0) *
-		 sizeof(struct blockreloc));
+		 sizeof(struct blockreloc_32));
     }
 
     /*
@@ -498,7 +501,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 
 	    chunkremaining = ndz_chunk_left(cstate->chunkobj);
 	    if (chunkremaining < new.ndz->sectsize ||
-		cstate->headerleft < sizeof(struct region)) {
+		cstate->headerleft < sizeof(struct region_32)) {
 		/* switch to new chunk */
 #ifdef CHUNKIFY_DEBUG
 		fprintf(stderr,
@@ -540,7 +543,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		if (new.ndz->relocentries > 0)
 		    cstate->headerleft -=
 			(ndz_reloc_inrange(new.ndz, pstart, 0) *
-			 sizeof(struct blockreloc));
+			 sizeof(struct blockreloc_32));
 
 		/* keep track if this hash range spans chunks */
 		if (psize < hsize)
@@ -585,7 +588,7 @@ chunkify(struct ndz_rangemap *mmap, struct ndz_range *range, void *arg)
 		cstate->curregion++;
 		cstate->curregion->start = pstart;
 		cstate->curregion->size = wsize;
-		cstate->headerleft -= sizeof(struct region);
+		cstate->headerleft -= sizeof(struct region_32);
 #ifdef CHUNKIFY_DEBUG
 		fprintf(stderr,
 			"    new range entry [%u-%u], %u header bytes left\n",

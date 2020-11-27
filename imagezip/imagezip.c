@@ -404,7 +404,7 @@ main(int argc, char *argv[])
 	memset(imageid, '\0', UUID_LENGTH);
 
 	gettimeofday(&sstamp, 0);
-	while ((ch = getopt(argc, argv, "vlbnNdihrs:c:z:ofI:13F:DR:S:XxH:U:P:Me:k:u:a:ZL")) != -1)
+	while ((ch = getopt(argc, argv, "vlbnNdihrs:c:z:ofI:135F:DR:S:XxH:U:P:Me:k:u:a:ZL")) != -1)
 		switch(ch) {
 		case 'v':
 			version++;
@@ -468,10 +468,14 @@ main(int argc, char *argv[])
 				usage();
 			break;
 		case '1':
-			compat = COMPRESSED_V1;
+			fprintf(stderr, "No longer support V1 compatibility\n"); 
+			usage();
 			break;
 		case '3':
 			compat = COMPRESSED_V3;
+			break;
+		case '5':
+			compat = COMPRESSED_V5;
 			break;
 		case 'F':
 #ifdef WITH_HASHALIGN
@@ -575,7 +579,7 @@ main(int argc, char *argv[])
 #endif
 			break;
 		case 'u':
-			/* UUID for image id. */
+			/* Unique image id. */
 			if (!hexstr_to_mem(imageid, optarg, UUID_LENGTH))
 				usage();
 			got_imageid = 1;
@@ -605,7 +609,10 @@ main(int argc, char *argv[])
 			fprintf(stderr, "\n  Partition types: ");
 			printslicemap();
 			fprintf(stderr, "\n  Features: ");
-			fprintf(stderr, "image UUIDs");
+#if COMPRESSED_MAGIC_CURRENT > COMPRESSED_V3
+			fprintf(stderr, "64-bit block numbers");
+			fprintf(stderr, ",unique image ID");
+#endif
 #ifdef WITH_CRYPTO
 #ifdef SIGN_CHECKSUM
 			fprintf(stderr, ",signed");
@@ -626,12 +633,13 @@ main(int argc, char *argv[])
 	if (argc < 1 || argc > 2)
 		usage();
 
-	if (compat &&
-	    (
 #ifdef WITH_CRYPTO
-	     do_encrypt || do_checksum ||
+	if (compat && compat < COMPRESSED_V6 && (do_encrypt || do_checksum)) {
+		fprintf(stderr, "Cannot use uuid/encrypt/checksum with -3\n");
+		usage();
+	}
 #endif
-	     got_imageid)) {
+	if (compat && compat < COMPRESSED_V5 && got_imageid) {
 		fprintf(stderr, "Cannot use uuid/encrypt/checksum with -3\n");
 		usage();
 	}
@@ -728,7 +736,7 @@ main(int argc, char *argv[])
 				       inputmaxsec > inputminsec);
 				if (debug)
 					fprintf(stderr, "Max sector: %lu\n",
-						inputmaxsec);
+						(unsigned long)inputmaxsec);
 			}
 			(void) lseek(infd, (off_t)0, SEEK_SET);
 		}
@@ -790,33 +798,36 @@ main(int argc, char *argv[])
 	}
 #ifdef WITH_V3COMPAT
 	/*
-	 * Deal with pre-crypto/pre-64-bit backward compatibility.
+	 * Default to "classic" V3 images where possible.
 	 *
-	 * We don't want to generate V4/V5 images unless we really need it.
-	 * For V4, we don't have to if none of encryption, checksuming, or
-	 * a UUID is specified. For V5, it also means that no region sector
-	 * number or size exceeds 32-bits. This is determined for us by
-	 * makeranges().
+	 * We don't want to generate V5+ images unless we really need it.
+	 * For V5, this means that no UUID was specified and no region sector
+	 * number or size exceeds 32-bits as determined by makeranges().
+	 * For V6, this means neither encryption or checksuming is specified.
 	 */
-	if (!compat &&
+	if (!compat && !got_imageid && !need64
 #ifdef WITH_CRYPTO
-	    !do_encrypt && !do_checksum &&
+	    && !do_encrypt && !do_checksum
 #endif
-	    !got_imageid && !need64)
+	)
 		compat = COMPRESSED_V3;
 #endif
 
 	/*
-	 * Generate a random UUID if one was not provided and we are
+	 * Generate a random image ID if one was not provided and we are
 	 * not operating in compatibility mode.
+	 *
+	 * XXX we need to generate a proper UUID. For now, if they don't
+	 * specify one, we just leave it zeroed.
 	 */
-	if (!compat && !got_imageid) {
+	if ((!compat || compat >= COMPRESSED_V5) && !got_imageid) {
+		memset(imageid, '\0', UUID_LENGTH);
+#if 0
 		int fd = open("/dev/urandom", O_RDONLY, 0);
 
 		if (fd < 0 ||
 		    read(fd, imageid, sizeof(imageid)) != sizeof(imageid)) {
 			fprintf(stderr, "WARNING: no UUID generated\n");
-			memset(imageid, '\0', UUID_LENGTH);
 		} else {
 			char uuidstr[UUID_LENGTH*2+1];
 
@@ -827,6 +838,7 @@ main(int argc, char *argv[])
 
 		if (fd >= 0)
 			close(fd);
+#endif
 	}
 
 #ifdef WITH_HASH
@@ -1039,12 +1051,14 @@ read_image(int fd)
 	if (debug) {
 		int i;
 
-		fprintf(stderr, "Disk:            start %12d, size %12ld\n",
-			0, dsize);
-		fprintf(stderr, "Usable:          start %12ld, size %12ld\n",
-			disk.lodata, disk.hidata - disk.lodata + 1);
-		fprintf(stderr, "Partition range: start %12ld, size %12ld\n",
-			disk.losect, disk.hisect - disk.losect + 1);
+		fprintf(stderr, "Disk:            start %12u, size %12lu\n",
+			0, (unsigned long)dsize);
+		fprintf(stderr, "Usable:          start %12lu, size %12lu\n",
+			(unsigned long)disk.lodata,
+			(unsigned long)disk.hidata - disk.lodata + 1);
+		fprintf(stderr, "Partition range: start %12lu, size %12lu\n",
+			(unsigned long)disk.losect,
+			(unsigned long)disk.hisect - disk.losect + 1);
 		fprintf(stderr, "%s Partitions:\n", bbstr);
 		for (i = 0; i < MAXSLICES; i++) {
 			struct sliceinfo *sinfo;
@@ -1059,8 +1073,9 @@ read_image(int fd)
 			else
 				fprintf(stderr, "%-12s", sinfo->desc);
 
-			fprintf(stderr, "  start %12ld, size %12ld",
-				parttab[i].offset, parttab[i].size);
+			fprintf(stderr, "  start %12lu, size %12lu",
+				(unsigned long)parttab[i].offset,
+				(unsigned long)parttab[i].size);
 			if (parttab[i].flags) {
 				fprintf(stderr, " (");
 				if (parttab[i].flags & IZFLAG_NOTSUP)
@@ -1129,14 +1144,15 @@ read_image(int fd)
 			addskip(dlow, losect-dlow);
 			if (dowarn > 1)
 				warnx("%s: skipping %lu sectors at %lu",
-				      bbstr, losect - dlow, dlow);
+				      bbstr, (unsigned long)losect - dlow,
+				      (unsigned long)dlow);
 		}
 		if (hisect < dhigh) {
 			addskip(hisect+1, dhigh-hisect);
 			if (dowarn > 1)
 				warnx("%s: skipping %lu sectors at %lu",
 				      bbstr, (unsigned long)(dhigh - hisect),
-				      hisect + 1);
+				      (unsigned long)hisect + 1);
 		}
 	}
 
@@ -1243,14 +1259,16 @@ read_image(int fd)
 			fprintf(stderr,
 				"partitioner low value (%lu) different than "
 				"computed value (%lu); using the former\n",
-				(unsigned long)dstart, inputminsec);
+				(unsigned long)dstart,
+				(unsigned long)inputminsec);
 			inputminsec = dstart;
 		}
 		if (!maxmode && dstart+dsize != inputmaxsec) {
 			fprintf(stderr,
 				"partitioner high value (%lu) different than "
 				"computed value (%lu); using the former\n",
-				(unsigned long)(dstart+dsize), inputmaxsec);
+				(unsigned long)(dstart+dsize),
+				(unsigned long)inputmaxsec);
 			inputmaxsec = dstart + dsize;
 		}
 	}
@@ -1310,7 +1328,7 @@ char *usagestr =
  "\n"
  " Authentication and integrity options\n"
  " -a hashalg     Create per-chunk signatures using the hash algorithm given\n"
- " -u uuid        Assign the given value as the image UUID\n"
+ " -u uuid        Assign the given value (up to 16 ascii chars) as the image ID\n"
  "\n"
  " Encryption options\n"
  " -e cipher      Encrypt the image with the given cipher\n"
@@ -1503,7 +1521,8 @@ dumpskips(int verbose)
 
 	if (verbose) {
 		fprintf(stderr, "\nMin sector %lu, Max sector %lu\n",
-			inputminsec, inputmaxsec);
+			(unsigned long)inputminsec,
+			(unsigned long)inputmaxsec);
 		fprintf(stderr, "Skip ranges (start/size) in sectors:\n");
 	}
 
@@ -1757,7 +1776,7 @@ sortrange(struct range **headp, int domerge,
 		size_t count = 0;
 		for (prange = head; prange; prange = prange->next)
 			count++;
-		fprintf(stderr, "sorting %u records\n", count);
+		fprintf(stderr, "sorting %lu records\n", count);
 		if (count > 10000) {
 			head = bettersort(head, count, rangecmp);
 			if (head != NULL) {
@@ -1975,16 +1994,6 @@ addfixupentry(off_t offset, off_t poffset, off_t size, void *data, off_t dsize,
 	struct range *entry;
 	struct fixup *fixup;
 	void *fdata;
-
-	if (compat == COMPRESSED_V1) {
-		static int warned;
-
-		if (!warned) {
-			fprintf(stderr, "WARNING: no fixups in V1 images\n");
-			warned = 1;
-		}
-		return;
-	}
 
 	/*
 	 * Malloc the range separate from the fixup data since
@@ -2312,24 +2321,19 @@ headerfull(int nregions, int nrelocs)
 	int hdrsize, regsize, relsize;
 
 	switch (compat) {
-	case COMPRESSED_V1:
-		assert(nrelocs == 0);
-		hdrsize = sizeof(struct blockhdr_V1);
-		regsize = sizeof(struct region_32);
-		relsize = 0;
-		break;
 	case COMPRESSED_V3:
 		hdrsize = sizeof(struct blockhdr_V2);
 		regsize = sizeof(struct region_32);
 		relsize = sizeof(struct blockreloc_32);
 		break;
+	case COMPRESSED_V5:
 	case 0:
 		hdrsize = sizeof(struct blockhdr_V5);
 		regsize = sizeof(struct region_64);
 		relsize = sizeof(struct blockreloc_64);
 		break;
 	default:
-		assert(compat != COMPRESSED_V1 && compat != COMPRESSED_V3);
+		assert(compat != COMPRESSED_V3);
 		exit(1);
 	}
 	if (hdrsize + nregions * regsize + nrelocs * relsize >
@@ -2342,10 +2346,8 @@ void
 addreloc(off_t offset, off_t size, int reloctype)
 {
 	blockreloc_t *reloc;
-	int is32 = compat ? 1 : 0;
+	int is32 = (compat && compat < COMPRESSED_V5) ? 1 : 0;
 	off_t sect;
-
-	assert(compat != COMPRESSED_V1);
 
 	if (!RELOC_VALID(is32, bytestosec(offset), size)) {
 		fprintf(stderr, "Reloc sector (%lu) or size (%lu) > 2^32,"
@@ -2410,17 +2412,17 @@ static void	encrypt_finish(blockhdr_t *hdr,
 int
 compress_image(void)
 {
-	int		cc, full, i, count, chunkno;
-	off_t		size = 0, outputoffset;
-	off_t		tmpoffset, rangesize;
+	int		cc, full, chunkno;
+	off_t		size = 0;
+	off_t		rangesize;
 	struct range	*prange;
 	blockhdr_t	*blkhdr;
 	region_t	*curregion, *regions;
 	struct timeval	estamp;
 	uint8_t		*buf;
-	uint64_t	cursect = 0;
+	uint64_t	cursect = 0, lastsect;
 	region_t	*lreg;
-	int		is32 = 1;
+	int		is32;
 
 	gettimeofday(&cstamp, 0);
 	inputoffset = 0;
@@ -2432,20 +2434,19 @@ compress_image(void)
 	memset(buf, 0, DEFAULTREGIONSIZE);
 	blkhdr = (blockhdr_t *) buf;
 	switch (compat) {
-	case COMPRESSED_V1:
-		regions = (region_t *)((struct blockhdr_V1 *)blkhdr + 1);
-		break;
 	case COMPRESSED_V2:
 	case COMPRESSED_V3:
+		is32 = 1;
 		regions = (region_t *)((struct blockhdr_V2 *)blkhdr + 1);
 		break;
-	case COMPRESSED_V4:
-		regions = (region_t *)((struct blockhdr_V4 *)blkhdr + 1);
+	case COMPRESSED_V5:
+		is32 = 0;
+		regions = (region_t *)((struct blockhdr_V5 *)blkhdr + 1);
 		break;
 	default:
 		assert(compat == 0);
-		regions = (region_t *)(blkhdr + 1);
 		is32 = 0;
+		regions = (region_t *)(blkhdr + 1);
 		break;
 	}
 	curregion = regions;
@@ -2596,58 +2597,49 @@ compress_image(void)
 		blkhdr->blockindex  = chunkno;
 		blkhdr->regionsize  = DEFAULTREGIONSIZE;
 		blkhdr->regioncount = REG_DIFF(is32, curregion, regions);
-		if (compat != COMPRESSED_V1) {
-			uint64_t lastsect;
 
-			if (is32)
-				blkhdr->firstsect = cursect;
-			else
-				blkhdr->firstsect64 = cursect;
-			if (size == rangesize) {
-				/*
-				 * Finished subblock at the end of a range.
-				 * Find the beginning of the next range so that
-				 * we include any free space between the ranges
-				 * here.  If this was the last range, we use
-				 * inputmaxsec.  If inputmaxsec is zero, we
-				 * know that we did not end with a skip range.
-				 */
-				if (prange->next)
-					lastsect = prange->next->start -
-						inputminsec;
-				else if (inputmaxsec > 0)
-					lastsect = inputmaxsec - inputminsec;
-				else {
-					lreg = REG_PREV(is32, curregion);
-					lastsect = is32 ?
-						(lreg->r32.start + lreg->r32.size) :
-						(lreg->r64.start + lreg->r64.size);
-				}
-			} else {
+		if (is32)
+			blkhdr->firstsect = cursect;
+		else
+			blkhdr->firstsect64 = cursect;
+		if (size == rangesize) {
+			/*
+			 * Finished subblock at the end of a range.
+			 * Find the beginning of the next range so that
+			 * we include any free space between the ranges
+			 * here.  If this was the last range, we use
+			 * inputmaxsec.  If inputmaxsec is zero, we
+			 * know that we did not end with a skip range.
+			 */
+			if (prange->next)
+				lastsect = prange->next->start - inputminsec;
+			else if (inputmaxsec > 0)
+				lastsect = inputmaxsec - inputminsec;
+			else {
 				lreg = REG_PREV(is32, curregion);
-				lastsect = is32 ?
-					(lreg->r32.start + lreg->r32.size) :
-					(lreg->r64.start + lreg->r64.size);
+				lastsect = REG_END(is32, lreg);
 			}
-			if (compat == 0)
-				cursect = blkhdr->lastsect64 = lastsect;
-			else
-				cursect = blkhdr->lastsect = lastsect;
-
-			blkhdr->reloccount = numrelocs;
+		} else {
+			lreg = REG_PREV(is32, curregion);
+			lastsect = REG_END(is32, lreg);
 		}
+		if (compat && compat < COMPRESSED_V5)
+			cursect = blkhdr->lastsect = lastsect;
+		else
+			cursect = blkhdr->lastsect64 = lastsect;
+
+		blkhdr->reloccount = numrelocs;
 
 		/*
 		 * Dump relocation info
 		 */
 		if (numrelocs) {
-			assert(compat != COMPRESSED_V1);
 			assert(relocs != NULL);
 			memcpy(curregion, relocs, RELOC_RSIZE(is32, numrelocs));
 			freerelocs();
 		}
 
-		if (!compat)
+		if (!compat || compat >= COMPRESSED_V5)
 			memcpy(blkhdr->imageid, imageid, UUID_LENGTH);
 
 #ifdef WITH_CRYPTO
@@ -2692,7 +2684,6 @@ compress_image(void)
 		 */
 		if (newhashfile) {
 			uint64_t first, last;
-			assert(compat != COMPRESSED_V1);
 			if (is32) {
 				first = blkhdr->firstsect;
 				last = blkhdr->lastsect;
@@ -2757,33 +2748,30 @@ compress_image(void)
 	 * Have to finish up by writing out the last batch of region info.
 	 */
 	if (curregion != regions) {
+		uint64_t lastsect;
+
 		compress_finish(&blkhdr->size);
 
 		blkhdr->magic = compat ? compat : COMPRESSED_MAGIC_CURRENT;
 		blkhdr->blockindex  = chunkno;
 		blkhdr->regionsize  = DEFAULTREGIONSIZE;
 		blkhdr->regioncount = REG_DIFF(is32, curregion, regions);
-		if (compat != COMPRESSED_V1) {
-			uint64_t lastsect;
 
-			if (compat == 0)
-				blkhdr->firstsect64 = cursect;
-			else
-				blkhdr->firstsect = cursect;
-			if (inputmaxsec > 0)
-				lastsect = inputmaxsec - inputminsec;
-			else {
-				lreg = REG_PREV(is32, curregion);
-				lastsect = is32 ?
-					(lreg->r32.start + lreg->r32.size) :
-					(lreg->r64.start + lreg->r64.size);
-			}
-			if (compat == 0)
-				blkhdr->lastsect64 = lastsect;
-			else
-				blkhdr->lastsect = lastsect;
-			blkhdr->reloccount = numrelocs;
+		if (compat && compat < COMPRESSED_V5)
+			blkhdr->firstsect = cursect;
+		else
+			blkhdr->firstsect64 = cursect;
+		if (inputmaxsec > 0)
+			lastsect = inputmaxsec - inputminsec;
+		else {
+			lreg = REG_PREV(is32, curregion);
+			lastsect = REG_END(is32, lreg);
 		}
+		if (compat && compat < COMPRESSED_V5)
+			blkhdr->lastsect = lastsect;
+		else
+			blkhdr->lastsect64 = lastsect;
+		blkhdr->reloccount = numrelocs;
 
 		/*
 		 * Check to see if the region/reloc table is full.
@@ -2799,13 +2787,12 @@ compress_image(void)
 		 * Dump relocation info
 		 */
 		if (numrelocs) {
-			assert(compat != COMPRESSED_V1);
 			assert(relocs != NULL);
 			memcpy(curregion, relocs, RELOC_RSIZE(is32, numrelocs));
 			freerelocs();
 		}
 
-		if (!compat)
+		if (!compat || compat >= COMPRESSED_V5)
 			memcpy(blkhdr->imageid, imageid, UUID_LENGTH);
 
 #ifdef WITH_CRYPTO
@@ -2850,7 +2837,6 @@ compress_image(void)
 		 */
 		if (newhashfile) {
 			uint64_t first, last;
-			assert(compat != COMPRESSED_V1);
 			if (is32) {
 				first = blkhdr->firstsect;
 				last = blkhdr->lastsect;
@@ -2889,48 +2875,8 @@ compress_image(void)
 
 	/*
 	 * For version 2 and beyond we don't bother to go back and fill in
-	 * the blockcount.  Imageunzip and frisbee don't use it.  We still
-	 * do it if creating V1 images and we can seek on the output.
+	 * the blockcount.  Imageunzip and frisbee don't use it.
 	 */
-	if (compat != COMPRESSED_V1 || !outcanseek)
-		return 0;
-
-	/*
-	 * Get the total filesize, and then number the subblocks.
-	 * Useful, for netdisk.
-	 */
-	if ((tmpoffset = lseek(outfd, (off_t) 0, SEEK_END)) < 0) {
-		perror("seeking to get output file size");
-		exit(1);
-	}
-	count = tmpoffset / CHUNKSIZE;
-
-	for (i = 0, outputoffset = 0; i < count;
-	     i++, outputoffset += CHUNKSIZE) {
-
-		if (lseek(outfd, (off_t) outputoffset, SEEK_SET) < 0) {
-			perror("seeking to read block header");
-			exit(1);
-		}
-		if ((cc = read(outfd, buf, sizeof(struct blockhdr_V1))) < 0) {
-			perror("reading subblock header");
-			exit(1);
-		}
-		assert(cc == sizeof(struct blockhdr_V1));
-		if (lseek(outfd, (off_t) outputoffset, SEEK_SET) < 0) {
-			perror("seeking to write new block header");
-			exit(1);
-		}
-		blkhdr = (blockhdr_t *) buf;
-		assert(blkhdr->blockindex == i);
-		blkhdr->blocktotal = count;
-
-		if ((cc = devwrite(outfd, buf, sizeof(struct blockhdr_V1))) < 0) {
-			perror("writing new subblock header");
-			exit(1);
-		}
-		assert(cc == sizeof(struct blockhdr_V1));
-	}
 	return 0;
 }
 
@@ -3137,10 +3083,6 @@ compress_chunk(off_t off, off_t size, int *full, uint32_t *subblksize)
 
 		outsize = CHUNKSIZE - buffer_offset;
 
-		/* XXX match behavior of original compressor */
-		if (compat == COMPRESSED_V1 && outsize > 0x20000)
-			outsize = 0x20000;
-
 		d_stream.next_in   = (Bytef *)inbuf;
 		d_stream.avail_in  = cc;
 		d_stream.next_out  = &output_buffer[buffer_offset];
@@ -3150,8 +3092,7 @@ compress_chunk(off_t off, off_t size, int *full, uint32_t *subblksize)
 		err = deflate(&d_stream, Z_SYNC_FLUSH);
 		CHECK_ZLIB_ERR(err, "deflate");
 
-		if (d_stream.avail_in != 0 ||
-		    (compat != COMPRESSED_V1 && d_stream.avail_out == 0)) {
+		if (d_stream.avail_in != 0 || d_stream.avail_out == 0) {
 			fprintf(stderr, "Something went wrong, ");
 			if (d_stream.avail_in)
 				fprintf(stderr, "not all input deflated!\n");

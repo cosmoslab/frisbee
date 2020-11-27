@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2016 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -569,7 +569,7 @@ initnewchunk(struct chunkstate *cstate, struct ndz_file *ndz)
 
     /*
      * XXX we still do V3 (actually V2 format) headers.
-     * We still don't really support V4 yet...
+     * We still don't really support V5 and above yet...
      */
     hdr = (struct blockhdr_V2 *)cstate->header;
     hdr->magic = COMPRESSED_V3;

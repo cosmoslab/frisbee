@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005-2018 University of Utah and the Flux Group.
+ * Copyright (c) 2005-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -51,24 +51,29 @@
  * globals for fetching the HASHSTATS related information
  */
 #ifdef HASHSTATS
+#ifdef WITH_64BITIZ
+typedef uint64_t hcnt_t;
+#else
+typedef uint32_t hcnt_t;
+#endif
 struct hashstats {
-	uint32_t cur_allocated;	 /* allocated sectors in original */
-	uint32_t orig_allocated; /* allocated sectors in current */
-	uint32_t cur_only;	 /* sectors allocated only in current */
-	uint32_t orig_only;	 /* sectors allocated only in original */
-	uint32_t shared;	 /* sectors allocated in both */
-	uint32_t unchanged;	 /* shared sectors that have not changed */
-	uint32_t nocompare;	 /* sectors assumed different with no compare */
-	uint32_t hash_compares;	 /* hash blocks compared */
-	uint32_t hash_scompares; /* sectors compared */
-	uint32_t hash_identical; /* hash blocks identical */
-	uint32_t hash_sidentical;/* sectors identical */
-	uint32_t gaps;		 /* hash ranges with free gaps */
-	uint32_t gapsects;	 /* free sectors in gaps */
-	uint32_t unchangedgaps;	 /* hash ranges with gaps that hash ok */
-	uint32_t gapunchanged;	 /* unchanged free sectors in gaps */
-	uint32_t gapnocompare;	 /* uncompared sectors in gaps */
-	uint32_t fixup;		 /* uncompared due to fixup overlap */
+	hcnt_t cur_allocated;	/* allocated sectors in original */
+	hcnt_t orig_allocated;	/* allocated sectors in current */
+	hcnt_t cur_only;	/* sectors allocated only in current */
+	hcnt_t orig_only;	/* sectors allocated only in original */
+	hcnt_t shared;		/* sectors allocated in both */
+	hcnt_t unchanged;	/* shared sectors that have not changed */
+	hcnt_t nocompare;	/* sectors assumed different with no compare */
+	hcnt_t hash_compares;	/* hash blocks compared */
+	hcnt_t hash_scompares;	/* sectors compared */
+	hcnt_t hash_identical;	/* hash blocks identical */
+	hcnt_t hash_sidentical;	/* sectors identical */
+	hcnt_t gaps;		/* hash ranges with free gaps */
+	hcnt_t gapsects;	/* free sectors in gaps */
+	hcnt_t unchangedgaps;	/* hash ranges with gaps that hash ok */
+	hcnt_t gapunchanged;	/* unchanged free sectors in gaps */
+	hcnt_t gapnocompare;	/* uncompared sectors in gaps */
+	hcnt_t fixup;		/* uncompared due to fixup overlap */
 } hashstats;
 
 struct timeval time_orig_read, time_curr_read, time_hash, time_hash_and_cmp;
@@ -92,7 +97,7 @@ static unsigned int hashlen;
 static unsigned char *(*hashfunc)(const unsigned char *, size_t,
 				  unsigned char *);
 static int imagefd;
-static uint32_t poffset = ~0;
+static iz_lba poffset = ~0;
 
 /*
  * time the operation, updating the global_v (of type 'struct timeval')
@@ -130,17 +135,18 @@ spewhash(unsigned char *h, int hlen)
 static void
 dumphash(struct hashinfo *hinfo)
 {
-	uint32_t i, total = 0;
+	uint32_t i;
+	uint64_t total = 0;
 	struct hashregion *reg;
 
 	for (i = 0; i < hinfo->nregions; i++) {
 		reg = &hinfo->regions[i];
-		printf("[%u-%u]: hash %s\n", reg->region.start,
+		printf("[%lu-%lu]: hash %s\n", reg->region.start,
 		       reg->region.start + reg->region.size - 1,
 		       spewhash(reg->hash, hashlen));
 		total += reg->region.size;
 	}
-	printf("TOTAL = %u\n", total);
+	printf("TOTAL = %lu\n", total);
 }
 #endif
 
