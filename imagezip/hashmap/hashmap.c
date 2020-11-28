@@ -154,7 +154,7 @@ dumphash(struct hashinfo *hinfo)
  * Read a range of the disk and compute the hash value.
  */
 static int
-hash_range(uint64_t start, uint64_t size, unsigned char *hash)
+hash_range(uint64_t start, uint32_t size, unsigned char *hash)
 {
 	unsigned char		*bp;
 	size_t			count, byte_size;
@@ -218,14 +218,13 @@ hash_range(uint64_t start, uint64_t size, unsigned char *hash)
 static int
 hash_and_cmp(struct hashregion *hashreg, unsigned char *hash)
 {
-	struct region_32	hreg = hashreg->region;
-	int			iretval;
+	int iretval;
 
 	assert(imagefd >= 0);
 	assert(hashfunc != NULL);
 	assert(hashlen != 0);
 
-	if (hash_range(hreg.start, hreg.size, hash))
+	if (hash_range(hashreg->start, hashreg->size, hash))
 		return -1;
 
 	/*
@@ -240,10 +239,10 @@ hash_and_cmp(struct hashregion *hashreg, unsigned char *hash)
 
 #ifdef HASHSTATS
 	hashstats.hash_compares++;
-	hashstats.hash_scompares += hreg.size;
+	hashstats.hash_scompares += hashreg->size;
 	if (!iretval) {
 		hashstats.hash_identical++;
-		hashstats.hash_sidentical += hreg.size;
+		hashstats.hash_sidentical += hashreg->size;
 	}
 #endif
 
@@ -287,71 +286,114 @@ add_to_range(struct range **tailp, uint32_t start, uint32_t size)
  * for IO.
  */
 static int
-readhashinfo(char *hfile, struct hashinfo **hinfop)
+readhashinfo(char *hname, struct hashinfo **hinfop)
 {
 	struct hashinfo		hi, *hinfo;
-	int			fd, nregbytes, cc, i, is32;
+	int			fd, nbytes, cc, i;
+	struct hashregion_32	*cvtbuf = NULL;
 
 	assert(poffset != ~0);
 
-	fd = open(hfile, O_RDONLY);
+	fd = open(hname, O_RDONLY);
 	if (fd < 0) {
-		perror(hfile);
+		perror(hname);
 		return -1;
 	}
-	cc = read(fd, &hi, sizeof(hi));
-	if (cc != sizeof(hi)) {
+	nbytes = sizeof(hi);
+	cc = read(fd, &hi, nbytes);
+	if (cc != nbytes) {
+	readbad:
 		if (cc < 0)
-			perror(hfile);
+			perror(hname);
 		else
-			fprintf(stderr, "%s: too short\n", hfile);
+			fprintf(stderr, "%s: too short\n", hname);
 		close(fd);
 		return -1;
 	}
 	if (strcmp((char *)hi.magic, HASH_MAGIC) != 0 ||
 	    !(hi.version == HASH_VERSION_1 || hi.version == HASH_VERSION_2 ||
 	      hi.version == HASH_VERSION_3)) {
-		fprintf(stderr, "%s: not a valid signature file\n", hfile);
+		fprintf(stderr, "%s: not a valid signature file\n", hname);
+		close(fd);
 		return -1;
 	}
-	is32 = (hi.version < HASH_VERSION_3) ? 1 : 0;
-	nregbytes = hi.nregions * sizeof(struct hashregion);
-	hinfo = malloc(sizeof(hi) + nregbytes);
+	switch (hi.version) {
+	case HASH_VERSION_1:
+		hi.blksize = bytestosec(HASHBLK_SIZE);
+		/* fall into ... */
+	case HASH_VERSION_2:
+		nbytes = hi.nregions * sizeof(struct hashregion_32);
+		cvtbuf = malloc(nbytes);
+		if (cvtbuf == NULL) {
+			fprintf(stderr, "%s: not enough memory for info\n",
+				hname);
+			close(fd);
+			return -1;
+		}
+		break;
+	default:
+		nbytes = hi.nregions * sizeof(struct hashregion);
+		break;
+	}
+	hinfo = malloc(sizeof(hi) + hi.nregions * sizeof(struct hashregion));
 	if (hinfo == 0) {
-		fprintf(stderr, "%s: not enough memory for info\n", hfile);
+		fprintf(stderr, "%s: not enough memory for info\n", hname);
+		close(fd);
 		return -1;
 	}
 	*hinfo = hi;
-	if (is32) {
-		FIXME
-	} else {
-		cc = read(fd, hinfo->regions, nregbytes);
-	}
-	if (cc != nregbytes) {
-		free(hinfo);
-		return -1;
-	}
+	if (cvtbuf) {
+		struct hashregion_32 *from;
+		struct hashregion *to;
+		int i;
 
-	hashblksize = (hi.version == HASH_VERSION_1) ?
-		bytestosec(HASHBLK_SIZE) : hi.blksize;
+		cc = read(fd, cvtbuf, nbytes);
+		if (cc != nbytes) {
+			free(hinfo);
+			free(cvtbuf);
+			goto readbad;
+		}
+		from = cvtbuf;
+		to = hinfo->regions;
+		for (i = 0; i < hinfo->nregions; i++) {
+			to->start = from->start;
+			to->size = from->size;
+			to->chunkno = from->chunkno;
+			memcpy(to->hash, from->hash, sizeof(from->hash));
+			memset(to->hash+sizeof(from->hash), 0,
+			       sizeof(to->hash)-sizeof(from->hash));
+			to++, from++;
+		}
+		free(cvtbuf);
+		hinfo->version = HASH_VERSION;
+	} else {
+		cc = read(fd, hinfo->regions, nbytes);
+		if (cc != nbytes) {
+			free(hinfo);
+			goto readbad;
+		}
+	}
+	close(fd);
+
+	hashblksize = hinfo->blksize;
 
 	/* Compensate for partition offset */
 	for (i = 0; i < hinfo->nregions; i++) {
 		struct hashregion *hreg = &hinfo->regions[i];
-		assert(hreg->region.size <= hashblksize);
+		assert(hreg->size <= hashblksize);
 
-		hreg->region.start += poffset;
+		hreg->start += poffset;
 #ifdef HASHSTATS
-		hashstats.orig_allocated += hreg->region.size;
+		hashstats.orig_allocated += hreg->size;
 #endif
 	}
-	close(fd);
 
-	hashfile = hfile;
+	hashfile = hname;
 	hashdata = malloc(sectobytes(hashblksize));
 	if (hashdata == NULL) {
 		fprintf(stderr, "%s: not enough memory for data buffer\n",
-			hfile);
+			hname);
+		free(hinfo);
 		return -1;
 	}
 
@@ -373,8 +415,9 @@ int hashmap_blocksize(void)
  * Write out hash (signature) info associated with the named image.
  * Signature file will be given either the explicit 'fname' or will
  * be derived from 'iname' if 'fname' is ''.
+ * We write out either V2 or V3 format depending on the image version.
  */
-int hashmap_write_hashfile(char *fname, char *iname)
+int hashmap_write_hashfile(char *fname, char *iname, uint32_t ivers)
 {
 	int ofd, i, cc, count;
 	char *hfile;
@@ -389,10 +432,10 @@ int hashmap_write_hashfile(char *fname, char *iname)
 	/* Compensate for partition offset */
 	for (i = 0; i < nhinfo->nregions; i++) {
 		struct hashregion *hreg = &nhinfo->regions[i];
-		assert(hreg->region.size <= nhinfo->blksize);
-		assert(hreg->region.start >= poffset);
+		assert(hreg->size <= nhinfo->blksize);
+		assert(hreg->start >= poffset);
 
-		hreg->region.start -= poffset;
+		hreg->start -= poffset;
 	}
 
 	/*
@@ -433,7 +476,65 @@ int hashmap_write_hashfile(char *fname, char *iname)
 			return -1;
 	}
 
-	count = sizeof(*nhinfo) + nhinfo->nregions*sizeof(struct hashregion);
+	count = sizeof(*nhinfo) + nhinfo->nregions * sizeof(struct hashregion);
+
+	/*
+	 * Convert the hash info as necessary.
+	 */
+	if (ivers < COMPRESSED_V5) {
+		struct hashinfo *hinfo;
+		struct hashregion *hreg;
+		struct hashregion_32 *hreg32;
+		int i;
+
+		if (nhinfo->hashtype == HASH_TYPE_SHA256) {
+			fprintf(stderr,
+				"%s: incompatible hash type for V2, writing V3 instead\n",
+				iname);
+			goto convertfailed;
+		}
+		hinfo = malloc(sizeof(*hinfo) +
+			       nhinfo->nregions * sizeof(struct hashregion_32));
+		if (hinfo == 0) {
+			fprintf(stderr,
+				"%s: Cannot convert hashinfo to V2, writing V3 instead\n",
+				iname);
+			goto convertfailed;
+		}
+		strcpy((char *)hinfo->magic, HASH_MAGIC);
+		hinfo->version = HASH_VERSION_2;
+		hinfo->hashtype = nhinfo->hashtype;
+		hinfo->nregions = nhinfo->nregions;
+		hinfo->blksize = hashblksize;
+		memset(hinfo->pad, 0, sizeof(hinfo->pad));
+
+		/*
+		 * Convert to old style (32-bit) descriptors
+		 */
+		hreg = nhinfo->regions;
+		hreg32 = (struct hashregion_32 *)hinfo->regions;
+		for (i = 0; i < nhinfo->nregions; i++) {
+			if (hreg->start > UINT32_MAX) {
+				fprintf(stderr,
+					"%s: start value > 32-bits, writing V3 instead\n",
+					iname);
+				free(hinfo);
+				goto convertfailed;
+			}
+			hreg32->start = (uint32_t)hreg->start;
+			hreg32->size = hreg->size;
+			hreg32->chunkno = hreg->chunkno;
+			memcpy(hreg32->hash, hreg->hash, sizeof(hreg32->hash));
+			hreg++;
+			hreg32++;
+		}
+		free(nhinfo);
+		nhinfo = hinfo;
+		count = sizeof(*hinfo) +
+			nhinfo->nregions * sizeof(struct hashregion_32);
+	}
+
+ convertfailed:
 	cc = write(ofd, nhinfo, count);
 	close(ofd);
 	if (cc != count) {
@@ -487,7 +588,7 @@ int hashmap_write_hashfile(char *fname, char *iname)
 #define REGPERBLK	8192	/* ~256KB -- must be power of 2 */
 
 static int
-addhash(struct hashinfo **hinfop, uint32_t start, uint32_t size,
+addhash(struct hashinfo **hinfop, uint64_t start, uint32_t size,
 	unsigned char *hash)
 {
 	struct hashinfo *hinfo = *hinfop;
@@ -508,8 +609,8 @@ addhash(struct hashinfo **hinfop, uint32_t start, uint32_t size,
 	}
 
 	hinfo->regions[nreg].chunkno = 0;
-	hinfo->regions[nreg].region.start = start;
-	hinfo->regions[nreg].region.size = size;
+	hinfo->regions[nreg].start = start;
+	hinfo->regions[nreg].size = size;
 	memcpy(hinfo->regions[nreg].hash, hash, HASH_MAXSIZE);
 	hinfo->nregions++;
 #ifdef FOLLOW
@@ -525,7 +626,7 @@ addhash(struct hashinfo **hinfop, uint32_t start, uint32_t size,
  * Compute the hash of each range if not given.
  */
 static int
-add_to_hashmap(struct hashinfo **hinfop, uint32_t rstart, uint32_t rsize,
+add_to_hashmap(struct hashinfo **hinfop, uint64_t rstart, uint32_t rsize,
 	       unsigned char *rhash)
 {
 	uint32_t offset, hsize;
@@ -600,8 +701,8 @@ hashmap_update_chunk(uint64_t ssect, uint64_t lsect, int chunkno)
 	lsect--;
 	for (i = 0; i < nhinfo->nregions; i++) {
 		struct hashregion *hreg = &nhinfo->regions[i];
-		uint32_t hrssect = hreg->region.start;
-		uint32_t hrlsect = hrssect + hreg->region.size - 1;
+		uint32_t hrssect = hreg->start;
+		uint32_t hrlsect = hrssect + hreg->size - 1;
 
 		/* hash range all before, skip */
 		if (hrlsect < ssect)
@@ -664,7 +765,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	} else {
 		hinfo = calloc(1, sizeof(*nhinfo));
 		strcpy((char *)hinfo->magic, HASH_MAGIC);
-		hinfo->version = HASH_VERSION_2;
+		hinfo->version = HASH_VERSION;
 		hinfo->hashtype = HASH_TYPE_SHA1; 		/* XXX */
 		hinfo->blksize = bytestosec(HASHBLK_SIZE);	/* XXX */
 		hinfo->nregions = 0;
@@ -690,6 +791,10 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	case HASH_TYPE_SHA1:
 		hashlen = 20;
 		hashfunc = SHA1;
+		break;
+	case HASH_TYPE_SHA256:
+		hashlen = 32;
+		hashfunc = SHA256;
 		break;
 	}
 
@@ -741,13 +846,11 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 		 * range are newly allocated, and must be put in the image.
 		 */
 		while (drange &&
-		       (drange->start + drange->size) <= hreg->region.start) {
+		       (drange->start + drange->size) <= hreg->start) {
 #ifdef FOLLOW
 			fprintf(stderr, "    D: [%u-%u] pre-hreg [%u-%u] skip\n",
-				drange->start,
-				drange->start + drange->size - 1,
-				hreg->region.start,
-				hreg->region.start + hreg->region.size - 1);
+				drange->start, drange->start + drange->size - 1,
+				hreg->start, hreg->start + hreg->size - 1);
 #endif
 #ifdef HASHSTATS
 			hashstats.cur_allocated += drange->size;
@@ -769,7 +872,7 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 		}
 		if (drange == NULL)
 			break;
-		assert(hreg->region.start < (drange->start + drange->size));
+		assert(hreg->start < (drange->start + drange->size));
 
 #ifdef FOLLOW
 		fprintf(stderr, "  D: [%u-%u] after pre-hreg skip\n",
@@ -783,9 +886,9 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 		 * (The blocks must have been deallocated.)
 		 */
 
-		if (hreg->region.start + hreg->region.size <= drange->start) {
+		if (hreg->start + hreg->size <= drange->start) {
 #ifdef HASHSTATS
-			hashstats.orig_only += hreg->region.size;
+			hashstats.orig_only += hreg->size;
 #endif
 			continue;
 		}
@@ -796,15 +899,15 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 		 * treat the portion of drange before the overlap seperately.
 		 * thus aligning with hash boundaries
 		 */
-		assert(hreg->region.start + hreg->region.size > drange->start);
-		assert(hreg->region.start < drange->start + drange->size);
+		assert(hreg->start + hreg->size > drange->start);
+		assert(hreg->start < drange->start + drange->size);
 
 		/*
 		 * Any part of the drange that falls before the hreg is
 		 * new data and needs to be in the image.
 		 */
-		if (drange->start < hreg->region.start) {
-			uint32_t before = hreg->region.start - drange->start;
+		if (drange->start < hreg->start) {
+			uint32_t before = hreg->start - drange->start;
 #ifdef HASHSTATS
 			hashstats.cur_allocated += before;
 			hashstats.cur_only += before;
@@ -860,8 +963,8 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 		 * it likely to pay off?  We will have to see.
 		 */
 		if (hash_free ||
-		    (drange->start == hreg->region.start &&
-		     drange->size >= hreg->region.size)) {
+		    (drange->start == hreg->start &&
+		     drange->size >= hreg->size)) {
 
 			/*
 			 * If there is a fixup, we have to include the
@@ -869,12 +972,12 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 			 * range matched after the fixup was applied, there
 			 * would have to be something to apply the fixup to!
 			 */
-			if (hasfixup(hreg->region.start, hreg->region.size)) {
+			if (hasfixup(hreg->start, hreg->size)) {
 				changed = 3;
 #ifdef FOLLOW
 				fprintf(stderr, "  H: [%u-%u] fixup overlap\n",
-					hreg->region.start,
-					hreg->region.start + hreg->region.size-1);
+					hreg->start,
+					hreg->start + hreg->size-1);
 #endif
 			} else {
 
@@ -886,8 +989,8 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 
 #ifdef FOLLOW
 				fprintf(stderr, "  H: [%u-%u] hash %s\n",
-					hreg->region.start,
-					hreg->region.start + hreg->region.size-1,
+					hreg->start,
+					hreg->start + hreg->size-1,
 					changed ? "differs" : "matches");
 #endif
 				/*
@@ -896,8 +999,8 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 				 * Add that hrange with the new hash.
 				 */
 				if (newhashfile &&
-				    add_to_hashmap(&nhinfo, hreg->region.start,
-						   hreg->region.size, hash))
+				    add_to_hashmap(&nhinfo, hreg->start,
+						   hreg->size, hash))
 					goto error;
 			}
 		} else {
@@ -908,21 +1011,21 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 			changed = 2;
 #ifdef FOLLOW
 			fprintf(stderr, "  H: [%u-%u] no compare\n",
-				hreg->region.start,
-				hreg->region.start + hreg->region.size - 1);
+				hreg->start,
+				hreg->start + hreg->size - 1);
 #endif
 		}
 
 #ifdef HASHSTATS
-		hashstats.shared += hreg->region.size;
+		hashstats.shared += hreg->size;
 		if (!changed)
-			hashstats.unchanged += hreg->region.size;
+			hashstats.unchanged += hreg->size;
 		else if (changed > 1) {
-			hashstats.nocompare += hreg->region.size;
+			hashstats.nocompare += hreg->size;
 			if (changed == 3)
-				hashstats.fixup += hreg->region.size;
+				hashstats.fixup += hreg->size;
 		}
-		gapstart = hreg->region.start;
+		gapstart = hreg->start;
 		gapsize = gapcount = 0;
 #endif
 		/*
@@ -930,13 +1033,13 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 		 * and add them or skip them depending on changed.
 		 */
 		assert(drange &&
-		       drange->start < hreg->region.start + hreg->region.size);
+		       drange->start < hreg->start + hreg->size);
 		while (drange &&
-		       drange->start < hreg->region.start + hreg->region.size) {
+		       drange->start < hreg->start + hreg->size) {
 			uint32_t curstart = drange->start;
 			uint32_t curend = curstart + drange->size;
-			uint32_t hregstart = hreg->region.start;
-			uint32_t hregend = hregstart + hreg->region.size;
+			uint32_t hregstart = hreg->start;
+			uint32_t hregend = hregstart + hreg->size;
 
 			/*
 			 * There may be a final drange which crosses over the
@@ -1019,9 +1122,9 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 		/*
 		 * Check for an end gap
 		 */
-		if (gapstart < hreg->region.start + hreg->region.size) {
+		if (gapstart < hreg->start + hreg->size) {
 			uint32_t hregend =
-				hreg->region.start + hreg->region.size;
+				hreg->start + hreg->size;
 #ifdef FOLLOW
 			fprintf(stderr, "    G: [%u-%u]\n",
 				gapstart, hregend - 1);
@@ -1054,15 +1157,15 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 			}
 #ifdef FOLLOW
 			fprintf(stderr, "  H: [%u-%u] %d/%d free\n",
-				hreg->region.start,
-				hreg->region.start + hreg->region.size - 1,
-				gapsize, hreg->region.size);
+				hreg->start,
+				hreg->start + hreg->size - 1,
+				gapsize, hreg->size);
 #endif
 		}
 #endif
 		if (drange == NULL)
 			break;
-		assert(drange->start >= hreg->region.start + hreg->region.size);
+		assert(drange->start >= hreg->start + hreg->size);
 	}
 	assert(drange == NULL || hreg == ereg);
 
@@ -1079,26 +1182,26 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 		 * the rest of the hreg is deallocated.
 		 */
 		if (lastdrangeend > 0 &&
-		    lastdrangeend <= hreg->region.start + hreg->region.size) {
-			size = hreg->region.start + hreg->region.size -
+		    lastdrangeend <= hreg->start + hreg->size) {
+			size = hreg->start + hreg->size -
 				lastdrangeend;
 #ifdef FOLLOW
 			fprintf(stderr, "H: [%u-%u]/[",
-				hreg->region.start,
+				hreg->start,
 				lastdrangeend - 1);
 			if (size)
 				fprintf(stderr, "%u-%u",
 					lastdrangeend,
-					hreg->region.start +
-					hreg->region.size - 1);
+					hreg->start +
+					hreg->size - 1);
 			fprintf(stderr, "] split, tail skipped\n");
 #endif
 		} else {
-			size = hreg->region.size;
+			size = hreg->size;
 #ifdef FOLLOW
 			fprintf(stderr, "H: [%u-%u] skipped\n",
-				hreg->region.start,
-				hreg->region.start + hreg->region.size - 1);
+				hreg->start,
+				hreg->start + hreg->size - 1);
 #endif
 		}
 		hashstats.orig_only += size;
@@ -1139,14 +1242,14 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 	/*
 	 * If creating a new hashfile, copy over header info from
 	 * the old one. Even if there are no ranges in the current
-	 * image, we create a valid (null) hashfile.
+	 * image, we create a valid (null) V3 hashfile.
 	 */
 	if (newhashfile) {
 		if (nhinfo == NULL)
 			nhinfo = calloc(1, sizeof(*nhinfo));
 		assert(nhinfo != NULL);
 		strcpy((char *)nhinfo->magic, HASH_MAGIC);
-		nhinfo->version = HASH_VERSION_2;
+		nhinfo->version = HASH_VERSION;
 		nhinfo->hashtype = hinfo->hashtype;
 		nhinfo->blksize = (hinfo->version == HASH_VERSION_1) ?
 			HASHBLK_SIZE : hinfo->blksize;

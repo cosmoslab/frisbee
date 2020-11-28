@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2014 University of Utah and the Flux Group.
+ * Copyright (c) 2000-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -22,8 +22,8 @@
  */
 
 int	hashmap_blocksize(void);
-void	hashmap_update_chunk(uint32_t, uint32_t, int);
-int	hashmap_compute_delta(struct range *, char *, int, u_int32_t, char *,
+void	hashmap_update_chunk(uint64_t, uint64_t, int);
+int	hashmap_compute_delta(struct range *, char *, int, uint64_t, char *,
 			      struct range **);
-int	hashmap_write_hashfile(char *, char *);
+int	hashmap_write_hashfile(char *, char *, u_int32_t);
 void	hashmap_dump_stats(int pnum);

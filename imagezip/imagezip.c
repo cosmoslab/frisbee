@@ -944,7 +944,8 @@ main(int argc, char *argv[])
 		 * Write out new signature file.
 		 */
 		if (newhashfile &&
-		    hashmap_write_hashfile(newhashfile, outfilename))
+		    hashmap_write_hashfile(newhashfile, outfilename,
+					   (compat ? compat : COMPRESSED_V5)))
 			fprintf(stderr, "Could not write new hashfile!\n");
 #endif
 	}

@@ -37,7 +37,7 @@ EXPANDCOPYRIGHT	= /usr/site/lib/copyright/expand-copyr
 WITH_RANGEMAP	= 0
 
 #
-# Use 64-bit block numbers and sizes.
+# Use 64-bit block numbers and sizes in internal imagezip data structures.
 #
 WITH_64BITIZ	= 1
 
@@ -117,8 +117,7 @@ WITH_EXTFS	= 1
 WITH_NTFS	= @WINSUPPORT@
 WITH_FAT	= @WINSUPPORT@
 
-# Note: requires WITH_CRYPTO
-WITH_HASH	= 0
+WITH_HASH	= 1
 WITH_HASHALIGN	= 0
 
 include $(OBJDIR)/Makeconf
@@ -143,6 +142,9 @@ endif
 #PTHREADCFLAGS	+= -DCONDVARS_WORK
 
 PROGS		= imagezip imageunzip imagedump
+ifeq ($(WITH_HASH),1)
+PROGS		+= imagehash
+endif
 ifeq ($(WITH_LIBNDZ),1)
 PROGS		+= imagerezip imagedelta imageundelta
 endif
@@ -166,8 +168,6 @@ endif
 
 # Secure images
 ifeq ($(WITH_CRYPTO),1)
-PROGS		+= imagehash
-CFLAGS		+= -DWITH_CRYPTO
 ifeq ($(WITH_SIGNING),1)
 CFLAGS		+= -DSIGN_CHECKSUM
 endif
