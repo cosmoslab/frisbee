@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005-2017 University of Utah and the Flux Group.
+ * Copyright (c) 2005-2020 University of Utah and the Flux Group.
  * 
  * {{{EMULAB-LICENSE
  * 
@@ -291,12 +291,12 @@ zappart(int fd, struct iz_disk *diskinfo, int pnum, int rpnum)
 	}
 
 	if (!doit) {
-		printf("%s: P%d: would zero %d bytes at sector %d\n",
+		printf("%s: P%d: would zero %d bytes at sector %lu\n",
 		       diskname, pnum, (int)zapsize, pinfo->offset);
 		cc = zapsize;
 	} else {
 		if (verbose)
-			printf("%s: P%d: zeroing %d bytes at sector %d\n",
+			printf("%s: P%d: zeroing %d bytes at sector %lu\n",
 			       diskname, pnum, (int)zapsize, pinfo->offset);
 		cc = write(fd, zapdata, zapsize);
 	}

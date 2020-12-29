@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000-2017 University of Utah and the Flux Group.
+# Copyright (c) 2000-2020 University of Utah and the Flux Group.
 # 
 # {{{EMULAB-LICENSE
 # 
@@ -33,6 +33,7 @@ IZOBJDIR	= ../imagezip
 #
 # XXX should be in sync with imagezip/GNUmakefile
 #
+WITH_64BITIZ	= 1
 WITH_MBR	= 1
 WITH_GPT	= 1
 WITH_ERASE	= 1
@@ -48,6 +49,9 @@ endif
 ifeq ($(WITH_GPT),1)
 PARTLIBS	+= $(IZOBJDIR)/gpt/libgpt.a
 PARTFLAGS	+= -DWITH_GPT
+endif
+ifeq ($(WITH_64BITIZ),1)
+PARTFLAGS	+= -DWITH_64BITIZ
 endif
 ifeq ($(WITH_ERASE),1)
 EFLAGS		=

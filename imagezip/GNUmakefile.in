@@ -162,7 +162,7 @@ NDZLIBS		= libndz/libndz.a $(LIBS)
 endif
 
 # 64-bit
-ifeq ($(WITH_64BIT),1)
+ifeq ($(WITH_64BITIZ),1)
 CFLAGS		+= -DWITH_64BITIZ
 endif
 
