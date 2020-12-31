@@ -243,12 +243,19 @@ sub map_bsname($)
 	goto bad;
     }
     #
+    # Cannot handle FreeBSD non-SYSVOL (non-UFS) filesystems right now.
+    #
+    if ($^O ne "linux" && $bsref->{'BSID'} ne "SYSVOL") {
+	print STDERR "Cannot image non-UFS filesystems\n";
+	goto bad;
+    }
+    #
     # The storage map tells us the device info.
     #
     open(MAP, TMSTORAGEMAP()) or
 	die("Could not open the storage map!\n");
     while (<MAP>) {
-	if ($_ =~ /^([-\w]+)\s+([-\w\.\/]+)\s+([-\w\.\/]+)\s*/) {
+	if ($_ =~ /^([-\w]+)\s+([-\w\.\/]+)(?:\s+([-\w\.\/]+))?/) {
 	    if ($1 eq $bsname) {
 		$device = $2;
 		#
@@ -256,10 +263,21 @@ sub map_bsname($)
 		# which seems wrong since now I have to figure it out
 		# in order to check to see if its mounted.
 		#
+		# XXX this is due to a bug in the storagemap code that
+		# has since been fixed, but we check it just in case.
+		#
+		# XXX even if the map does have the /dev/emulab/... name,
+		# we need to use the /dev/mapper/... name instead since
+		# that is what shows up with "mount" and "mount" is what
+		# is used in os_ismounted below.
+		#
 		if ($bsref->{'BSID'} ne "SYSVOL") {
+		    print STDERR
+			"WARNING: malformed storage map entry ignored!\n"
+			if (!defined($3));
 		    # XXX don't forget to double down on the dashes.
 		    (my $rdev = $bsname) =~ s/-/--/g;
-                    $device = "/dev/mapper/emulab-$rdev";
+		    $device = "/dev/mapper/emulab-$rdev";
 		}
 		$bsref->{'DEVICE'} = $device;
 	    }
