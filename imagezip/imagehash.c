@@ -368,7 +368,7 @@ usage(void)
 		"imagehash -v\n"
 		"    print version info and exit\n"
 		"\n"
-		"-D hfunc      hash function to use (md5 or sha1)\n"
+		"-D hfunc      hash function to use (md5, sha1 or sha256)\n"
 		"-b blksize    size of hash blocks (512 <= size <= 32M)\n"
 		"-d            print additional detail to STDOUT\n"
 		"-o sigfile    name to use for sig file, else <image>.sig\n"

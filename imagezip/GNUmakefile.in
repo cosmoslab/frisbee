@@ -164,6 +164,7 @@ endif
 # 64-bit
 ifeq ($(WITH_64BITIZ),1)
 CFLAGS		+= -DWITH_64BITIZ
+SUBDIRCFLAGS	+= -DWITH_64BITIZ
 endif
 
 # Secure images

@@ -51,29 +51,24 @@
  * globals for fetching the HASHSTATS related information
  */
 #ifdef HASHSTATS
-#ifdef WITH_64BITIZ
-typedef uint64_t hcnt_t;
-#else
-typedef uint32_t hcnt_t;
-#endif
 struct hashstats {
-	hcnt_t cur_allocated;	/* allocated sectors in original */
-	hcnt_t orig_allocated;	/* allocated sectors in current */
-	hcnt_t cur_only;	/* sectors allocated only in current */
-	hcnt_t orig_only;	/* sectors allocated only in original */
-	hcnt_t shared;		/* sectors allocated in both */
-	hcnt_t unchanged;	/* shared sectors that have not changed */
-	hcnt_t nocompare;	/* sectors assumed different with no compare */
-	hcnt_t hash_compares;	/* hash blocks compared */
-	hcnt_t hash_scompares;	/* sectors compared */
-	hcnt_t hash_identical;	/* hash blocks identical */
-	hcnt_t hash_sidentical;	/* sectors identical */
-	hcnt_t gaps;		/* hash ranges with free gaps */
-	hcnt_t gapsects;	/* free sectors in gaps */
-	hcnt_t unchangedgaps;	/* hash ranges with gaps that hash ok */
-	hcnt_t gapunchanged;	/* unchanged free sectors in gaps */
-	hcnt_t gapnocompare;	/* uncompared sectors in gaps */
-	hcnt_t fixup;		/* uncompared due to fixup overlap */
+	uint64_t cur_allocated;	/* allocated sectors in original */
+	uint64_t orig_allocated;/* allocated sectors in current */
+	uint64_t cur_only;	/* sectors allocated only in current */
+	uint64_t orig_only;	/* sectors allocated only in original */
+	uint64_t shared;	/* sectors allocated in both */
+	uint64_t unchanged;	/* shared sectors that have not changed */
+	uint64_t nocompare;	/* sectors assumed different with no compare */
+	uint64_t hash_compares;	/* hash blocks compared */
+	uint64_t hash_scompares;/* sectors compared */
+	uint64_t hash_identical;/* hash blocks identical */
+	uint64_t hash_sidentical;/* sectors identical */
+	uint64_t gaps;		/* hash ranges with free gaps */
+	uint64_t gapsects;	/* free sectors in gaps */
+	uint64_t unchangedgaps;	/* hash ranges with gaps that hash ok */
+	uint64_t gapunchanged;	/* unchanged free sectors in gaps */
+	uint64_t gapnocompare;	/* uncompared sectors in gaps */
+	uint64_t fixup;		/* uncompared due to fixup overlap */
 } hashstats;
 
 struct timeval time_orig_read, time_curr_read, time_hash, time_hash_and_cmp;
@@ -766,7 +761,10 @@ hashmap_compute_delta(struct range *curranges, char *hfile, int infd,
 		hinfo = calloc(1, sizeof(*nhinfo));
 		strcpy((char *)hinfo->magic, HASH_MAGIC);
 		hinfo->version = HASH_VERSION;
-		hinfo->hashtype = HASH_TYPE_SHA1; 		/* XXX */
+		if (hinfo->version >= HASH_VERSION_3)		/* XXX */
+			hinfo->hashtype = HASH_TYPE_SHA256;
+		else
+			hinfo->hashtype = HASH_TYPE_SHA1;
 		hinfo->blksize = bytestosec(HASHBLK_SIZE);	/* XXX */
 		hinfo->nregions = 0;
 
@@ -1372,17 +1370,17 @@ hashmap_dump_stats(int pnum)
 		fprintf(stderr, "Modified from original: %10u (%.1f%%)\n\n",
 			b2, ((double)b2 / b1) * 100.0);
 
-		fprintf(stderr, "Hash blocks covering free sectors:   %u\n",
+		fprintf(stderr, "Hash blocks covering free sectors:   %lu\n",
 			hashstats.gaps);
-		fprintf(stderr, "  Total free sectors covered:        %u\n",
+		fprintf(stderr, "  Total free sectors covered:        %lu\n",
 			hashstats.gapsects);
-		fprintf(stderr, "  Hash blocks compared identical:    %u\n",
+		fprintf(stderr, "  Hash blocks compared identical:    %lu\n",
 			hashstats.unchangedgaps);
-		fprintf(stderr, "  Free sectors compared identical:   %u\n",
+		fprintf(stderr, "  Free sectors compared identical:   %lu\n",
 			hashstats.gapunchanged);
-		fprintf(stderr, "  Allocated sectors assumed changed: %u\n",
+		fprintf(stderr, "  Allocated sectors assumed changed: %lu\n",
 			hashstats.nocompare);
-		fprintf(stderr, "    Assumed changed due to fixups:   %u\n",
+		fprintf(stderr, "    Assumed changed due to fixups:   %lu\n",
 			hashstats.fixup);
 	}
 

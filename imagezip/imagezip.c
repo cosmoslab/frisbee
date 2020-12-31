@@ -1007,6 +1007,7 @@ read_image(int fd)
 	iz_size		dsize;
 	int		dowarn = debug ? 2 : 0;
 
+	memset(&disk, 0, sizeof(disk));
 #ifdef WITH_GPT
 	if (!gotbb && parse_gpt(fd, &disk, dowarn) == 0) {
 		gotbb = 1;

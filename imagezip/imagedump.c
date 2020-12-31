@@ -690,8 +690,13 @@ dumpchunk(char *name, char *buf, int chunkno, int checkindex)
 				losect = first;
 			if ((last-1) > hisect)
 				hisect = last - 1;
-		} else
+		} else {
 			count = rstart - nextsector;
+			if (rstart < losect)
+				losect = rstart;
+			if ((rstart+rsize-1) > hisect)
+				hisect = rstart + rsize - 1;
+		}
 		if (count > 0) {
 			sectfree += count;
 			if (count < fmin)
