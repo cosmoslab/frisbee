@@ -1,9 +1,6 @@
 name: run reviewdog linters
 on:
-  workflow_dispatch:
   pull_request:
-    branch: main
-  push:
     branch: main
 
 jobs:
