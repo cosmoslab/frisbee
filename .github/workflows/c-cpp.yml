@@ -1,0 +1,23 @@
+name: Build ImageZip
+
+on:
+  push:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      OUTPUT_DIR: outputs
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: run the build
+      run: make all
+
+    - name: Upload executables in tar
+      uses: actions/upload-artifact@v2
+      with:
+        name: ${{ env.OUTPUT_DIR }}.tgz
+        path: ${{ env.OUTPUT_DIR }}.tgz
