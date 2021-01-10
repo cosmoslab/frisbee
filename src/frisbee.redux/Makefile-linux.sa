@@ -28,8 +28,8 @@ WITH_MBR	= 1
 WITH_GPT	= 1
 
 # Set to 1 for "secure frisbee" support.  Requires openssl libraries.
-WITH_CRYPTO	= 1
-WITH_SIGNING	= 1
+WITH_CRYPTO	= 0
+WITH_SIGNING	= 0
 
 # 
 # Makefile for the standalone version of frisbee.
